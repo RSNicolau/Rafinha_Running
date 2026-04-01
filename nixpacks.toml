@@ -1,0 +1,2 @@
+[start]
+cmd = "node /app/apps/api/dist/main"
