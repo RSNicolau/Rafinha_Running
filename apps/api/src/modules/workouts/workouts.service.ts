@@ -152,4 +152,51 @@ export class WorkoutsService {
       avgPace,
     };
   }
+
+  async syncFromAppleHealth(athleteId: string, data: {
+    id: string;
+    type: string;
+    startDate: string;
+    endDate: string;
+    durationMinutes: number;
+    distanceKm: number;
+    calories: number;
+    averageHeartRate?: number;
+    averagePaceMinPerKm?: number;
+    source: 'APPLE_HEALTH';
+  }) {
+    const externalId = `apple_health_${data.id}`;
+
+    // Idempotency: skip if already synced
+    const existing = await this.prisma.workout.findFirst({
+      where: { athleteId, externalId },
+    });
+    if (existing) return { status: 'already_synced', workoutId: existing.id };
+
+    const workout = await this.prisma.workout.create({
+      data: {
+        athleteId,
+        externalId,
+        type: 'EASY_RUN',
+        title: `Corrida — Apple Health`,
+        description: `Sincronizado automaticamente via Apple Health (${data.type})`,
+        scheduledDate: new Date(data.startDate),
+        completedAt: new Date(data.endDate),
+        status: 'COMPLETED',
+        result: {
+          create: {
+            distanceMeters: Math.round(data.distanceKm * 1000),
+            durationSeconds: Math.round(data.durationMinutes * 60),
+            averageHeartRate: data.averageHeartRate ?? null,
+            caloriesBurned: data.calories ?? null,
+            notes: data.averagePaceMinPerKm
+              ? `Pace médio: ${data.averagePaceMinPerKm.toFixed(2)} min/km`
+              : null,
+          },
+        },
+      },
+    });
+
+    return { status: 'synced', workoutId: workout.id };
+  }
 }

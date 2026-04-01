@@ -27,7 +27,20 @@
       "bundler": "metro",
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-router", "expo-secure-store", "expo-notifications"],
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-notifications",
+      [
+        "react-native-health",
+        {
+          "isClinicalHealthRecordsEnabled": false,
+          "isBackgroundDeliveryEnabled": true,
+          "NSHealthShareUsageDescription": "O app precisa acessar seus dados de corrida (distância, frequência cardíaca, pace) para sincronizar automaticamente com seu treinador.",
+          "NSHealthUpdateUsageDescription": "O app pode salvar seus treinos no Apple Health para manter um histórico unificado de atividades."
+        }
+      ]
+    ],
     "experiments": {
       "typedRoutes": true
     }

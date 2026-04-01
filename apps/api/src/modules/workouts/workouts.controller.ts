@@ -60,4 +60,11 @@ export class WorkoutsController {
   async submitResult(@Param('id') id: string, @CurrentUser('id') athleteId: string, @Body() dto: SubmitResultDto) {
     return this.workoutsService.submitResult(id, athleteId, dto);
   }
+
+  @Post('sync/health')
+  @Roles(UserRole.ATHLETE)
+  @ApiOperation({ summary: 'Sincronizar treino do Apple Health / HealthKit' })
+  async syncFromHealth(@CurrentUser('id') athleteId: string, @Body() body: any) {
+    return this.workoutsService.syncFromAppleHealth(athleteId, body);
+  }
 }
