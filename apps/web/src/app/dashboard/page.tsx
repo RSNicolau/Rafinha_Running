@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/lib/api';
+import { useDemo, MOCK_ATHLETES, MOCK_STATS, MOCK_ALERTS } from '@/contexts/demo-mode';
 
 interface Athlete {
   id: string;
@@ -14,6 +15,7 @@ interface Athlete {
 
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
+  const { isDemoMode } = useDemo();
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -21,6 +23,18 @@ export default function DashboardPage() {
   const [alerts, setAlerts] = useState<Array<{ athleteId: string; name: string; missedCount: number; lastMissedDate: string }>>([]);
 
   const loadData = () => {
+    if (isDemoMode) {
+      setAthletes(MOCK_ATHLETES.map((a) => ({
+        id: a.id,
+        level: a.athleteProfile.currentPlan === 'ATIVO' ? 'INTERMEDIÁRIO' : 'INICIANTE',
+        weeklyGoalKm: a.athleteProfile.weeklyDistance,
+        user: { id: a.id, name: a.name, email: a.email },
+      })));
+      setCoachStats({ totalAthletes: MOCK_STATS.totalAthletes, alertCount: MOCK_ALERTS.length, adherencePercent: MOCK_STATS.completionRate });
+      setAlerts(MOCK_ALERTS.map((a) => ({ athleteId: a.id, name: a.athlete.name, missedCount: 1, lastMissedDate: new Date().toISOString() })));
+      setLoading(false);
+      return;
+    }
     setLoadError(false);
     setLoading(true);
     Promise.all([
@@ -37,7 +51,7 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [isDemoMode]);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';

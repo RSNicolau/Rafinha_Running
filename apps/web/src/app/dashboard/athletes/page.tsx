@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { useDemo, MOCK_ATHLETES } from '@/contexts/demo-mode';
 
 interface Athlete {
   id: string;
@@ -12,6 +13,7 @@ interface Athlete {
 }
 
 export default function AthletesPage() {
+  const { isDemoMode } = useDemo();
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -22,6 +24,16 @@ export default function AthletesPage() {
   const [inviteLoading, setInviteLoading] = useState(false);
 
   const loadAthletes = () => {
+    if (isDemoMode) {
+      setAthletes(MOCK_ATHLETES.map((a) => ({
+        id: a.id,
+        level: a.athleteProfile.currentPlan === 'ATIVO' ? 'INTERMEDIÁRIO' : 'INICIANTE',
+        weeklyGoalKm: a.athleteProfile.weeklyDistance,
+        user: { id: a.id, name: a.name, email: a.email },
+      })));
+      setLoading(false);
+      return;
+    }
     setLoadError(false);
     api.get('/users/athletes')
       .then(({ data }) => setAthletes(data))
@@ -29,7 +41,7 @@ export default function AthletesPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadAthletes(); }, []);
+  useEffect(() => { loadAthletes(); }, [isDemoMode]);
 
   const filtered = athletes.filter((a) =>
     a.user.name.toLowerCase().includes(search.toLowerCase()) ||

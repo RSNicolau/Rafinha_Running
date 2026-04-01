@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/stores/auth.store';
+import { DemoModeProvider, useDemo } from '@/contexts/demo-mode';
 
 const navItems = [
   { href: '/dashboard', label: 'Visão Geral', icon: 'grid', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
@@ -69,7 +70,25 @@ function NavIcon({ name, className }: { name: string; className?: string }) {
   return <>{icons[name]}</>;
 }
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+function DemoToggle() {
+  const { isDemoMode, toggleDemoMode } = useDemo();
+  return (
+    <button
+      onClick={toggleDemoMode}
+      title={isDemoMode ? 'Desativar modo demo' : 'Ativar modo demo'}
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
+        isDemoMode
+          ? 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
+          : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
+      }`}
+    >
+      <span className={`w-2 h-2 rounded-full ${isDemoMode ? 'bg-amber-400 animate-pulse' : 'bg-gray-300'}`} />
+      {isDemoMode ? 'Demo ON' : 'Demo'}
+    </button>
+  );
+}
+
+function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { user, isAuthenticated, isLoading, loadUser, logout } = useAuthStore();
@@ -102,7 +121,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <>
       {/* Logo */}
       <div className="h-16 flex items-center px-5 border-b border-gray-100 shrink-0">
-        <img src="/logo.png" alt="Rafinha Running" className="h-9 w-auto" />
+        {(user as any)?.branding?.logoUrl ? (
+          <img src={(user as any).branding.logoUrl} alt="Logo" className="h-9 w-auto object-contain" />
+        ) : (
+          <img src="/logo.png" alt="Rafinha Running" className="h-9 w-auto" />
+        )}
       </div>
 
       {/* Nav */}
@@ -189,12 +212,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </svg>
           </button>
           <img src="/logo.png" alt="RR" className="h-7 w-auto" />
+          <div className="flex-1" />
+          {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && <DemoToggle />}
         </div>
+
+        {/* Desktop demo toggle — ADMIN only */}
+        {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
+          <div className="hidden md:flex justify-end px-6 pt-4">
+            <DemoToggle />
+          </div>
+        )}
 
         <div className="max-w-[1200px] mx-auto px-4 py-6 sm:px-6 sm:py-8 md:p-8">
           {children}
         </div>
       </main>
     </div>
+  );
+}
+
+export default function DashboardLayoutWrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <DemoModeProvider>
+      <DashboardLayout>{children}</DashboardLayout>
+    </DemoModeProvider>
   );
 }
