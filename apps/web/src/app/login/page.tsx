@@ -24,17 +24,23 @@ function LoginContent() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      api.get('/subscriptions/current')
-        .then(({ data }) => {
-          router.replace(getSubscriptionRoute(data?.status));
+      api.get('/users/me')
+        .then(({ data: me }) => {
+          if (me?.role === 'SUPER_ADMIN') { router.replace('/super-admin'); return; }
+          if (me?.role === 'ADMIN') { router.replace('/dashboard'); return; }
+          return api.get('/subscriptions/current')
+            .then(({ data }) => router.replace(getSubscriptionRoute(data?.status)))
+            .catch((err) => {
+              if (err?.response?.status === 404 || err?.response?.status === 400) {
+                router.replace('/subscribe');
+              }
+            });
         })
-        .catch((err) => {
-          // Only redirect to /subscribe if it's a clear "no subscription" case.
-          // Network/server errors should NOT force a redirect — user stays on login.
-          if (err?.response?.status === 404 || err?.response?.status === 400) {
-            router.replace('/subscribe');
-          }
-          // Otherwise: do nothing — avoid redirect loop on transient API errors
+        .catch(() => {
+          // me endpoint failed — just check subscription as fallback
+          api.get('/subscriptions/current')
+            .then(({ data }) => router.replace(getSubscriptionRoute(data?.status)))
+            .catch(() => {});
         });
     }
   }, [isAuthenticated]);
@@ -49,6 +55,7 @@ function LoginContent() {
         const meRes = await api.get('/users/me');
         const role = meRes.data?.role;
         if (role === 'SUPER_ADMIN') { router.replace('/super-admin'); return; }
+        if (role === 'ADMIN') { router.replace('/dashboard'); return; }
         const { data } = await api.get('/subscriptions/current');
         router.replace(getSubscriptionRoute(data?.status));
       } catch (err: any) {

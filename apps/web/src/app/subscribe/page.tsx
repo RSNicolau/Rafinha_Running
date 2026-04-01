@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/lib/api';
 
-// Fallback plans in case the API is unavailable
 const FALLBACK_PLANS = [
   {
     type: 'MONTHLY',
@@ -90,16 +89,13 @@ export default function SubscribePage() {
 
   useEffect(() => {
     if (!isAuthenticated) { router.replace('/login'); return; }
-    // Fetch plans from API and check subscription in parallel
     Promise.all([
       api.get('/admin/config/plans').catch(() => null),
       api.get('/subscriptions/current').catch(() => null),
     ]).then(([plansRes, subRes]) => {
-      // Load plans from API if available
       if (plansRes?.data?.coach?.length) {
         setPlans(plansRes.data.coach.map(apiPlanToUi));
       }
-      // Redirect if already subscribed
       if (subRes?.data?.status === 'ACTIVE' || subRes?.data?.status === 'TRIALING') {
         router.replace('/dashboard');
       }
@@ -153,146 +149,178 @@ export default function SubscribePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'linear-gradient(to bottom, #FEE2E2 0%, #F2F2F7 50%)' }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'linear-gradient(to bottom, #FEE2E2 0%, #F2F2F7 55%)' }}>
         <div className="w-8 h-8 border-2 border-red-200 border-t-[#DC2626] rounded-full animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen" style={{ background: 'linear-gradient(to bottom, #FEF2F2 0%, #F9FAFB 40%)' }}>
+    <div className="min-h-screen" style={{ background: 'linear-gradient(to bottom, #FEE2E2 0%, #F2F2F7 55%)' }}>
+      <svg width="0" height="0" style={{ position: 'absolute' }}>
+        <defs>
+          <filter id="logo-red-fix" colorInterpolationFilters="sRGB">
+            <feColorMatrix type="matrix" values="1.062 0 0 0 -0.062  0 1.107 0 0 -0.107  0 0 1.038 0 -0.038  0 0 0 1 0" />
+          </filter>
+        </defs>
+      </svg>
+
       {/* Header */}
-      <header className="px-6 py-4 flex items-center justify-between max-w-5xl mx-auto">
-        <div className="flex items-center gap-3">
-          <svg width="0" height="0" style={{ position: 'absolute' }}>
-            <defs>
-              <filter id="logo-fix" colorInterpolationFilters="sRGB">
-                <feColorMatrix type="matrix" values="1.062 0 0 0 -0.062  0 1.107 0 0 -0.107  0 0 1.038 0 -0.038  0 0 0 1 0" />
-              </filter>
-            </defs>
-          </svg>
-          <img src="/logo.png" alt="RR" className="h-8" style={{ filter: 'url(#logo-fix)' }} />
+      <header className="px-6 py-5 flex items-center justify-between max-w-5xl mx-auto">
+        <div className="w-10 h-10 rounded-2xl overflow-hidden shadow-sm">
+          <img src="/logo.png" alt="RR" className="w-full block" style={{ filter: 'url(#logo-red-fix)' }} />
         </div>
         <button
           onClick={() => { logout(); router.replace('/login'); }}
-          className="text-xs text-gray-400 hover:text-gray-600 transition"
+          className="text-xs text-gray-400 hover:text-gray-600 transition font-medium"
         >
           Sair
         </button>
       </header>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 pb-16">
-        <div className="text-center mb-8 sm:mb-10 mt-4">
-          <h1 className="text-2xl sm:text-3xl font-black text-gray-900 mb-2">Escolha seu plano</h1>
-          <p className="text-gray-500">
-            Olá, <strong>{user?.name}</strong>. Selecione um plano para acessar o painel de coach.
+        {/* Hero */}
+        <div className="text-center mb-10 mt-2">
+          <h1 className="text-2xl sm:text-3xl font-black text-gray-900 mb-2 tracking-tight">Escolha seu plano</h1>
+          <p className="text-gray-500 text-sm">
+            Olá, <strong className="text-gray-700">{user?.name}</strong>. Selecione um plano para acessar o painel de coach.
           </p>
         </div>
 
         {/* Plan cards */}
         {!pixData && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5 mb-8">
-            {plans.map((plan) => (
-              <div
-                key={plan.type}
-                onClick={() => setSelectedPlan(plan)}
-                className={`rounded-2xl p-6 border-2 cursor-pointer transition-all ${
-                  selectedPlan?.type === plan.type
-                    ? 'border-[#DC2626] bg-red-50 shadow-lg shadow-red-100'
-                    : plan.popular
-                    ? 'border-gray-200 bg-white hover:border-[#DC2626]/40'
-                    : 'border-gray-200 bg-white hover:border-gray-300'
-                }`}
-              >
-                {plan.popular && (
-                  <span className="inline-block text-xs font-bold px-2.5 py-0.5 rounded-full bg-[#DC2626] text-white mb-3">
-                    MAIS POPULAR
-                  </span>
-                )}
-                <h3 className="text-lg font-bold text-gray-900">{plan.name}</h3>
-                <p className="text-xs text-gray-400 mb-3">{plan.desc}</p>
-                <div className="flex items-baseline gap-1 mb-4">
-                  <span className="text-2xl sm:text-3xl font-black text-gray-900">{plan.price}</span>
-                  <span className="text-sm text-gray-400">/mês</span>
-                </div>
-                <ul className="space-y-1.5 mb-5">
-                  {plan.features.map((f) => (
-                    <li key={f} className="flex items-center gap-2 text-sm text-gray-500">
-                      <svg className="w-3.5 h-3.5 text-[#DC2626] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                      </svg>
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-                <div className={`w-5 h-5 rounded-full border-2 mx-auto transition-all ${
-                  selectedPlan?.type === plan.type ? 'border-[#DC2626] bg-[#DC2626]' : 'border-gray-300'
-                }`}>
-                  {selectedPlan?.type === plan.type && (
-                    <svg className="w-full h-full text-white p-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                    </svg>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 mb-8">
+            {plans.map((plan) => {
+              const isSelected = selectedPlan?.type === plan.type;
+              return (
+                <div
+                  key={plan.type}
+                  onClick={() => setSelectedPlan(plan)}
+                  className={`glass-card p-6 cursor-pointer relative overflow-hidden transition-all ${
+                    isSelected
+                      ? 'ring-2 ring-[#DC2626] shadow-[0_4px_32px_rgba(220,38,38,0.18)]'
+                      : 'hover:shadow-[0_4px_24px_rgba(0,0,0,0.12)]'
+                  }`}
+                >
+                  {plan.popular && (
+                    <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-[#DC2626] via-red-400 to-[#DC2626]" />
                   )}
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      {plan.popular && (
+                        <span className="inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#DC2626]/10 text-[#DC2626] mb-2 tracking-wider uppercase">
+                          Mais popular
+                        </span>
+                      )}
+                      <h3 className="text-lg font-bold text-gray-900">{plan.name}</h3>
+                      <p className="text-xs text-gray-400 mt-0.5">{plan.desc}</p>
+                    </div>
+                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-1 transition-all ${
+                      isSelected ? 'border-[#DC2626] bg-[#DC2626]' : 'border-gray-200'
+                    }`}>
+                      {isSelected && (
+                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-baseline gap-1 mb-5">
+                    <span className="text-3xl font-black text-gray-900">{plan.price}</span>
+                    <span className="text-sm text-gray-400 font-medium">/mês</span>
+                  </div>
+
+                  <ul className="space-y-2">
+                    {plan.features.map((f) => (
+                      <li key={f} className="flex items-center gap-2 text-sm text-gray-500">
+                        <svg className="w-3.5 h-3.5 text-[#DC2626] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
-        {/* Payment */}
+        {/* Payment CTA */}
         {selectedPlan && !pixData && (
-          <div className="max-w-md mx-auto glass-card p-6 text-center">
-            <h3 className="font-semibold text-gray-900 mb-1">Pagar com PIX</h3>
-            <p className="text-sm text-gray-500 mb-4">
-              Plano <strong>{selectedPlan.name}</strong> — {selectedPlan.price}/mês
-            </p>
-            <button
-              onClick={() => handlePix(selectedPlan)}
-              disabled={pixLoading}
-              className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm transition disabled:opacity-50 cursor-pointer"
-            >
-              {pixLoading ? 'Gerando PIX...' : 'Pagar com PIX →'}
-            </button>
-            <p className="text-xs text-gray-400 mt-3">Pagamento instantâneo · Confirmação automática</p>
+          <div className="max-w-sm mx-auto">
+            <div className="glass-card p-6 text-center">
+              <p className="text-xs text-gray-400 uppercase tracking-wider font-medium mb-1">Plano selecionado</p>
+              <p className="text-lg font-bold text-gray-900 mb-4">
+                {selectedPlan.name} · {selectedPlan.price}<span className="text-sm font-normal text-gray-400">/mês</span>
+              </p>
+              <button
+                onClick={() => handlePix(selectedPlan)}
+                disabled={pixLoading}
+                className="w-full py-3.5 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-sm transition disabled:opacity-50 cursor-pointer shadow-[0_4px_16px_rgba(220,38,38,0.3)]"
+              >
+                {pixLoading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    Gerando PIX...
+                  </span>
+                ) : 'Pagar com PIX →'}
+              </button>
+              <p className="text-xs text-gray-400 mt-3">Pagamento instantâneo · Confirmação automática</p>
+            </div>
           </div>
         )}
 
         {/* PIX QR Code */}
         {pixData && pixStatus === 'pending' && (
-          <div className="max-w-sm mx-auto glass-card p-6 text-center">
-            <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center mx-auto mb-4">
-              <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5z" />
-              </svg>
-            </div>
-            <h3 className="font-bold text-gray-900 mb-1">QR Code PIX gerado</h3>
-            <p className="text-xs text-gray-500 mb-4">Escaneie com seu banco ou copie o código</p>
-            {pixData.pixQrCodeUrl && (
-              <img src={pixData.pixQrCodeUrl} alt="QR Code PIX" className="w-36 sm:w-44 h-36 sm:h-44 mx-auto mb-4 rounded-xl border border-gray-100" />
-            )}
-            <button
-              onClick={handleCopy}
-              className="w-full py-2.5 rounded-xl bg-gray-800 hover:bg-gray-900 text-white text-sm font-medium transition cursor-pointer mb-3"
-            >
-              {pixCopied ? '✓ Copiado!' : 'Copiar código PIX'}
-            </button>
-            <div className="flex items-center gap-2 justify-center text-xs text-gray-400">
-              <div className="w-3 h-3 border border-gray-300 border-t-gray-600 rounded-full animate-spin" />
-              Aguardando pagamento...
+          <div className="max-w-sm mx-auto">
+            <div className="glass-card p-7 text-center">
+              <div className="w-10 h-10 rounded-2xl bg-[#DC2626]/10 flex items-center justify-center mx-auto mb-4">
+                <svg className="w-5 h-5 text-[#DC2626]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5z" />
+                </svg>
+              </div>
+              <h3 className="font-bold text-gray-900 mb-1">QR Code PIX gerado</h3>
+              <p className="text-xs text-gray-500 mb-5">Escaneie com seu banco ou copie o código abaixo</p>
+              {pixData.pixQrCodeUrl && (
+                <div className="inline-block p-3 rounded-2xl bg-white shadow-sm border border-gray-100 mb-5">
+                  <img src={pixData.pixQrCodeUrl} alt="QR Code PIX" className="w-36 sm:w-44 h-36 sm:h-44 block" />
+                </div>
+              )}
+              <button
+                onClick={handleCopy}
+                className="w-full py-3 rounded-xl bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium transition cursor-pointer mb-4"
+              >
+                {pixCopied ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                    Copiado!
+                  </span>
+                ) : 'Copiar código PIX'}
+              </button>
+              <div className="flex items-center gap-2 justify-center text-xs text-gray-400">
+                <div className="w-3 h-3 border border-gray-300 border-t-gray-500 rounded-full animate-spin" />
+                Aguardando pagamento...
+              </div>
             </div>
           </div>
         )}
 
         {/* Paid */}
         {pixStatus === 'paid' && (
-          <div className="max-w-sm mx-auto glass-card p-8 text-center">
-            <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
-              <svg className="w-7 h-7 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+          <div className="max-w-sm mx-auto">
+            <div className="glass-card p-8 text-center">
+              <div className="w-16 h-16 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center mx-auto mb-5">
+                <svg className="w-8 h-8 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-1">Pagamento confirmado!</h3>
+              <p className="text-sm text-gray-500">Redirecionando para o painel...</p>
             </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-1">Pagamento confirmado!</h3>
-            <p className="text-sm text-gray-500">Redirecionando para o painel...</p>
           </div>
         )}
       </main>

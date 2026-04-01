@@ -35,12 +35,10 @@ export default function AthleteSubscribePage() {
 
   useEffect(() => {
     if (!isAuthenticated) { router.replace('/athlete-login'); return; }
-    // Fetch athlete plan from API and check subscription in parallel
     Promise.all([
       api.get('/admin/config/plans').catch(() => null),
       api.get('/subscriptions/current').catch(() => null),
     ]).then(([plansRes, subRes]) => {
-      // Load first athlete plan from API if available
       const athletePlans = plansRes?.data?.athlete;
       if (athletePlans?.length) {
         const p = athletePlans[0];
@@ -105,86 +103,114 @@ export default function AthleteSubscribePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'linear-gradient(to bottom, #E5E7EB 0%, #F2F2F7 50%)' }}>
-        <div className="w-8 h-8 border-2 border-gray-200 border-t-gray-600 rounded-full animate-spin" />
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'linear-gradient(to bottom, #FEE2E2 0%, #F2F2F7 55%)' }}>
+        <div className="w-8 h-8 border-2 border-red-200 border-t-[#DC2626] rounded-full animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-5 py-8" style={{ background: 'linear-gradient(to bottom, #E5E7EB 0%, #F9FAFB 50%)' }}>
+    <div className="min-h-screen flex flex-col items-center justify-center px-5 py-10" style={{ background: 'linear-gradient(to bottom, #FEE2E2 0%, #F2F2F7 55%)' }}>
       <svg width="0" height="0" style={{ position: 'absolute' }}>
         <defs>
-          <filter id="logo-fix" colorInterpolationFilters="sRGB">
+          <filter id="logo-red-fix" colorInterpolationFilters="sRGB">
             <feColorMatrix type="matrix" values="1.062 0 0 0 -0.062  0 1.107 0 0 -0.107  0 0 1.038 0 -0.038  0 0 0 1 0" />
           </filter>
         </defs>
       </svg>
 
       <div className="w-full max-w-md">
+        {/* Logo + header */}
         <div className="text-center mb-8">
-          <img src="/logo.png" alt="RR" className="h-12 mx-auto mb-4" style={{ filter: 'url(#logo-fix)' }} />
-          <h1 className="text-2xl font-black text-gray-900 mb-1">Ative sua conta</h1>
+          <div className="w-16 h-16 rounded-3xl overflow-hidden shadow-md mx-auto mb-5">
+            <img src="/logo.png" alt="RR" className="w-full block" style={{ filter: 'url(#logo-red-fix)' }} />
+          </div>
+          <h1 className="text-2xl font-black text-gray-900 mb-1 tracking-tight">Ative sua conta</h1>
           <p className="text-sm text-gray-500">
-            Olá, <strong>{user?.name}</strong>. Assine para acessar seus treinos.
+            Olá, <strong className="text-gray-700">{user?.name}</strong>. Assine para acessar seus treinos.
           </p>
         </div>
 
+        {/* Plan card */}
         {!pixData ? (
-          <div className="glass-card p-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-5 pb-4 border-b border-gray-100">
+          <div className="glass-card p-7">
+            {/* Plan header */}
+            <div className="flex items-start justify-between mb-5 pb-5 border-b border-gray-100">
               <div>
-                <h2 className="font-bold text-gray-900 text-lg">{plan.name}</h2>
-                <p className="text-xs text-gray-400">Acesso completo à plataforma</p>
+                <p className="text-xs text-[#DC2626] font-semibold uppercase tracking-wider mb-1">Plano completo</p>
+                <h2 className="font-bold text-gray-900 text-xl">{plan.name}</h2>
               </div>
-              <div className="sm:text-right">
-                <span className="text-2xl font-black text-gray-900">{plan.price}</span>
-                <span className="text-xs text-gray-400 ml-1">/mês</span>
+              <div className="text-right">
+                <span className="text-3xl font-black text-gray-900">{plan.price}</span>
+                <span className="text-sm text-gray-400 ml-1">/mês</span>
               </div>
             </div>
 
-            <ul className="space-y-2 mb-6">
+            {/* Features */}
+            <ul className="space-y-2.5 mb-7">
               {plan.features.map((f) => (
-                <li key={f} className="flex items-center gap-2 text-sm text-gray-500">
-                  <svg className="w-3.5 h-3.5 text-gray-700 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
+                <li key={f} className="flex items-center gap-3 text-sm text-gray-600">
+                  <span className="w-5 h-5 rounded-full bg-[#DC2626]/10 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-2.5 h-2.5 text-[#DC2626]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                  </span>
                   {f}
                 </li>
               ))}
             </ul>
 
+            {/* CTA */}
             <button
               onClick={handlePix}
               disabled={pixLoading}
-              className="w-full py-3.5 rounded-xl bg-gray-800 hover:bg-gray-900 text-white font-semibold text-sm transition disabled:opacity-50 cursor-pointer"
+              className="w-full py-3.5 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-sm transition disabled:opacity-50 cursor-pointer shadow-[0_4px_16px_rgba(220,38,38,0.3)]"
             >
-              {pixLoading ? 'Gerando PIX...' : 'Pagar com PIX →'}
+              {pixLoading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  Gerando PIX...
+                </span>
+              ) : 'Pagar com PIX →'}
             </button>
             <p className="text-xs text-gray-400 text-center mt-3">Pagamento instantâneo · Confirmação automática</p>
           </div>
         ) : pixStatus === 'pending' ? (
-          <div className="glass-card p-6 text-center">
+          <div className="glass-card p-7 text-center">
+            <div className="w-10 h-10 rounded-2xl bg-[#DC2626]/10 flex items-center justify-center mx-auto mb-4">
+              <svg className="w-5 h-5 text-[#DC2626]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5z" />
+              </svg>
+            </div>
             <h3 className="font-bold text-gray-900 mb-1">QR Code PIX gerado</h3>
-            <p className="text-xs text-gray-500 mb-4">Escaneie com seu banco ou copie o código</p>
+            <p className="text-xs text-gray-500 mb-5">Escaneie com seu banco ou copie o código abaixo</p>
             {pixData.pixQrCodeUrl && (
-              <img src={pixData.pixQrCodeUrl} alt="QR Code PIX" className="w-36 sm:w-44 h-36 sm:h-44 mx-auto mb-4 rounded-xl border border-gray-100" />
+              <div className="inline-block p-3 rounded-2xl bg-white shadow-sm border border-gray-100 mb-5">
+                <img src={pixData.pixQrCodeUrl} alt="QR Code PIX" className="w-36 sm:w-44 h-36 sm:h-44 block" />
+              </div>
             )}
             <button
               onClick={handleCopy}
-              className="w-full py-2.5 rounded-xl bg-gray-800 hover:bg-gray-900 text-white text-sm font-medium transition cursor-pointer mb-3"
+              className="w-full py-3 rounded-xl bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium transition cursor-pointer mb-4"
             >
-              {pixCopied ? '✓ Copiado!' : 'Copiar código PIX'}
+              {pixCopied ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                  Copiado!
+                </span>
+              ) : 'Copiar código PIX'}
             </button>
             <div className="flex items-center gap-2 justify-center text-xs text-gray-400">
-              <div className="w-3 h-3 border border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+              <div className="w-3 h-3 border border-gray-300 border-t-gray-500 rounded-full animate-spin" />
               Aguardando pagamento...
             </div>
           </div>
         ) : (
           <div className="glass-card p-8 text-center">
-            <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
-              <svg className="w-7 h-7 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <div className="w-16 h-16 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center mx-auto mb-5">
+              <svg className="w-8 h-8 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
