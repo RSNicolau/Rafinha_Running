@@ -27,7 +27,7 @@ function LoginContent() {
       api.get('/users/me')
         .then(({ data: me }) => {
           if (me?.role === 'SUPER_ADMIN') { router.replace('/super-admin'); return; }
-          if (me?.role === 'ADMIN') { router.replace('/dashboard'); return; }
+          if (me?.role === 'ADMIN') { router.replace('/dashboard/admin/plans'); return; }
           return api.get('/subscriptions/current')
             .then(({ data }) => router.replace(getSubscriptionRoute(data?.status)))
             .catch((err) => {

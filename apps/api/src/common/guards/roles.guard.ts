@@ -21,7 +21,7 @@ export class RolesGuard implements CanActivate {
     // Guard against missing user object (e.g. malformed JWT)
     if (!user) return false;
     // SUPER_ADMIN bypasses all role restrictions
-    if (user.role === 'SUPER_ADMIN') return true;
+    if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
     return requiredRoles.includes(user.role);
   }
 }
