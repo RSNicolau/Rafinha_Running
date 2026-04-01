@@ -116,7 +116,7 @@ export default function SubscribePage() {
         if (data.status === 'paid' || data.dbStatus === 'SUCCEEDED') {
           setPixStatus('paid');
           clearInterval(pollRef.current!);
-          setTimeout(() => router.replace('/dashboard'), 2000);
+          setTimeout(() => router.replace('/dashboard'), 3000);
         }
       } catch {}
     }, 5000);

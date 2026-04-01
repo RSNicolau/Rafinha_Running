@@ -68,7 +68,7 @@ export default function AthleteSubscribePage() {
         if (data.status === 'paid' || data.dbStatus === 'SUCCEEDED') {
           setPixStatus('paid');
           clearInterval(pollRef.current!);
-          setTimeout(() => router.replace('/athlete'), 2000);
+          setTimeout(() => router.replace('/athlete'), 3000);
         }
       } catch {}
     }, 5000);

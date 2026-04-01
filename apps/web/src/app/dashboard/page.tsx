@@ -71,7 +71,7 @@ export default function DashboardPage() {
           { label: 'Atletas', value: String(coachStats?.totalAthletes ?? athletes.length), icon: '👥', color: 'bg-primary/8 text-primary' },
           { label: 'Alertas', value: coachStats ? String(coachStats.alertCount) : '--', icon: '⚠️', color: 'bg-amber-50 text-amber-600' },
           { label: 'Adesão Média', value: coachStats ? `${coachStats.adherencePercent}%` : '--', icon: '✅', color: 'bg-emerald-50 text-emerald-600' },
-          { label: 'Total Atletas', value: String(coachStats?.totalAthletes ?? '--'), icon: '🏃', color: 'bg-blue-50 text-blue-600' },
+          { label: 'Sem Treino', value: coachStats ? String(coachStats.alertCount) : '--', icon: '🏃', color: 'bg-red-50 text-red-600' },
         ].map((stat) => (
           <div key={stat.label} className="glass-card p-5">
             <div className="flex items-center justify-between mb-3">

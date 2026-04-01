@@ -107,7 +107,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* Nav */}
       <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-        {navItems.filter((item) => !user?.role || item.roles.includes(user.role)).map((item) => {
+        {navItems.filter((item) => user?.role && item.roles.includes(user.role)).map((item) => {
           const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
           return (
             <Link
