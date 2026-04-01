@@ -1,0 +1,27 @@
+{
+  "name": "rr-rafinha-running",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RR - Rafinha Running: Plataforma de treino de corrida",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "db:migrate": "pnpm --filter @rr/api exec prisma migrate dev",
+    "db:generate": "pnpm --filter @rr/api exec prisma generate",
+    "db:migrate:prod": "pnpm --filter @rr/api exec prisma migrate deploy",
+    "db:studio": "pnpm --filter @rr/api exec prisma studio",
+    "deploy:web": "vercel --cwd apps/web",
+    "db:seed": "pnpm --filter @rr/api exec prisma db seed",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "devDependencies": {
+    "sharp": "^0.34.5"
+  }
+}
