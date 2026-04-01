@@ -19,7 +19,7 @@
       "ios": { "simulator": false },
       "android": { "buildType": "apk" },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://your-api.railway.app"
+        "EXPO_PUBLIC_API_URL": "https://rrapi-production.up.railway.app/api"
       }
     },
     "production": {
@@ -27,16 +27,16 @@
       "ios": { "buildConfiguration": "Release" },
       "android": { "buildType": "app-bundle" },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://your-api.railway.app"
+        "EXPO_PUBLIC_API_URL": "https://rrapi-production.up.railway.app/api"
       }
     }
   },
   "submit": {
     "production": {
       "ios": {
-        "appleId": "your@email.com",
+        "appleId": "rodrigo@rafinharunning.com",
         "ascAppId": "XXXXXXXXXX",
-        "appleTeamId": "XXXXXXXXXX"
+        "appleTeamId": "LPMFPMB2ZG"
       },
       "android": {
         "serviceAccountKeyPath": "./google-service-account.json",

@@ -43,6 +43,15 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "34d8880d-2a9c-4163-9a04-07305e629b0e"
+      }
+    },
+    "owner": "rafinharunning"
   }
 }
