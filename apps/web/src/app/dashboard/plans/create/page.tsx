@@ -21,9 +21,12 @@ export default function CreatePlanPage() {
   const [loading, setLoading] = useState(false);
   const [aiResult, setAiResult] = useState<any>(null);
   const [athletes, setAthletes] = useState<{ id: string; user: { id: string; name: string } }[]>([]);
+  const [athletesError, setAthletesError] = useState(false);
 
   useEffect(() => {
-    api.get('/users/athletes').then(({ data }) => setAthletes(data)).catch(() => {});
+    api.get('/users/athletes')
+      .then(({ data }) => setAthletes(data))
+      .catch(() => setAthletesError(true));
   }, []);
 
   const [form, setForm] = useState({
@@ -93,6 +96,16 @@ export default function CreatePlanPage() {
       </button>
 
       <h1 className="text-2xl font-bold tracking-tight text-gray-900 mb-6">Nova Planilha de Treino</h1>
+
+      {/* Athletes load error */}
+      {athletesError && (
+        <div className="flex items-center gap-3 p-3.5 rounded-xl bg-amber-50 border border-amber-100 text-sm text-amber-800 mb-6">
+          <svg className="w-4 h-4 text-amber-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
+          </svg>
+          Erro ao carregar lista de atletas. Recarregue a página para tentar novamente.
+        </div>
+      )}
 
       {/* Mode toggle */}
       <div className="flex gap-2 mb-8 p-1 rounded-xl bg-gray-100 w-fit">

@@ -8,7 +8,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 @ApiTags('IA - Treinos')
 @ApiBearerAuth()
 @UseGuards(AuthGuard('jwt'))
-@Controller('api/ai-training')
+@Controller('ai-training')
 export class AiTrainingController {
   constructor(private readonly aiTrainingService: AiTrainingService) {}
 

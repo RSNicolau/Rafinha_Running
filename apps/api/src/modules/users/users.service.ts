@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
@@ -125,6 +126,18 @@ export class UsersService {
       missedCount: data.count,
       lastMissedDate: data.lastDate,
     }));
+  }
+
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+
+    const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!isValid) throw new BadRequestException('Senha atual incorreta');
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+    return { message: 'Senha alterada com sucesso' };
   }
 
   async getCoachStats(coachId: string) {

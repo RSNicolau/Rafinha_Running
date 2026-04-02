@@ -243,6 +243,7 @@ function MapboxMap({ positions, athletes, selectedAthleteId }: MapboxMapProps) {
 export default function LiveTrackingPage() {
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const [liveAthletes, setLiveAthletes] = useState<LiveAthleteInfo[]>([]);
   const [watchedPositions, setWatchedPositions] = useState<Map<string, LivePosition>>(new Map());
   const [selectedAthleteId, setSelectedAthleteId] = useState<string | null>(null);
@@ -251,10 +252,16 @@ export default function LiveTrackingPage() {
     const socket = io('/live', {
       transports: ['websocket'],
       autoConnect: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
 
-    socket.on('connect', () => setIsConnected(true));
-    socket.on('disconnect', () => setIsConnected(false));
+    socket.on('connect', () => { setIsConnected(true); setReconnecting(false); });
+    socket.on('disconnect', () => { setIsConnected(false); setReconnecting(false); });
+    socket.on('reconnect_attempt', () => setReconnecting(true));
+    socket.on('reconnect_failed', () => setReconnecting(false));
 
     socket.on('athlete-update', (data: LivePosition) => {
       setWatchedPositions((prev) => {
@@ -320,6 +327,21 @@ export default function LiveTrackingPage() {
 
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 120px)' }}>
+      {/* Reconnection banner */}
+      {reconnecting && (
+        <div className="flex items-center gap-2 px-4 py-2.5 mb-3 rounded-xl bg-amber-50 border border-amber-100 text-amber-800 text-sm shrink-0">
+          <div className="w-3.5 h-3.5 border-2 border-amber-400/40 border-t-amber-600 rounded-full animate-spin shrink-0" />
+          Conexão perdida — tentando reconectar...
+        </div>
+      )}
+      {!isConnected && !reconnecting && (
+        <div className="flex items-center gap-2 px-4 py-2.5 mb-3 rounded-xl bg-red-50 border border-red-100 text-red-700 text-sm shrink-0">
+          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
+          </svg>
+          Sem conexão com o servidor de live tracking. Verifique sua rede.
+        </div>
+      )}
       {/* Header */}
       <div className="mb-4 flex items-center justify-between shrink-0">
         <div>

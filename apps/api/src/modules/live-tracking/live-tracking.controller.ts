@@ -6,7 +6,7 @@ import { LiveTrackingService } from './live-tracking.service';
 @ApiTags('Live Tracking')
 @ApiBearerAuth()
 @UseGuards(AuthGuard('jwt'))
-@Controller('api/live-tracking')
+@Controller('live-tracking')
 export class LiveTrackingController {
   constructor(private readonly liveTrackingService: LiveTrackingService) {}
 

@@ -30,6 +30,7 @@ export default function AthletePortalPage() {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     loadUser();
@@ -43,12 +44,17 @@ export default function AthletePortalPage() {
 
   useEffect(() => {
     if (!isAuthenticated) return;
+    setLoadError(false);
     Promise.all([
-      api.get('/workouts/history?limit=5').catch(() => ({ data: [] })),
-      api.get('/training-plans?status=ACTIVE&limit=1').catch(() => ({ data: [] })),
+      api.get('/workouts/history?limit=5').catch(() => null),
+      api.get('/training-plans?status=ACTIVE&limit=1').catch(() => null),
     ]).then(([workoutsRes, plansRes]) => {
-      setWorkouts(workoutsRes.data?.workouts ?? workoutsRes.data ?? []);
-      const plans = plansRes.data;
+      if (workoutsRes === null && plansRes === null) {
+        setLoadError(true);
+        return;
+      }
+      setWorkouts(workoutsRes?.data?.workouts ?? workoutsRes?.data ?? []);
+      const plans = plansRes?.data;
       if (Array.isArray(plans) && plans.length > 0) setPlan(plans[0]);
     }).finally(() => setLoading(false));
   }, [isAuthenticated]);
@@ -105,6 +111,16 @@ export default function AthletePortalPage() {
           <h1 className="text-2xl font-bold text-gray-900">Olá, {user?.name?.split(' ')[0]} 👋</h1>
           <p className="text-sm text-gray-500 mt-0.5">Aqui estão seus treinos e planilha atual</p>
         </div>
+
+        {/* API error banner */}
+        {loadError && (
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-amber-50 border border-amber-100 mb-4 text-sm text-amber-800">
+            <svg className="w-5 h-5 text-amber-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
+            </svg>
+            Erro ao carregar dados. Verifique sua conexão e tente novamente.
+          </div>
+        )}
 
         {/* Active Plan */}
         {loading ? (

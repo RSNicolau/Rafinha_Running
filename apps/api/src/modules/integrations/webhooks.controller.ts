@@ -8,7 +8,7 @@ import * as crypto from 'crypto';
 import { IntegrationsService } from './integrations.service';
 
 @ApiTags('Webhooks')
-@Controller('api/webhooks')
+@Controller('webhooks')
 export class WebhooksController {
   private readonly logger = new Logger('WebhooksController');
 

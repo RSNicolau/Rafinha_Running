@@ -1,12 +1,18 @@
-import { Controller, Get, Put, Post, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Put, Post, Body, Param, UseGuards, BadRequestException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
+import { IsString, MinLength } from 'class-validator';
 import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+
+class ChangePasswordDto {
+  @IsString() currentPassword: string;
+  @IsString() @MinLength(6) newPassword: string;
+}
 
 @ApiTags('Usuários')
 @ApiBearerAuth()
@@ -25,6 +31,12 @@ export class UsersController {
   @ApiOperation({ summary: 'Atualizar perfil' })
   async updateProfile(@CurrentUser('id') userId: string, @Body() dto: UpdateProfileDto) {
     return this.usersService.updateProfile(userId, dto);
+  }
+
+  @Put('me/password')
+  @ApiOperation({ summary: 'Alterar senha' })
+  async changePassword(@CurrentUser('id') userId: string, @Body() dto: ChangePasswordDto) {
+    return this.usersService.changePassword(userId, dto.currentPassword, dto.newPassword);
   }
 
   @Get('athletes')
