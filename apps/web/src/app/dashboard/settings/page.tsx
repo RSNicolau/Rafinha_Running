@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
 
@@ -37,6 +37,14 @@ interface NotificationPrefs {
 
 type FeedbackState = { type: 'success' | 'error'; message: string } | null;
 
+interface BrandingForm {
+  tenantName: string;
+  primaryColor: string;
+  logoUrl: string;
+  bannerUrl: string;
+  welcomeMsg: string;
+}
+
 function Toggle({
   checked,
   onChange,
@@ -68,6 +76,15 @@ function Feedback({ state }: { state: FeedbackState }) {
       {state.message}
     </p>
   );
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 export default function SettingsPage() {
@@ -102,6 +119,20 @@ export default function SettingsPage() {
   // Aparência
   const [darkMode, setDarkMode] = useState(false);
 
+  // Branding (COACH only)
+  const isCoach = storeUser?.role === 'COACH' || storeUser?.role === 'ADMIN' || storeUser?.role === 'SUPER_ADMIN';
+  const [brandingForm, setBrandingForm] = useState<BrandingForm>({
+    tenantName: '',
+    primaryColor: '#DC2626',
+    logoUrl: '',
+    bannerUrl: '',
+    welcomeMsg: '',
+  });
+  const [savingBranding, setSavingBranding] = useState(false);
+  const [brandingFeedback, setBrandingFeedback] = useState<FeedbackState>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const bannerInputRef = useRef<HTMLInputElement>(null);
+
   // Load user on mount
   useEffect(() => {
     api
@@ -128,6 +159,19 @@ export default function SettingsPage() {
     // Load dark mode preference from localStorage
     const stored = localStorage.getItem('rr_dark_mode');
     if (stored === 'true') setDarkMode(true);
+
+    // Load branding for coaches
+    if (storeUser?.role === 'COACH' || storeUser?.role === 'ADMIN' || storeUser?.role === 'SUPER_ADMIN') {
+      api.get('/config/branding').then(({ data }) => {
+        setBrandingForm({
+          tenantName: data.tenantName || '',
+          primaryColor: data.primaryColor || '#DC2626',
+          logoUrl: data.logoUrl || '',
+          bannerUrl: data.bannerUrl || '',
+          welcomeMsg: data.welcomeMsg || '',
+        });
+      }).catch(() => {});
+    }
   }, [storeUser]);
 
   const handleSaveProfile = async () => {
@@ -199,6 +243,42 @@ export default function SettingsPage() {
   const handleDarkModeToggle = (val: boolean) => {
     setDarkMode(val);
     localStorage.setItem('rr_dark_mode', String(val));
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 500 * 1024) {
+      setBrandingFeedback({ type: 'error', message: 'Logo deve ter menos de 500KB.' });
+      return;
+    }
+    const base64 = await fileToBase64(file);
+    setBrandingForm((f) => ({ ...f, logoUrl: base64 }));
+  };
+
+  const handleBannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 1024 * 1024) {
+      setBrandingFeedback({ type: 'error', message: 'Banner deve ter menos de 1MB.' });
+      return;
+    }
+    const base64 = await fileToBase64(file);
+    setBrandingForm((f) => ({ ...f, bannerUrl: base64 }));
+  };
+
+  const handleSaveBranding = async () => {
+    setSavingBranding(true);
+    setBrandingFeedback(null);
+    try {
+      await api.put('/config/branding', brandingForm);
+      setBrandingFeedback({ type: 'success', message: 'Personalização salva com sucesso.' });
+    } catch (err: any) {
+      const msg = err.response?.data?.message || 'Erro ao salvar personalização.';
+      setBrandingFeedback({ type: 'error', message: msg });
+    } finally {
+      setSavingBranding(false);
+    }
   };
 
   const displayName = profile?.name || storeUser?.name || '';
@@ -432,6 +512,156 @@ export default function SettingsPage() {
             A preferência de aparência é salva localmente neste dispositivo.
           </p>
         </div>
+
+        {/* Branding — COACH/ADMIN only */}
+        {isCoach && (
+          <div className="glass-card p-6">
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">Personalização do App</h2>
+
+            <div className="space-y-5">
+              {/* Tenant name */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Nome da assessoria</label>
+                <input
+                  type="text"
+                  value={brandingForm.tenantName}
+                  onChange={(e) => setBrandingForm((f) => ({ ...f, tenantName: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
+                  placeholder="Ex: Rafinha Running"
+                />
+              </div>
+
+              {/* Primary color */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Cor principal</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={brandingForm.primaryColor}
+                    onChange={(e) => setBrandingForm((f) => ({ ...f, primaryColor: e.target.value }))}
+                    className="w-10 h-10 rounded-lg cursor-pointer border border-gray-200 p-0.5"
+                  />
+                  <input
+                    type="text"
+                    value={brandingForm.primaryColor}
+                    onChange={(e) => setBrandingForm((f) => ({ ...f, primaryColor: e.target.value }))}
+                    className="w-28 px-3 py-2 text-sm font-mono bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    placeholder="#DC2626"
+                  />
+                  <div
+                    className="w-8 h-8 rounded-lg border border-gray-200"
+                    style={{ backgroundColor: brandingForm.primaryColor }}
+                  />
+                </div>
+              </div>
+
+              {/* Logo */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Logo (PNG/JPG, máx 500KB)</label>
+                <div className="flex items-center gap-3">
+                  {brandingForm.logoUrl ? (
+                    <div className="relative w-16 h-16 rounded-xl border border-gray-200 overflow-hidden bg-gray-50 flex items-center justify-center">
+                      <img src={brandingForm.logoUrl} alt="Logo" className="w-full h-full object-contain" />
+                      <button
+                        onClick={() => setBrandingForm((f) => ({ ...f, logoUrl: '' }))}
+                        className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white text-xs leading-none"
+                      >×</button>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={() => logoInputRef.current?.click()}
+                      className="w-16 h-16 rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center cursor-pointer hover:border-primary/40 transition"
+                    >
+                      <svg className="w-6 h-6 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => logoInputRef.current?.click()}
+                    className="px-3 py-2 text-xs font-medium bg-gray-100 hover:bg-gray-200 rounded-xl transition"
+                  >
+                    {brandingForm.logoUrl ? 'Trocar logo' : 'Enviar logo'}
+                  </button>
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    className="hidden"
+                    onChange={handleLogoUpload}
+                  />
+                </div>
+              </div>
+
+              {/* Banner */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Banner de fundo (PNG/JPG, máx 1MB)</label>
+                <div className="flex items-center gap-3">
+                  {brandingForm.bannerUrl ? (
+                    <div className="relative w-32 h-16 rounded-xl border border-gray-200 overflow-hidden bg-gray-50">
+                      <img src={brandingForm.bannerUrl} alt="Banner" className="w-full h-full object-cover" />
+                      <button
+                        onClick={() => setBrandingForm((f) => ({ ...f, bannerUrl: '' }))}
+                        className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white text-xs leading-none"
+                      >×</button>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={() => bannerInputRef.current?.click()}
+                      className="w-32 h-16 rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center cursor-pointer hover:border-primary/40 transition"
+                    >
+                      <svg className="w-6 h-6 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => bannerInputRef.current?.click()}
+                    className="px-3 py-2 text-xs font-medium bg-gray-100 hover:bg-gray-200 rounded-xl transition"
+                  >
+                    {brandingForm.bannerUrl ? 'Trocar banner' : 'Enviar banner'}
+                  </button>
+                  <input
+                    ref={bannerInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={handleBannerUpload}
+                  />
+                </div>
+              </div>
+
+              {/* Welcome message */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Mensagem de boas-vindas</label>
+                <input
+                  type="text"
+                  value={brandingForm.welcomeMsg}
+                  onChange={(e) => setBrandingForm((f) => ({ ...f, welcomeMsg: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
+                  placeholder="Ex: Entre para acessar seus treinos"
+                />
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <button
+                onClick={handleSaveBranding}
+                disabled={savingBranding}
+                className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-60 text-white text-sm font-medium rounded-xl transition cursor-pointer flex items-center gap-2"
+              >
+                {savingBranding && (
+                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                )}
+                Salvar Personalização
+              </button>
+            </div>
+
+            <Feedback state={brandingFeedback} />
+          </div>
+        )}
 
         {/* Danger Zone */}
         <div className="glass-card p-6 border-red-100">

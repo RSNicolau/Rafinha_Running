@@ -12,6 +12,14 @@ interface Athlete {
   user: { id: string; name: string; email: string };
 }
 
+interface Invite {
+  id: string;
+  email: string;
+  status: string;
+  expiresAt: string;
+  athlete: { id: string; name: string } | null;
+}
+
 export default function AthletesPage() {
   const { isDemoMode } = useDemo();
   const [athletes, setAthletes] = useState<Athlete[]>([]);
@@ -22,6 +30,9 @@ export default function AthletesPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteError, setInviteError] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [sentInviteLink, setSentInviteLink] = useState('');
+  const [pendingInvites, setPendingInvites] = useState<Invite[]>([]);
+  const [copied, setCopied] = useState('');
 
   const loadAthletes = () => {
     if (isDemoMode) {
@@ -41,28 +52,48 @@ export default function AthletesPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadAthletes(); }, [isDemoMode]);
+  const loadInvites = () => {
+    if (isDemoMode) return;
+    api.get('/invites')
+      .then(({ data }) => setPendingInvites(data.filter((i: Invite) => i.status === 'PENDING')))
+      .catch(() => {});
+  };
+
+  useEffect(() => { loadAthletes(); loadInvites(); }, [isDemoMode]);
 
   const filtered = athletes.filter((a) =>
     a.user.name.toLowerCase().includes(search.toLowerCase()) ||
     a.user.email.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleAddAthlete = async (e: React.FormEvent) => {
+  const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteEmail.trim()) return;
     setInviteError('');
     setInviteLoading(true);
     try {
-      await api.post('/users/athletes/add', { email: inviteEmail.trim() });
-      setShowModal(false);
-      setInviteEmail('');
-      loadAthletes();
+      const { data } = await api.post('/invites', { email: inviteEmail.trim() });
+      const link = `${window.location.origin}/join?token=${data.token}`;
+      setSentInviteLink(link);
+      loadInvites();
     } catch (err: any) {
-      setInviteError(err.response?.data?.message || 'Erro ao adicionar atleta');
+      setInviteError(err.response?.data?.message || 'Erro ao enviar convite');
     } finally {
       setInviteLoading(false);
     }
+  };
+
+  const handleCancelInvite = async (id: string) => {
+    try {
+      await api.delete(`/invites/${id}`);
+      loadInvites();
+    } catch {}
+  };
+
+  const copyLink = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(''), 2000);
   };
 
   return (
@@ -159,46 +190,110 @@ export default function AthletesPage() {
         </table>
       </div>
 
-      {/* Add Athlete Modal */}
+      {/* Pending Invites */}
+      {!isDemoMode && pendingInvites.length > 0 && (
+        <div className="mt-8">
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Convites pendentes</h2>
+          <div className="glass-card divide-y divide-gray-50">
+            {pendingInvites.map((inv) => {
+              const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/join?token=${inv.id}`;
+              return (
+                <div key={inv.id} className="flex items-center justify-between px-5 py-3 gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">{inv.email}</p>
+                    <p className="text-xs text-gray-400">
+                      Expira em {new Date(inv.expiresAt).toLocaleDateString('pt-BR')}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => copyLink(`${window.location.origin}/join?token=${inv.id}`, inv.id)}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-primary/8 text-primary font-medium hover:bg-primary/15 transition"
+                    >
+                      {copied === inv.id ? 'Copiado!' : 'Copiar link'}
+                    </button>
+                    <button
+                      onClick={() => handleCancelInvite(inv.id)}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-600 transition"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Invite Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-1">Adicionar Atleta</h2>
+            <h2 className="text-lg font-bold text-gray-900 mb-1">Convidar Atleta</h2>
             <p className="text-sm text-gray-500 mb-5">
-              O atleta deve já ter uma conta registrada no app.
+              Um link de convite será gerado para o atleta criar a conta.
             </p>
-            <form onSubmit={handleAddAthlete} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">E-mail do atleta</label>
-                <input
-                  type="email"
-                  required
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="atleta@email.com"
-                  className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40"
-                />
-              </div>
-              {inviteError && (
-                <p className="text-sm text-red-600">{inviteError}</p>
-              )}
-              <div className="flex gap-3 pt-2">
+
+            {sentInviteLink ? (
+              <div className="space-y-4">
+                <div className="bg-green-50 rounded-xl p-4">
+                  <p className="text-sm font-medium text-green-800 mb-2">Convite criado! Envie este link ao atleta:</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      readOnly
+                      value={sentInviteLink}
+                      className="flex-1 text-xs bg-white border border-green-200 rounded-lg px-3 py-2 text-gray-700 min-w-0"
+                    />
+                    <button
+                      onClick={() => copyLink(sentInviteLink, 'modal')}
+                      className="shrink-0 px-3 py-2 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-dark transition"
+                    >
+                      {copied === 'modal' ? 'Copiado!' : 'Copiar'}
+                    </button>
+                  </div>
+                </div>
                 <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+                  onClick={() => { setShowModal(false); setSentInviteLink(''); setInviteEmail(''); }}
+                  className="w-full px-4 py-2.5 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary-dark transition"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={inviteLoading}
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-primary hover:bg-primary-dark disabled:opacity-50 text-white text-sm font-medium transition"
-                >
-                  {inviteLoading ? 'Adicionando...' : 'Adicionar'}
+                  Fechar
                 </button>
               </div>
-            </form>
+            ) : (
+              <form onSubmit={handleSendInvite} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">E-mail do atleta</label>
+                  <input
+                    type="email"
+                    required
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="atleta@email.com"
+                    className="w-full px-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40"
+                  />
+                </div>
+                {inviteError && (
+                  <p className="text-sm text-red-600">{inviteError}</p>
+                )}
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => { setShowModal(false); setInviteEmail(''); setInviteError(''); }}
+                    className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={inviteLoading}
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-primary hover:bg-primary-dark disabled:opacity-50 text-white text-sm font-medium transition"
+                  >
+                    {inviteLoading ? 'Gerando...' : 'Gerar convite'}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

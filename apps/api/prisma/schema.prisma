@@ -173,6 +173,9 @@ model User {
 
   tenantBranding TenantBranding?
 
+  sentInvites     CoachInvite[] @relation("CoachInvites")
+  receivedInvites CoachInvite[] @relation("AthleteInvites")
+
   @@map("users")
 }
 
@@ -485,12 +488,46 @@ model EventRegistration {
   @@map("event_registrations")
 }
 
+// ============================================
+// INVITES
+// ============================================
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  CANCELLED
+}
+
+model CoachInvite {
+  id        String       @id @default(uuid())
+  coachId   String       @map("coach_id")
+  email     String
+  token     String       @unique @default(uuid())
+  status    InviteStatus @default(PENDING)
+  expiresAt DateTime     @map("expires_at")
+  acceptedAt DateTime?   @map("accepted_at")
+  athleteId  String?     @map("athlete_id")
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  coach   User  @relation("CoachInvites", fields: [coachId], references: [id], onDelete: Cascade)
+  athlete User? @relation("AthleteInvites", fields: [athleteId], references: [id])
+
+  @@index([coachId])
+  @@index([email])
+  @@index([token])
+  @@index([status])
+  @@map("coach_invites")
+}
+
 model TenantBranding {
   id           String   @id @default(uuid())
   coachId      String   @unique @map("coach_id")
   tenantName   String   @map("tenant_name")
   primaryColor String   @default("#DC2626") @map("primary_color")
   logoUrl      String?  @map("logo_url")
+  bannerUrl    String?  @map("banner_url")
   domain       String?  @unique
   welcomeMsg   String?  @map("welcome_msg")
   isActive     Boolean  @default(true) @map("is_active")

@@ -14,7 +14,8 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.rafinharunning.app"
+      "bundleIdentifier": "com.rafinharunning.app",
+      "deploymentTarget": "16.0"
     },
     "android": {
       "adaptiveIcon": {
@@ -38,6 +39,14 @@
           "isBackgroundDeliveryEnabled": true,
           "NSHealthShareUsageDescription": "O app precisa acessar seus dados de corrida (distância, frequência cardíaca, pace) para sincronizar automaticamente com seu treinador.",
           "NSHealthUpdateUsageDescription": "O app pode salvar seus treinos no Apple Health para manter um histórico unificado de atividades."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.0"
+          }
         }
       ]
     ],
