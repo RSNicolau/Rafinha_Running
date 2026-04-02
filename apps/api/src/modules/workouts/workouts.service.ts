@@ -167,16 +167,23 @@ export class WorkoutsService {
   }) {
     const externalId = `apple_health_${data.id}`;
 
-    // Idempotency: skip if already synced
-    const existing = await this.prisma.workout.findFirst({
-      where: { athleteId, externalId },
+    // Idempotency: skip if already synced (externalId is on WorkoutResult)
+    const existingResult = await this.prisma.workoutResult.findFirst({
+      where: { externalId },
     });
-    if (existing) return { status: 'already_synced', workoutId: existing.id };
+    if (existingResult) return { status: 'already_synced', workoutId: existingResult.workoutId };
+
+    // Apple Health workouts need a plan — find the athlete's most recent plan
+    const plan = await this.prisma.trainingPlan.findFirst({
+      where: { athleteId },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!plan) return { status: 'skipped', reason: 'no_active_plan' };
 
     const workout = await this.prisma.workout.create({
       data: {
         athleteId,
-        externalId,
+        planId: plan.id,
         type: 'EASY_RUN',
         title: `Corrida — Apple Health`,
         description: `Sincronizado automaticamente via Apple Health (${data.type})`,
@@ -185,13 +192,11 @@ export class WorkoutsService {
         status: 'COMPLETED',
         result: {
           create: {
+            externalId,
             distanceMeters: Math.round(data.distanceKm * 1000),
             durationSeconds: Math.round(data.durationMinutes * 60),
-            averageHeartRate: data.averageHeartRate ?? null,
-            caloriesBurned: data.calories ?? null,
-            notes: data.averagePaceMinPerKm
-              ? `Pace médio: ${data.averagePaceMinPerKm.toFixed(2)} min/km`
-              : null,
+            avgHeartRate: data.averageHeartRate ?? null,
+            calories: data.calories ?? null,
           },
         },
       },
