@@ -45,7 +45,11 @@
         "expo-build-properties",
         {
           "ios": {
-            "deploymentTarget": "16.0"
+            "deploymentTarget": "16.0",
+            "buildSettings": {
+              "SWIFT_COMPILATION_MODE": "wholemodule",
+              "GCC_WARN_INHIBIT_ALL_WARNINGS": "YES"
+            }
           }
         }
       ]
