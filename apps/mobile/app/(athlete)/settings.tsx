@@ -167,7 +167,7 @@ export default function SettingsScreen() {
                 return (
                   <TouchableOpacity
                     key={opt.key}
-                    onPress={() => setMode(opt.key)}>
+                    onPress={() => setMode(opt.key)}
                     style={{
                       flex: 1,
                       alignItems: 'center',
@@ -206,7 +206,7 @@ export default function SettingsScreen() {
                 return (
                   <TouchableOpacity
                     key={opt.key}
-                    onPress={() => setLanguage(opt.key as 'pt-BR' | 'en')}>
+                    onPress={() => setLanguage(opt.key as 'pt-BR' | 'en')}
                     style={{
                       flex: 1,
                       alignItems: 'center',

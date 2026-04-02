@@ -165,7 +165,8 @@ export default function LiveTrackingScreen() {
   const handleStop = () => {
     stopTracking();
     if (timerRef.current) clearInterval(timerRef.current);
-    if (locationIntervalRef.current) clearInterval(locationIntervalRef.current);
+    locationWatcherRef.current?.remove();
+    locationWatcherRef.current = null;
   };
 
   return (
