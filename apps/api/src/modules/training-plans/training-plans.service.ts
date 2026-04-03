@@ -1,14 +1,18 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreatePlanDto, UpdatePlanDto } from './dto/plan.dto';
-import { UserRole, PlanStatus } from '@prisma/client';
+import { UserRole, PlanStatus, NotificationType } from '@prisma/client';
 
 @Injectable()
 export class TrainingPlansService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notifications: NotificationsService,
+  ) {}
 
   async create(coachId: string, dto: CreatePlanDto) {
-    return this.prisma.trainingPlan.create({
+    const plan = await this.prisma.trainingPlan.create({
       data: {
         coachId,
         athleteId: dto.athleteId,
@@ -21,8 +25,20 @@ export class TrainingPlansService {
       },
       include: {
         athlete: { select: { id: true, name: true, avatarUrl: true } },
+        coach: { select: { name: true } },
       },
     });
+
+    // Notify athlete about the new training plan
+    this.notifications.createNotification(
+      dto.athleteId,
+      NotificationType.PLAN_ASSIGNED,
+      'Nova planilha de treino',
+      `${plan.coach?.name || 'Seu treinador'} criou a planilha "${dto.name}" para você.`,
+      { planId: plan.id },
+    ).catch(() => {});
+
+    return plan;
   }
 
   async findAll(userId: string, role: UserRole) {

@@ -6,11 +6,16 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateInviteDto, AcceptInviteDto } from './dto/invite.dto';
+import { NotificationType } from '@prisma/client';
 
 @Injectable()
 export class InvitesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notifications: NotificationsService,
+  ) {}
 
   async createInvite(coachId: string, dto: CreateInviteDto) {
     // Check if invite already pending for this email+coach
@@ -120,6 +125,14 @@ export class InvitesService {
           data: { status: 'ACCEPTED', acceptedAt: new Date(), athleteId: existingUser.id },
         }),
       ]);
+      // Notify coach that existing athlete accepted
+      this.notifications.createNotification(
+        invite.coachId,
+        NotificationType.PLAN_ASSIGNED,
+        'Atleta vinculado',
+        `${existingUser.name} aceitou seu convite e está na sua lista de atletas.`,
+        { athleteId: existingUser.id },
+      ).catch(() => {});
       return { message: 'Conta vinculada ao treinador com sucesso', userId: existingUser.id };
     }
 
@@ -146,6 +159,15 @@ export class InvitesService {
 
       return user;
     });
+
+    // Notify coach that new athlete joined
+    this.notifications.createNotification(
+      invite.coachId,
+      NotificationType.PLAN_ASSIGNED,
+      'Novo atleta na equipe',
+      `${result.name} criou conta e está na sua lista de atletas.`,
+      { athleteId: result.id },
+    ).catch(() => {});
 
     return { message: 'Conta criada com sucesso', userId: result.id };
   }

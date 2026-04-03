@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { authService, AuthResponse } from '../services/auth.service';
+import { setAuthLogout } from '../services/api';
 
 interface User {
   id: string;
@@ -22,6 +23,9 @@ interface AuthState {
   loadStoredUser: () => Promise<void>;
   clearError: () => void;
 }
+
+// Will be set after store is created
+let _storeLogout: (() => Promise<void>) | null = null;
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
@@ -86,3 +90,6 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   clearError: () => set({ error: null }),
 }));
+
+// Wire the logout function into the API interceptor so it's called when refresh fails
+setAuthLogout(() => useAuthStore.getState().logout());

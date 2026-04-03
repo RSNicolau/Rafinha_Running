@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, Pressable, Platform, Modal, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/theme';
+import { api } from '../../src/services/api';
 
 type MainTab = 'eventos' | 'loja';
 type RegStep = 'distance' | 'kit' | 'payment' | 'confirmation';
@@ -382,6 +383,17 @@ export default function EventsScreen() {
   const [activeTab, setActiveTab] = useState<MainTab>('eventos');
   const [selectedSizes, setSelectedSizes] = useState<Record<string, string>>({});
   const [regEvent, setRegEvent] = useState<typeof SAO_GARRAFA_EVENTS[0] | null>(null);
+  const [apiEvents, setApiEvents] = useState<any[]>([]);
+  const [myApiRegistrations, setMyApiRegistrations] = useState<string[]>([]);
+
+  useEffect(() => {
+    api.get('/events').then(({ data }) => {
+      if (data?.data?.length > 0) setApiEvents(data.data);
+    }).catch(() => {});
+    api.get('/events/registrations/my').then(({ data }) => {
+      setMyApiRegistrations(data?.map((r: any) => r.eventId) || []);
+    }).catch(() => {});
+  }, []);
 
   const shadow = Platform.OS === 'web'
     ? { boxShadow: isDark ? '0 4px 20px rgba(0,0,0,0.25)' : '0 2px 16px rgba(0,0,0,0.06)' } as any
@@ -389,7 +401,7 @@ export default function EventsScreen() {
 
   const myRaces = EXTERNAL_RACES.filter((r) => r.myStatus === 'registered');
 
-  // Mock: João is registered in sg2025
+  // Static fallback registrations (shown when no API data)
   const myRegistrations: Record<string, { bib: string; distance: string; pickup: string }> = {
     'sg2025': { bib: '0342', distance: '10K', pickup: 'Assessoria RR — 07 Dez às 10:00' },
   };
@@ -541,6 +553,52 @@ export default function EventsScreen() {
                 </View>
               );
             })}
+
+            {/* API Events (when available) */}
+            {apiEvents.length > 0 && (
+              <>
+                <Text style={{ fontSize: 17, fontWeight: '700', letterSpacing: -0.4, color: colors.text, marginBottom: 16, marginTop: 8 }}>📅 Próximos Eventos</Text>
+                {apiEvents.map((event) => {
+                  const isRegistered = myApiRegistrations.includes(event.id);
+                  return (
+                    <View key={event.id} style={{ borderRadius: 18, backgroundColor: colors.surface, borderWidth: 0.5, borderColor: colors.text + '0A', padding: 16, marginBottom: 12, ...shadow }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 16, fontWeight: '800', color: colors.text, letterSpacing: -0.3 }}>{event.name}</Text>
+                          {event.description ? <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 3 }}>{event.description}</Text> : null}
+                        </View>
+                        {isRegistered && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: '#10B981' + '15', marginLeft: 8 }}>
+                            <Ionicons name="checkmark-circle" size={13} color="#10B981" />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#10B981' }}>Inscrito</Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
+                        {event.date && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Ionicons name="calendar-outline" size={12} color={colors.textTertiary} />
+                            <Text style={{ fontSize: 12, color: colors.textSecondary }}>{new Date(event.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}</Text>
+                          </View>
+                        )}
+                        {event.location && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Ionicons name="location-outline" size={12} color={colors.textTertiary} />
+                            <Text style={{ fontSize: 12, color: colors.textSecondary }}>{event.location}</Text>
+                          </View>
+                        )}
+                        {event.price != null && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Ionicons name="pricetag-outline" size={12} color={colors.textTertiary} />
+                            <Text style={{ fontSize: 12, color: colors.textSecondary }}>{event.price === 0 ? 'Gratuito' : `R$ ${(event.price / 100).toFixed(2)}`}</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </>
+            )}
 
             {/* External races */}
             <Text style={{ fontSize: 17, fontWeight: '700', letterSpacing: -0.4, color: colors.text, marginBottom: 8, marginTop: 4 }}>👥 Corridas em Equipe</Text>

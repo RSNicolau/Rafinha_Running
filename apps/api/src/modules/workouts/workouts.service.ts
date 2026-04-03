@@ -1,18 +1,22 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateWorkoutDto, SubmitResultDto } from './dto/workout.dto';
-import { WorkoutStatus } from '@prisma/client';
+import { WorkoutStatus, NotificationType } from '@prisma/client';
 
 @Injectable()
 export class WorkoutsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notifications: NotificationsService,
+  ) {}
 
   async create(coachId: string, dto: CreateWorkoutDto) {
     const plan = await this.prisma.trainingPlan.findUnique({ where: { id: dto.planId } });
     if (!plan) throw new NotFoundException('Plano de treino não encontrado');
     if (plan.coachId !== coachId) throw new ForbiddenException('Acesso negado');
 
-    return this.prisma.workout.create({
+    const workout = await this.prisma.workout.create({
       data: {
         planId: dto.planId,
         athleteId: plan.athleteId,
@@ -26,6 +30,17 @@ export class WorkoutsService {
         heartRateZone: dto.heartRateZone,
       },
     });
+
+    // Notify athlete about new workout
+    this.notifications.createNotification(
+      plan.athleteId,
+      NotificationType.WORKOUT_REMINDER,
+      'Novo treino agendado',
+      `${dto.title} — ${new Date(dto.scheduledDate).toLocaleDateString('pt-BR')}`,
+      { workoutId: workout.id, type: dto.type },
+    ).catch(() => {}); // Fire-and-forget
+
+    return workout;
   }
 
   async getWeeklyWorkouts(athleteId: string, weekStart: string) {
@@ -69,7 +84,10 @@ export class WorkoutsService {
   }
 
   async submitResult(workoutId: string, athleteId: string, dto: SubmitResultDto) {
-    const workout = await this.prisma.workout.findUnique({ where: { id: workoutId } });
+    const workout = await this.prisma.workout.findUnique({
+      where: { id: workoutId },
+      include: { plan: { select: { coachId: true } } },
+    });
     if (!workout) throw new NotFoundException('Treino não encontrado');
     if (workout.athleteId !== athleteId) throw new ForbiddenException('Acesso negado');
 
@@ -92,6 +110,21 @@ export class WorkoutsService {
       where: { id: workoutId },
       data: { status: WorkoutStatus.COMPLETED, completedAt: new Date() },
     });
+
+    // Notify coach about completed workout
+    if (workout.plan?.coachId) {
+      const athlete = await this.prisma.user.findUnique({
+        where: { id: athleteId },
+        select: { name: true },
+      });
+      this.notifications.createNotification(
+        workout.plan.coachId,
+        NotificationType.WORKOUT_COMPLETED,
+        'Treino concluído',
+        `${athlete?.name || 'Atleta'} concluiu "${workout.title}"`,
+        { workoutId, athleteId, resultId: result.id },
+      ).catch(() => {});
+    }
 
     return result;
   }

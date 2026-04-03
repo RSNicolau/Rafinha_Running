@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, Pressable, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/theme';
+import { api } from '../../src/services/api';
 
 type NutritionTab = 'hoje' | 'integracoes';
 
@@ -108,23 +109,44 @@ export default function NutritionScreen() {
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<NutritionTab>('hoje');
-  const [waterMl, setWaterMl] = useState(1850);
+  const [waterMl, setWaterMl] = useState(0);
+  const [waterGoal, setWaterGoal] = useState(WATER_GOAL);
   const [supplements, setSupplements] = useState(SUPPLEMENTS);
   const [expandedMeal, setExpandedMeal] = useState<string | null>(null);
+  const [apiMeals, setApiMeals] = useState<any[]>([]);
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  const loadDaySummary = useCallback(() => {
+    api.get(`/nutrition/day?date=${todayStr}`).then(({ data }) => {
+      if (data?.meals?.length > 0) setApiMeals(data.meals);
+      if (data?.water) {
+        setWaterMl(data.water.amount);
+        setWaterGoal(data.water.goal);
+      }
+    }).catch(() => {});
+  }, [todayStr]);
+
+  useEffect(() => {
+    loadDaySummary();
+  }, [loadDaySummary]);
 
   const shadow = Platform.OS === 'web'
     ? { boxShadow: isDark ? '0 4px 20px rgba(0,0,0,0.25)' : '0 2px 16px rgba(0,0,0,0.06)' } as any
     : {};
 
-  const totalCalories = MEALS.reduce((s, m) => s + m.calories, 0);
-  const totalProtein = MEALS.reduce((s, m) => s + m.protein, 0);
-  const totalCarbs = MEALS.reduce((s, m) => s + m.carbs, 0);
-  const totalFat = MEALS.reduce((s, m) => s + m.fat, 0);
-  const waterPct = Math.round((waterMl / WATER_GOAL) * 100);
+  const displayMeals = apiMeals.length > 0 ? apiMeals : MEALS;
+  const totalCalories = displayMeals.reduce((s: number, m: any) => s + (m.calories || 0), 0);
+  const totalProtein = displayMeals.reduce((s: number, m: any) => s + (m.protein || 0), 0);
+  const totalCarbs = displayMeals.reduce((s: number, m: any) => s + (m.carbs || 0), 0);
+  const totalFat = displayMeals.reduce((s: number, m: any) => s + (m.fat || 0), 0);
+  const waterPct = Math.round((waterMl / waterGoal) * 100);
   const supplementsDone = supplements.filter((s) => s.taken).length;
 
   const addWater = (ml: number) => {
-    setWaterMl((prev) => Math.min(WATER_GOAL + 500, prev + ml));
+    const newAmount = Math.min(waterGoal + 500, waterMl + ml);
+    setWaterMl(newAmount);
+    api.post('/nutrition/water', { date: todayStr, amount: newAmount, goal: waterGoal }).catch(() => {});
   };
 
   const toggleSupplement = (id: string) => {
@@ -203,7 +225,7 @@ export default function NutritionScreen() {
                   </View>
                   <View>
                     <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>Hidratação</Text>
-                    <Text style={{ fontSize: 11, color: colors.textTertiary }}>Meta: {(WATER_GOAL / 1000).toFixed(1)}L/dia</Text>
+                    <Text style={{ fontSize: 11, color: colors.textTertiary }}>Meta: {(waterGoal / 1000).toFixed(1)}L/dia</Text>
                   </View>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
@@ -219,7 +241,7 @@ export default function NutritionScreen() {
               {/* Water cups visualization */}
               <View style={{ flexDirection: 'row', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
                 {Array.from({ length: 10 }).map((_, i) => {
-                  const cupMl = WATER_GOAL / 10;
+                  const cupMl = waterGoal / 10;
                   const filled = waterMl >= cupMl * (i + 1);
                   const partial = !filled && waterMl > cupMl * i;
                   return (
@@ -287,14 +309,14 @@ export default function NutritionScreen() {
                 </Pressable>
               </View>
               <View style={{ gap: 10 }}>
-                {MEALS.map((meal) => (
+                {displayMeals.map((meal: any) => (
                   <Pressable key={meal.id} onPress={() => setExpandedMeal(expandedMeal === meal.id ? null : meal.id)} style={{ borderRadius: 18, backgroundColor: colors.surface, borderWidth: 0.5, borderColor: colors.text + '07', overflow: 'hidden', ...shadow }}>
                     <View style={{ padding: 16 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <Text style={{ fontSize: 24 }}>{meal.icon}</Text>
+                        <Text style={{ fontSize: 24 }}>{meal.icon || '🍽️'}</Text>
                         <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>{meal.name}</Text>
-                          <Text style={{ fontSize: 11, color: colors.textTertiary, marginTop: 1 }}>{meal.time} · {meal.items.length} alimentos</Text>
+                          <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>{meal.mealName || meal.name}</Text>
+                          <Text style={{ fontSize: 11, color: colors.textTertiary, marginTop: 1 }}>{meal.mealTime || meal.time} · {(meal.items || []).length} alimentos</Text>
                         </View>
                         <View style={{ alignItems: 'flex-end' }}>
                           <Text style={{ fontSize: 16, fontWeight: '800', color: colors.text }}>{meal.calories} kcal</Text>
@@ -306,7 +328,7 @@ export default function NutritionScreen() {
                     {expandedMeal === meal.id && (
                       <View style={{ paddingHorizontal: 16, paddingBottom: 14, borderTopWidth: 0.5, borderTopColor: colors.text + '08' }}>
                         <View style={{ gap: 6, marginTop: 12 }}>
-                          {meal.items.map((item) => (
+                          {(meal.items || []).map((item: string) => (
                             <View key={item} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                               <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} />
                               <Text style={{ fontSize: 13, color: colors.textSecondary }}>{item}</Text>

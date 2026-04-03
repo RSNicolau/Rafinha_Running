@@ -16,6 +16,7 @@ import { LiveTrackingModule } from './modules/live-tracking/live-tracking.module
 import { AiTrainingModule } from './modules/ai-training/ai-training.module';
 import { BrandingModule } from './modules/branding/branding.module';
 import { InvitesModule } from './modules/invites/invites.module';
+import { NutritionModule } from './modules/nutrition/nutrition.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { InvitesModule } from './modules/invites/invites.module';
     AiTrainingModule,
     BrandingModule,
     InvitesModule,
+    NutritionModule,
   ],
 })
 export class AppModule {}

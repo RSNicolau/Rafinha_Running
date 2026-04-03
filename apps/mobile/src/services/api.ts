@@ -2,6 +2,12 @@ import axios from 'axios';
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 
+// Lazy import to avoid circular dependency
+let _logoutFn: (() => Promise<void>) | null = null;
+export function setAuthLogout(fn: () => Promise<void>) {
+  _logoutFn = fn;
+}
+
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
 
 // Web-safe storage helpers
@@ -57,7 +63,8 @@ api.interceptors.response.use(
       } catch {
         await deleteItem('accessToken');
         await deleteItem('refreshToken');
-        // Navigation to login is handled by auth store listener
+        // Notify auth store to clear user state and navigate to login
+        if (_logoutFn) await _logoutFn().catch(() => {});
       }
     }
 
