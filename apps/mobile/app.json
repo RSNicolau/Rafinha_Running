@@ -50,6 +50,7 @@
       ],
       "./plugins/withRNHealthSwiftFix"
     ],
+    "newArchEnabled": false,
     "experiments": {
       "typedRoutes": true
     },
