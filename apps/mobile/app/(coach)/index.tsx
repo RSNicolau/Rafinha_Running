@@ -151,7 +151,7 @@ export default function CoachDashboard() {
             onPress={() => router.push(`/(coach)/athletes/${athlete.user.id}`)}
           >
             <GlassCard
-              intensity="light"
+              intensity="subtle"
               shadow="sm"
               padding={14}
               style={{ marginBottom: 8 }}
@@ -180,7 +180,7 @@ export default function CoachDashboard() {
         ))}
 
         {(!athletes || athletes.length === 0) && (
-          <GlassCard intensity="light" shadow="sm" padding={32}>
+          <GlassCard intensity="subtle" shadow="sm" padding={32}>
             <View style={{ alignItems: 'center' }}>
               <Ionicons name="people-outline" size={48} color={colors.textTertiary} />
               <Text style={{

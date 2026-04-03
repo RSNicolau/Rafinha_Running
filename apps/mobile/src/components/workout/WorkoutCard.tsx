@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, borderRadius, typography, shadow } from '../../theme';
+import { workoutColors, colors, spacing, borderRadius, typography, shadow } from '../../theme';
 import { Badge } from '../ui/Badge';
 import { formatDistance, formatDuration, formatPace } from '../../utils/pace';
 import { ptBR } from '../../i18n/pt-BR';
@@ -38,14 +38,14 @@ const typeIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
 };
 
 const typeColors: Record<string, string> = {
-  EASY_RUN: colors.easyRun,
-  TEMPO: colors.tempo,
-  INTERVAL: colors.interval,
-  LONG_RUN: colors.longRun,
-  RECOVERY: colors.recovery,
-  RACE: colors.race,
-  CROSS_TRAINING: colors.crossTraining,
-  REST: colors.rest,
+  EASY_RUN: workoutColors.easyRun,
+  TEMPO: workoutColors.tempo,
+  INTERVAL: workoutColors.interval,
+  LONG_RUN: workoutColors.longRun,
+  RECOVERY: workoutColors.recovery,
+  RACE: workoutColors.race,
+  CROSS_TRAINING: workoutColors.crossTraining,
+  REST: workoutColors.rest,
 };
 
 const statusVariant: Record<string, 'success' | 'warning' | 'error' | 'default'> = {

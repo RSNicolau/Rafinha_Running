@@ -20,7 +20,7 @@ export function StatCard({ icon, value, label, trend, style, compact = false }: 
       intensity="subtle"
       shadow="sm"
       padding={compact ? 14 : 18}
-      style={[{ alignItems: 'center' as any }, style]}
+      style={{ alignItems: 'center', ...style }}
     >
       {icon && (
         <View

@@ -83,7 +83,7 @@ export const lightTheme = {
   skeletonHighlight: palette.gray100,
 } as const;
 
-export const darkTheme: typeof lightTheme = {
+export const darkTheme = {
   primary: palette.red500,
   primaryDark: palette.red600,
   primaryLight: palette.red400,
@@ -150,7 +150,7 @@ export const hrZoneColors = {
   z5: palette.red500,
 } as const;
 
-export type ThemeColors = typeof lightTheme;
+export type ThemeColors = typeof lightTheme | typeof darkTheme;
 
 // Legacy compatibility
 export const colors = lightTheme;

@@ -402,10 +402,13 @@ export default function SubscriptionScreen() {
               <GlassCard
                 intensity={plan.popular ? 'strong' : 'medium'}
                 shadow={plan.popular ? 'lg' : 'md'}
-                style={[
-                  plan.popular && { borderWidth: 1, borderColor: colors.primary + '40' },
-                  isCurrentPlan && { borderWidth: 1, borderColor: colors.success + '40' },
-                ]}
+                style={
+                  plan.popular
+                    ? { borderWidth: 1, borderColor: colors.primary + '40' }
+                    : isCurrentPlan
+                    ? { borderWidth: 1, borderColor: colors.success + '40' }
+                    : undefined
+                }
               >
                 {/* Plan Header */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }}>
@@ -500,10 +503,10 @@ export default function SubscriptionScreen() {
                   <View style={{
                     marginTop: 12,
                     padding: 12,
-                    backgroundColor: (colors.surface ?? colors.background) + '80',
+                    backgroundColor: colors.surface + '80',
                     borderRadius: 12,
                     borderWidth: 1,
-                    borderColor: colors.border ?? '#E5E7EB',
+                    borderColor: colors.border,
                   }}>
                     <Text style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 8 }}>
                       Token gerado pelo Pagar.me.js no frontend

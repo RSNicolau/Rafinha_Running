@@ -55,7 +55,7 @@ function LoginContent() {
         const meRes = await api.get('/users/me');
         const role = meRes.data?.role;
         if (role === 'SUPER_ADMIN') { router.replace('/super-admin'); return; }
-        if (role === 'ADMIN') { router.replace('/dashboard'); return; }
+        if (role === 'ADMIN') { router.replace('/dashboard/admin/plans'); return; }
         const { data } = await api.get('/subscriptions/current');
         router.replace(getSubscriptionRoute(data?.status));
       } catch (err: any) {

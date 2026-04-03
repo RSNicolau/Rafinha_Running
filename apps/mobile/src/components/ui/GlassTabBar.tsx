@@ -38,7 +38,7 @@ export function GlassTabBar({ state, descriptors, navigation }: BottomTabBarProp
           const { options } = descriptors[route.key];
           const isFocused = state.index === index;
 
-          if (options.href === null) return null;
+          if ((options as any).href === null) return null;
 
           const label = options.tabBarLabel ?? options.title ?? route.name;
           const icon = options.tabBarIcon;
