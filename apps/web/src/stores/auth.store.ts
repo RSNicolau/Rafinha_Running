@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api } from '@/lib/api';
+import { setAuthCookie, clearAuthCookie } from '../lib/auth-cookie';
 
 interface User {
   id: string;
@@ -36,6 +37,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         localStorage.setItem('rr_refresh_token', data.refreshToken);
       }
       localStorage.setItem('rr_user', JSON.stringify(data.user));
+      setAuthCookie(data.accessToken);
       set({ user: data.user, isAuthenticated: true, isLoading: false });
     } catch (err: any) {
       const message = err.response?.data?.message || 'Credenciais inválidas';
@@ -48,6 +50,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     localStorage.removeItem('rr_access_token');
     localStorage.removeItem('rr_refresh_token');
     localStorage.removeItem('rr_user');
+    clearAuthCookie();
     set({ user: null, isAuthenticated: false, isLoading: false });
     window.location.href = '/login';
   },

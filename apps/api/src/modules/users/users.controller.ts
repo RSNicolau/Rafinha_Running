@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Body, Param, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Put, Post, Body, Param, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
@@ -42,8 +42,12 @@ export class UsersController {
   @Get('athletes')
   @Roles(UserRole.COACH)
   @ApiOperation({ summary: 'Listar atletas do treinador' })
-  async getAthletes(@CurrentUser('id') coachId: string) {
-    return this.usersService.getCoachAthletes(coachId);
+  async getAthletes(
+    @CurrentUser('id') coachId: string,
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+  ) {
+    return this.usersService.getCoachAthletes(coachId, +page, +limit);
   }
 
   @Get('athletes/alerts')

@@ -201,10 +201,12 @@ export class AuthService {
     const token = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
+    const tokenHash = await bcrypt.hash(token, 10);
+
     await this.prisma.appConfig.upsert({
       where: { key: `password_reset:${user.id}` },
-      create: { key: `password_reset:${user.id}`, value: { token, expiresAt } },
-      update: { value: { token, expiresAt } },
+      create: { key: `password_reset:${user.id}`, value: { tokenHash, expiresAt } },
+      update: { value: { tokenHash, expiresAt } },
     });
 
     this.logger.log(`Password reset token generated for ${email}`);
@@ -229,11 +231,13 @@ export class AuthService {
     });
     if (!record) throw new BadRequestException('Token inválido ou expirado');
 
-    const { token: storedToken, expiresAt } = record.value as any;
-    if (storedToken !== token || new Date() > new Date(expiresAt)) {
+    const { tokenHash, expiresAt } = record.value as any;
+    if (new Date() > new Date(expiresAt)) {
       await this.prisma.appConfig.delete({ where: { key: `password_reset:${user.id}` } }).catch(() => {});
       throw new BadRequestException('Token inválido ou expirado');
     }
+    const isValid = await bcrypt.compare(token, tokenHash);
+    if (!isValid) throw new BadRequestException('Token inválido ou expirado');
 
     if (newPassword.length < 8) {
       throw new BadRequestException('A senha deve ter no mínimo 8 caracteres');

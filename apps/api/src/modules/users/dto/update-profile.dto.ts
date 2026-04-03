@@ -40,6 +40,10 @@ export class UpdateProfileDto {
   @IsString() @IsOptional()
   avatarUrl?: string;
 
+  @ApiPropertyOptional({ example: 'America/Sao_Paulo' })
+  @IsString() @IsOptional()
+  timezone?: string;
+
   @ApiPropertyOptional({ type: UpdateAthleteProfileDto })
   @IsOptional()
   athleteProfile?: UpdateAthleteProfileDto;

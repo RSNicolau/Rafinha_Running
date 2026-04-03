@@ -41,18 +41,26 @@ export class TrainingPlansService {
     return plan;
   }
 
-  async findAll(userId: string, role: UserRole) {
+  async findAll(userId: string, role: UserRole, page = 1, limit = 20) {
     const where = role === UserRole.COACH ? { coachId: userId } : { athleteId: userId };
+    const skip = (page - 1) * limit;
 
-    return this.prisma.trainingPlan.findMany({
-      where,
-      include: {
-        athlete: { select: { id: true, name: true, avatarUrl: true } },
-        coach: { select: { id: true, name: true } },
-        _count: { select: { workouts: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const [data, total] = await Promise.all([
+      this.prisma.trainingPlan.findMany({
+        where,
+        include: {
+          athlete: { select: { id: true, name: true, avatarUrl: true } },
+          coach: { select: { id: true, name: true } },
+          _count: { select: { workouts: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.trainingPlan.count({ where }),
+    ]);
+
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async findById(id: string, userId: string, role: UserRole) {

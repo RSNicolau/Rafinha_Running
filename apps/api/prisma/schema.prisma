@@ -144,6 +144,7 @@ model User {
   phone        String?
   dateOfBirth  DateTime? @map("date_of_birth")
   isActive     Boolean   @default(true) @map("is_active")
+  timezone     String    @default("America/Sao_Paulo") @map("timezone")
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
@@ -270,6 +271,7 @@ model Workout {
   @@index([athleteId, status])
   @@index([planId])
   @@index([type])
+  @@index([completedAt])
   @@map("workouts")
 }
 
@@ -293,6 +295,7 @@ model WorkoutResult {
   workout Workout @relation(fields: [workoutId], references: [id], onDelete: Cascade)
 
   @@index([externalId])
+  @@index([createdAt])
   @@map("workout_results")
 }
 
@@ -314,6 +317,7 @@ model FitnessIntegration {
   @@unique([userId, provider])
   @@index([isActive])
   @@index([provider])
+  @@index([expiresAt])
   @@map("fitness_integrations")
 }
 
@@ -365,6 +369,7 @@ model Payment {
   @@index([userId])
   @@index([status])
   @@index([subscriptionId])
+  @@index([paidAt])
   @@map("payments")
 }
 
@@ -399,6 +404,7 @@ model Message {
   sender       User         @relation("MessageSender", fields: [senderId], references: [id])
 
   @@index([conversationId, createdAt])
+  @@index([senderId])
   @@map("messages")
 }
 

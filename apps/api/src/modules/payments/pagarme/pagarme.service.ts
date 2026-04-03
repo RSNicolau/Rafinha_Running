@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import * as crypto from 'crypto';
+import * as Sentry from '@sentry/nestjs';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PaymentStatus, SubscriptionStatus } from '@prisma/client';
 
@@ -279,6 +280,7 @@ export class PagarmeService {
 
       this.logger.log(`Pagamento Pagar.me confirmado: ${payment.id} (order: ${order.id})`);
     } catch (err: any) {
+      Sentry.captureException(err, { extra: { orderId: order?.id } });
       this.logger.error(`Erro ao processar order.paid Pagar.me: ${err.message}`);
     }
   }
@@ -287,10 +289,18 @@ export class PagarmeService {
     if (!order?.id) return;
 
     try {
+      const payment = await this.prisma.payment.findFirst({
+        where: { externalPaymentId: order.id },
+      });
+
       await this.prisma.payment.updateMany({
         where: { externalPaymentId: order.id },
         data: { status: PaymentStatus.FAILED },
       });
+
+      if (payment) {
+        Sentry.captureMessage(`Pagamento falhou: order=${order.id} user=${payment.userId}`, 'warning');
+      }
     } catch (err: any) {
       this.logger.error(`Erro ao processar order.payment_failed Pagar.me: ${err.message}`);
     }

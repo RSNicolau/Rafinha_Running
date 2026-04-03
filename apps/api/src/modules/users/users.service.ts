@@ -45,6 +45,7 @@ export class UsersService {
         name: dto.name,
         phone: dto.phone,
         avatarUrl: dto.avatarUrl,
+        timezone: dto.timezone,
         ...(dto.athleteProfile && {
           athleteProfile: { update: dto.athleteProfile },
         }),
@@ -56,13 +57,21 @@ export class UsersService {
     });
   }
 
-  async getCoachAthletes(coachId: string) {
-    return this.prisma.athleteProfile.findMany({
-      where: { coachId },
-      include: {
-        user: { select: { id: true, name: true, email: true, avatarUrl: true } },
-      },
-    });
+  async getCoachAthletes(coachId: string, page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+    const [athletes, total] = await Promise.all([
+      this.prisma.athleteProfile.findMany({
+        where: { coachId },
+        include: {
+          user: { select: { id: true, name: true, email: true, avatarUrl: true } },
+        },
+        skip,
+        take: limit,
+      }),
+      this.prisma.athleteProfile.count({ where: { coachId } }),
+    ]);
+
+    return { data: athletes, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async addAthleteByEmail(coachId: string, email: string) {

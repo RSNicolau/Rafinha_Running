@@ -17,6 +17,7 @@ import { AiTrainingModule } from './modules/ai-training/ai-training.module';
 import { BrandingModule } from './modules/branding/branding.module';
 import { InvitesModule } from './modules/invites/invites.module';
 import { NutritionModule } from './modules/nutrition/nutrition.module';
+import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { NutritionModule } from './modules/nutrition/nutrition.module';
     BrandingModule,
     InvitesModule,
     NutritionModule,
+    HealthModule,
   ],
 })
 export class AppModule {}

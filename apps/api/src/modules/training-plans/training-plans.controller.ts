@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
@@ -24,8 +24,13 @@ export class TrainingPlansController {
 
   @Get()
   @ApiOperation({ summary: 'Listar planos de treino' })
-  async findAll(@CurrentUser('id') userId: string, @CurrentUser('role') role: UserRole) {
-    return this.plansService.findAll(userId, role);
+  async findAll(
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: UserRole,
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+  ) {
+    return this.plansService.findAll(userId, role, +page, +limit);
   }
 
   @Get(':id')

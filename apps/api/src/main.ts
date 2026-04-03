@@ -1,4 +1,6 @@
+import './instrument';
 import { NestFactory } from '@nestjs/core';
+import { CorrelationIdInterceptor } from './common/interceptors/correlation-id.interceptor';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
@@ -34,6 +36,8 @@ async function bootstrap() {
   });
 
   app.setGlobalPrefix('api');
+
+  app.useGlobalInterceptors(new CorrelationIdInterceptor());
 
   app.useGlobalPipes(
     new ValidationPipe({

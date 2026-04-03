@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole, SubscriptionStatus, WorkoutStatus } from '@prisma/client';
 
@@ -81,8 +81,22 @@ export class AdminService {
   }
 
   async hardDeleteUser(id: string) {
-    await this.prisma.user.delete({ where: { id } });
-    return { success: true };
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+
+    // Soft delete: deactivate instead of hard delete to preserve FK integrity
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id },
+        data: { isActive: false },
+      }),
+      this.prisma.subscription.updateMany({
+        where: { userId: id },
+        data: { status: 'CANCELED' as any },
+      }),
+    ]);
+
+    return { message: 'Usuário desativado com sucesso' };
   }
 
   async updateUserRole(id: string, role: UserRole) {
