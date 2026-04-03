@@ -102,9 +102,8 @@ describe('Training Plans & Workouts E2E', () => {
           title: 'Corrida Fácil E2E',
           type: 'EASY_RUN',
           scheduledDate: scheduledDate.toISOString(),
-          durationMinutes: 45,
-          distanceKm: 8,
-          notes: 'Test workout',
+          targetDurationSeconds: 2700,
+          targetDistanceMeters: 8000,
         })
         .expect(201);
 
@@ -120,18 +119,16 @@ describe('Training Plans & Workouts E2E', () => {
         .post(`/api/workouts/${workoutId}/result`)
         .set('Authorization', `Bearer ${athleteToken}`)
         .send({
-          completedAt: new Date().toISOString(),
-          durationMinutes: 48,
           distanceMeters: 8200,
-          averagePace: 350,
-          heartRateAvg: 148,
-          feeling: 4,
-          notes: 'Treino ótimo!',
+          durationSeconds: 2880,
+          avgPace: '5:52',
+          avgHeartRate: 148,
+          calories: 520,
         })
         .expect(201);
 
       expect(res.body).toHaveProperty('id');
-      expect(res.body.durationMinutes).toBe(48);
+      expect(res.body.durationSeconds).toBe(2880);
     });
 
     it('should update workout status to COMPLETED', async () => {

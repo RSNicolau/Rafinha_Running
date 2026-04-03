@@ -1,36 +1,37 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
 import { NutritionService } from './nutrition.service';
 import { CreateMealDto, UpdateWaterDto } from './dto/nutrition.dto';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('nutrition')
-@UseGuards(JwtAuthGuard)
+@UseGuards(AuthGuard('jwt'))
 export class NutritionController {
   constructor(private readonly nutritionService: NutritionService) {}
 
   @Get('day')
-  getDaySummary(@Request() req: any, @Query('date') date: string) {
+  getDaySummary(@CurrentUser('id') userId: string, @Query('date') date: string) {
     const today = new Date().toISOString().slice(0, 10);
-    return this.nutritionService.getDaySummary(req.user.sub, date || today);
+    return this.nutritionService.getDaySummary(userId, date || today);
   }
 
   @Get('week')
-  getWeekHistory(@Request() req: any) {
-    return this.nutritionService.getWeekHistory(req.user.sub);
+  getWeekHistory(@CurrentUser('id') userId: string) {
+    return this.nutritionService.getWeekHistory(userId);
   }
 
   @Post('meal')
-  logMeal(@Request() req: any, @Body() dto: CreateMealDto) {
-    return this.nutritionService.logMeal(req.user.sub, dto);
+  logMeal(@CurrentUser('id') userId: string, @Body() dto: CreateMealDto) {
+    return this.nutritionService.logMeal(userId, dto);
   }
 
   @Delete('meal/:id')
-  deleteMeal(@Request() req: any, @Param('id') id: string) {
-    return this.nutritionService.deleteMeal(req.user.sub, id);
+  deleteMeal(@CurrentUser('id') userId: string, @Param('id') id: string) {
+    return this.nutritionService.deleteMeal(userId, id);
   }
 
   @Post('water')
-  updateWater(@Request() req: any, @Body() dto: UpdateWaterDto) {
-    return this.nutritionService.updateWater(req.user.sub, dto);
+  updateWater(@CurrentUser('id') userId: string, @Body() dto: UpdateWaterDto) {
+    return this.nutritionService.updateWater(userId, dto);
   }
 }
