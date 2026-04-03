@@ -1,0 +1,8 @@
+[build]
+builder = "nixpacks"
+buildCommand = "cd apps/mobile && pnpm install --filter @rr/mobile"
+
+[deploy]
+startCommand = "cd apps/mobile && npx expo start --web --port ${PORT:-8081} --non-interactive"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
