@@ -4,6 +4,7 @@ import {
   Logger, NotFoundException,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiParam } from '@nestjs/swagger';
 import { Request } from 'express';
 import { PaymentsService } from './payments.service';
@@ -276,6 +277,8 @@ export class PaymentsController {
 
   @Post('payments/webhook')
   @HttpCode(HttpStatus.OK)
+  @SkipThrottle()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Webhook Pagar.me v5 (sem autenticação JWT, verificação HMAC-SHA256)' })
   async pagarmeWebhook(
     @Req() req: RawBodyRequest<Request>,
