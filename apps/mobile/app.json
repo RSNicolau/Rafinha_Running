@@ -47,8 +47,7 @@
             "deploymentTarget": "16.0"
           }
         }
-      ],
-      "./plugins/withRNHealthSwiftFix"
+      ]
     ],
     "newArchEnabled": false,
     "experiments": {
