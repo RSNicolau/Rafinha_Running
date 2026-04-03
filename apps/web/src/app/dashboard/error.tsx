@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import * as Sentry from '@sentry/nextjs';
 
 export default function DashboardError({
   error,
@@ -10,8 +11,7 @@ export default function DashboardError({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Log the error to console (replace with Sentry when available)
-    console.error('[Dashboard Error]', error);
+    Sentry.captureException(error, { tags: { section: 'dashboard' } });
   }, [error]);
 
   return (
@@ -22,9 +22,13 @@ export default function DashboardError({
         </svg>
       </div>
       <h2 className="text-lg font-bold text-gray-900 mb-2">Algo deu errado</h2>
-      <p className="text-sm text-gray-500 mb-6 max-w-sm">
-        Ocorreu um erro inesperado nesta página. Se o problema persistir, entre em contato com o suporte.
+      <p className="text-sm text-gray-500 mb-1 max-w-sm">
+        Ocorreu um erro inesperado nesta página.
       </p>
+      {error.digest && (
+        <p className="text-xs text-gray-400 mb-5 font-mono">Ref: {error.digest}</p>
+      )}
+      {!error.digest && <div className="mb-5" />}
       <button
         onClick={reset}
         className="px-5 py-2.5 rounded-xl bg-primary hover:bg-red-700 text-white text-sm font-medium transition"

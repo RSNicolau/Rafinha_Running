@@ -1,10 +1,22 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { View, Platform } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
+import * as Sentry from '@sentry/react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStore } from '../src/stores/auth.store';
 import { OfflineIndicator } from '../src/components/ui/OfflineIndicator';
+
+// Keep splash screen visible while we initialise
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
+// Sentry — only active when DSN is provided via env
+Sentry.init({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
+  enabled: !!process.env.EXPO_PUBLIC_SENTRY_DSN,
+  tracesSampleRate: 0.2,
+});
 
 // Load Bebas Neue from Google Fonts on web
 if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -13,7 +25,6 @@ if (Platform.OS === 'web' && typeof document !== 'undefined') {
   link.href = 'https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap';
   document.head.appendChild(link);
 
-  // Fix browser autofill blue background on inputs
   const style = document.createElement('style');
   style.textContent = `
     input:-webkit-autofill,
@@ -39,17 +50,35 @@ const queryClient = new QueryClient({
   },
 });
 
-export default function RootLayout() {
+function RootLayout() {
   const loadStoredUser = useAuthStore((s) => s.loadStoredUser);
+  const [appReady, setAppReady] = React.useState(false);
 
   useEffect(() => {
-    loadStoredUser();
+    async function prepare() {
+      try {
+        await loadStoredUser();
+      } catch (e) {
+        Sentry.captureException(e);
+      } finally {
+        setAppReady(true);
+      }
+    }
+    prepare();
   }, []);
 
+  const onLayoutRootView = useCallback(async () => {
+    if (appReady) {
+      await SplashScreen.hideAsync();
+    }
+  }, [appReady]);
+
+  if (!appReady) return null;
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <StatusBar style="dark" />
-      <View style={{ flex: 1 }}>
+    <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
+      <QueryClientProvider client={queryClient}>
+        <StatusBar style="dark" />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(athlete)" />
@@ -57,7 +86,9 @@ export default function RootLayout() {
           <Stack.Screen name="(admin)" />
         </Stack>
         <OfflineIndicator />
-      </View>
-    </QueryClientProvider>
+      </QueryClientProvider>
+    </View>
   );
 }
+
+export default Sentry.wrap(RootLayout);

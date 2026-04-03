@@ -3,8 +3,25 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/lib/api';
+
+interface FieldErrors {
+  name?: string;
+  email?: string;
+  password?: string;
+}
+
+function validateRegisterForm(name: string, email: string, password: string): FieldErrors | null {
+  const errors: FieldErrors = {};
+  if (!name.trim() || name.trim().length < 2) errors.name = 'Nome deve ter no mínimo 2 caracteres';
+  if (!email.trim()) errors.email = 'E-mail é obrigatório';
+  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = 'E-mail inválido';
+  if (!password) errors.password = 'Senha é obrigatória';
+  else if (password.length < 6) errors.password = 'Senha deve ter no mínimo 6 caracteres';
+  return Object.keys(errors).length > 0 ? errors : null;
+}
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -14,20 +31,29 @@ export default function RegisterPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   useEffect(() => { loadUser(); }, []);
   useEffect(() => { if (isAuthenticated) router.replace('/dashboard'); }, [isAuthenticated]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    setFieldErrors({});
+
+    const errors = validateRegisterForm(name, email, password);
+    if (errors) {
+      setFieldErrors(errors);
+      return;
+    }
+
     setLoading(true);
     try {
-      await api.post('/auth/register', { name, email, password, role: 'COACH' });
+      await api.post('/auth/register', { name: name.trim(), email, password, role: 'COACH' });
+      toast.success('Conta criada com sucesso!');
       router.replace('/login?registered=1');
     } catch (err: any) {
-      setError(err?.response?.data?.message ?? 'Erro ao criar conta. Tente novamente.');
+      const msg = err?.response?.data?.message ?? 'Erro ao criar conta. Tente novamente.';
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -55,37 +81,30 @@ export default function RegisterPage() {
           <h2 className="text-xl font-semibold text-gray-900 mb-1">Criar conta</h2>
           <p className="text-sm text-gray-500 mb-6">Comece a gerenciar sua assessoria</p>
 
-          {error && (
-            <div className="flex items-center gap-2 p-3.5 rounded-xl bg-red-50 mb-5">
-              <svg className="w-4 h-4 text-red-500 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-              </svg>
-              <span className="text-sm font-medium text-red-600">{error}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">Nome completo</label>
               <input
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => { setName(e.target.value); setFieldErrors(p => ({ ...p, name: undefined })); }}
                 placeholder="Seu nome"
-                className="w-full px-4 py-3 rounded-xl bg-gray-50/80 border border-gray-200/60 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
-                required
+                className={`w-full px-4 py-3 rounded-xl bg-gray-50/80 border text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition ${fieldErrors.name ? 'border-red-400 bg-red-50/40' : 'border-gray-200/60'}`}
+                autoComplete="name"
               />
+              {fieldErrors.name && <p className="mt-1 text-xs text-red-500">{fieldErrors.name}</p>}
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">E-mail</label>
               <input
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => { setEmail(e.target.value); setFieldErrors(p => ({ ...p, email: undefined })); }}
                 placeholder="seu@email.com"
-                className="w-full px-4 py-3 rounded-xl bg-gray-50/80 border border-gray-200/60 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
-                required
+                className={`w-full px-4 py-3 rounded-xl bg-gray-50/80 border text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition ${fieldErrors.email ? 'border-red-400 bg-red-50/40' : 'border-gray-200/60'}`}
+                autoComplete="email"
               />
+              {fieldErrors.email && <p className="mt-1 text-xs text-red-500">{fieldErrors.email}</p>}
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">Senha</label>
@@ -93,11 +112,10 @@ export default function RegisterPage() {
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => { setPassword(e.target.value); setFieldErrors(p => ({ ...p, password: undefined })); }}
                   placeholder="Mínimo 6 caracteres"
-                  className="w-full px-4 py-3 rounded-xl bg-gray-50/80 border border-gray-200/60 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition pr-12"
-                  required
-                  minLength={6}
+                  className={`w-full px-4 py-3 rounded-xl bg-gray-50/80 border text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition pr-12 ${fieldErrors.password ? 'border-red-400 bg-red-50/40' : 'border-gray-200/60'}`}
+                  autoComplete="new-password"
                 />
                 <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -112,6 +130,7 @@ export default function RegisterPage() {
                   </svg>
                 </button>
               </div>
+              {fieldErrors.password && <p className="mt-1 text-xs text-red-500">{fieldErrors.password}</p>}
             </div>
 
             <button

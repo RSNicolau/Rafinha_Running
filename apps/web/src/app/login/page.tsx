@@ -2,11 +2,20 @@
 
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/lib/api';
 
 function getSubscriptionRoute(status: string | undefined): string {
   return status === 'ACTIVE' || status === 'TRIALING' ? '/dashboard' : '/subscribe';
+}
+
+function validateLoginForm(email: string, password: string): string | null {
+  if (!email.trim()) return 'E-mail é obrigatório';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'E-mail inválido';
+  if (!password) return 'Senha é obrigatória';
+  if (password.length < 6) return 'Senha deve ter no mínimo 6 caracteres';
+  return null;
 }
 
 function LoginContent() {
@@ -17,10 +26,17 @@ function LoginContent() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
 
   useEffect(() => {
     loadUser();
   }, []);
+
+  useEffect(() => {
+    if (justRegistered) {
+      toast.success('Conta criada com sucesso! Faça login para continuar.');
+    }
+  }, [justRegistered]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -37,7 +53,6 @@ function LoginContent() {
             });
         })
         .catch(() => {
-          // me endpoint failed — just check subscription as fallback
           api.get('/subscriptions/current')
             .then(({ data }) => router.replace(getSubscriptionRoute(data?.status)))
             .catch(() => {});
@@ -48,9 +63,17 @@ function LoginContent() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     clearError();
+    setFieldErrors({});
+
+    const validationError = validateLoginForm(email, password);
+    if (validationError) {
+      if (validationError.includes('E-mail')) setFieldErrors({ email: validationError });
+      else setFieldErrors({ password: validationError });
+      return;
+    }
+
     try {
       await login(email, password);
-      // Check subscription before granting access
       try {
         const meRes = await api.get('/users/me');
         const role = meRes.data?.role;
@@ -59,21 +82,20 @@ function LoginContent() {
         const { data } = await api.get('/subscriptions/current');
         router.replace(getSubscriptionRoute(data?.status));
       } catch (err: any) {
-        // Distinguish "no subscription" (200 NONE) from API failure
         if (err?.response?.status === 404 || err?.response?.status === 400) {
           router.replace('/subscribe');
         } else {
-          // API failure: grant dashboard access anyway — subscription check is non-blocking
           router.replace('/dashboard');
         }
       }
-    } catch {}
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? 'E-mail ou senha incorretos');
+    }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center px-5 py-8" style={{ background: 'linear-gradient(to bottom, #FEE2E2 0%, #F2F2F7 55%)' }}>
       <div className="w-full max-w-[420px]">
-        {/* SVG color matrix: maps logo red rgb(222,59,46) → #DC2626 rgb(220,38,38), white stays white */}
         <svg width="0" height="0" style={{ position: 'absolute' }}>
           <defs>
             <filter id="logo-red-fix" colorInterpolationFilters="sRGB">
@@ -81,7 +103,6 @@ function LoginContent() {
             </filter>
           </defs>
         </svg>
-        {/* Logo */}
         <div className="text-center mb-10">
           <div className="w-40 sm:w-52 mx-auto mb-5 rounded-2xl overflow-hidden shadow-lg">
             <img
@@ -94,18 +115,8 @@ function LoginContent() {
           <p className="text-sm text-gray-500 font-medium">Painel do Treinador</p>
         </div>
 
-        {/* Login Card */}
         <div className="glass-card p-6 sm:p-8">
           <h2 className="text-xl font-semibold text-gray-900 mb-6">Bem-vindo de volta</h2>
-
-          {justRegistered && (
-            <div className="flex items-center gap-2 p-3.5 rounded-xl bg-green-50 mb-5">
-              <svg className="w-4 h-4 text-green-600 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-              </svg>
-              <span className="text-sm font-medium text-green-700">Conta criada com sucesso! Faça login para continuar.</span>
-            </div>
-          )}
 
           {error && (
             <div className="flex items-center gap-2 p-3.5 rounded-xl bg-red-50 mb-5">
@@ -116,7 +127,7 @@ function LoginContent() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">
                 E-mail
@@ -124,11 +135,12 @@ function LoginContent() {
               <input
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => { setEmail(e.target.value); setFieldErrors(p => ({ ...p, email: undefined })); }}
                 placeholder="seu@email.com"
-                className="w-full px-4 py-3 rounded-xl bg-gray-50/80 border border-gray-200/60 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
-                required
+                className={`w-full px-4 py-3 rounded-xl bg-gray-50/80 border text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition ${fieldErrors.email ? 'border-red-400 bg-red-50/40' : 'border-gray-200/60'}`}
+                autoComplete="email"
               />
+              {fieldErrors.email && <p className="mt-1 text-xs text-red-500">{fieldErrors.email}</p>}
             </div>
 
             <div>
@@ -139,10 +151,10 @@ function LoginContent() {
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => { setPassword(e.target.value); setFieldErrors(p => ({ ...p, password: undefined })); }}
                   placeholder="••••••••"
-                  className="w-full px-4 py-3 rounded-xl bg-gray-50/80 border border-gray-200/60 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition pr-12"
-                  required
+                  className={`w-full px-4 py-3 rounded-xl bg-gray-50/80 border text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition pr-12 ${fieldErrors.password ? 'border-red-400 bg-red-50/40' : 'border-gray-200/60'}`}
+                  autoComplete="current-password"
                 />
                 <button
                   type="button"
@@ -161,6 +173,7 @@ function LoginContent() {
                   </svg>
                 </button>
               </div>
+              {fieldErrors.password && <p className="mt-1 text-xs text-red-500">{fieldErrors.password}</p>}
             </div>
 
             <button
