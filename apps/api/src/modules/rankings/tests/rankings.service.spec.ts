@@ -1,6 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { RankingsService } from '../rankings.service';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { CacheService } from '../../cache/cache.service';
+
+const mockCache = {
+  get: jest.fn().mockResolvedValue(null),
+  set: jest.fn().mockResolvedValue(undefined),
+};
 
 const mockRawKmResult = [
   { user_id: 'user-1', name: 'João Silva', avatar_url: null, total_meters: BigInt(52000) },
@@ -27,6 +33,7 @@ describe('RankingsService', () => {
       providers: [
         RankingsService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: CacheService, useValue: mockCache },
       ],
     }).compile();
 

@@ -2,12 +2,22 @@ import { create } from 'zustand';
 import { api } from '@/lib/api';
 import { setAuthCookie, clearAuthCookie } from '../lib/auth-cookie';
 
-interface User {
+export interface UserBranding {
+  logoUrl?: string | null;
+  bannerUrl?: string | null;
+  primaryColor?: string;
+  secondaryColor?: string;
+  tenantName?: string;
+  niche?: string;
+}
+
+export interface User {
   id: string;
   email: string;
   name: string;
   role: string;
   avatarUrl?: string;
+  branding?: UserBranding;
 }
 
 interface AuthState {

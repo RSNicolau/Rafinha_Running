@@ -7,9 +7,31 @@ import helmet from 'helmet';
 import * as express from 'express';
 import { AppModule } from './app.module';
 
+function validateEnv(): void {
+  const required = [
+    'JWT_SECRET',
+    'JWT_REFRESH_SECRET',
+    'DATABASE_URL',
+  ];
+  const missing = required.filter((k) => !process.env[k]);
+  if (missing.length) {
+    throw new Error(`Missing required env variables: ${missing.join(', ')}`);
+  }
+
+  // Warn (not crash) for optional-but-important vars
+  const recommended = [
+    'PAGARME_API_KEY',
+    'PAGARME_WEBHOOK_SECRET',
+    'SENTRY_DSN',
+  ];
+  const absent = recommended.filter((k) => !process.env[k]);
+  if (absent.length) {
+    console.warn(`[startup] WARNING — optional env vars not set: ${absent.join(', ')}`);
+  }
+}
+
 async function bootstrap() {
-  if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET env variable is required');
-  if (!process.env.JWT_REFRESH_SECRET) throw new Error('JWT_REFRESH_SECRET env variable is required');
+  validateEnv();
 
   const app = await NestFactory.create(AppModule, { rawBody: true });
 

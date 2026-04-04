@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsInt, IsDateString, IsEnum, IsUUID, IsNumber, IsArray, Min } from 'class-validator';
+import { IsString, IsOptional, IsInt, IsDateString, IsEnum, IsUUID, IsNumber, IsArray, Min, Max, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { WorkoutType, HeartRateZone, WorkoutSource } from '@prisma/client';
 
@@ -60,4 +60,18 @@ export class SubmitResultDto {
 
   @ApiPropertyOptional() @IsArray() @IsOptional()
   splits?: { kilometer: number; durationSeconds: number; pace: string; heartRate?: number }[];
+}
+
+export class SubmitFeedbackDto {
+  @ApiPropertyOptional({ example: 7, description: 'Esforço percebido 1-10 (RPE)' })
+  @IsInt() @Min(1) @Max(10) @IsOptional()
+  rpe?: number;
+
+  @ApiPropertyOptional({ example: 4, description: 'Sensação geral 1-5 (1=péssimo, 5=ótimo)' })
+  @IsInt() @Min(1) @Max(5) @IsOptional()
+  sensationScore?: number;
+
+  @ApiPropertyOptional({ example: 'Perna pesada, mas consegui completar' })
+  @IsString() @MaxLength(500) @IsOptional()
+  athleteFeedback?: string;
 }

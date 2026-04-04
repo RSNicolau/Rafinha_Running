@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { CreateWorkoutDto, SubmitResultDto } from './dto/workout.dto';
+import { CreateWorkoutDto, SubmitResultDto, SubmitFeedbackDto } from './dto/workout.dto';
 import { WorkoutStatus, NotificationType } from '@prisma/client';
 
 @Injectable()
@@ -200,13 +200,79 @@ export class WorkoutsService {
   }) {
     const externalId = `apple_health_${data.id}`;
 
-    // Idempotency: skip if already synced (externalId is on WorkoutResult)
-    const existingResult = await this.prisma.workoutResult.findFirst({
-      where: { externalId },
-    });
+    // Idempotency: skip if already synced
+    const existingResult = await this.prisma.workoutResult.findFirst({ where: { externalId } });
     if (existingResult) return { status: 'already_synced', workoutId: existingResult.workoutId };
 
-    // Apple Health workouts need a plan — find the athlete's most recent plan
+    const distanceMeters = Math.round(data.distanceKm * 1000);
+    const durationSeconds = Math.round(data.durationMinutes * 60);
+
+    // Calculate pace (mm:ss / km)
+    let avgPace: string | null = null;
+    if (data.averagePaceMinPerKm) {
+      const mins = Math.floor(data.averagePaceMinPerKm);
+      const secs = Math.round((data.averagePaceMinPerKm - mins) * 60);
+      avgPace = `${mins}:${secs.toString().padStart(2, '0')}`;
+    } else if (distanceMeters > 0 && durationSeconds > 0) {
+      const paceSecPerKm = (durationSeconds / distanceMeters) * 1000;
+      const mins = Math.floor(paceSecPerKm / 60);
+      const secs = Math.round(paceSecPerKm % 60);
+      avgPace = `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // Try to match an existing scheduled workout for this day and distance (±15%)
+    const startDate = new Date(data.startDate);
+    const startOfDay = new Date(startDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(startDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const matchedWorkout = await this.prisma.workout.findFirst({
+      where: {
+        athleteId,
+        scheduledDate: { gte: startOfDay, lte: endOfDay },
+        status: 'SCHEDULED',
+        ...(distanceMeters > 0 && {
+          targetDistanceMeters: {
+            gte: Math.round(distanceMeters * 0.85),
+            lte: Math.round(distanceMeters * 1.15),
+          },
+        }),
+      },
+    });
+
+    if (matchedWorkout) {
+      // Link the Apple Health result to the scheduled workout
+      await this.prisma.workoutResult.upsert({
+        where: { workoutId: matchedWorkout.id },
+        create: {
+          workoutId: matchedWorkout.id,
+          source: 'APPLE_HEALTH',
+          externalId,
+          distanceMeters,
+          durationSeconds,
+          avgPace,
+          avgHeartRate: data.averageHeartRate ?? null,
+          calories: data.calories ?? null,
+        },
+        update: {
+          source: 'APPLE_HEALTH',
+          externalId,
+          distanceMeters,
+          durationSeconds,
+          avgPace,
+          avgHeartRate: data.averageHeartRate ?? null,
+          calories: data.calories ?? null,
+        },
+      });
+      await this.prisma.workout.update({
+        where: { id: matchedWorkout.id },
+        data: { status: 'COMPLETED', completedAt: startDate },
+      });
+      return { status: 'synced', workoutId: matchedWorkout.id, matched: true };
+    }
+
+    // No scheduled workout found — create a standalone entry under the most recent plan
     const plan = await this.prisma.trainingPlan.findFirst({
       where: { athleteId },
       orderBy: { createdAt: 'desc' },
@@ -219,15 +285,17 @@ export class WorkoutsService {
         planId: plan.id,
         type: 'EASY_RUN',
         title: `Corrida — Apple Health`,
-        description: `Sincronizado automaticamente via Apple Health (${data.type})`,
-        scheduledDate: new Date(data.startDate),
+        description: `Sincronizado via Apple Health (${data.type})`,
+        scheduledDate: startDate,
         completedAt: new Date(data.endDate),
         status: 'COMPLETED',
         result: {
           create: {
+            source: 'APPLE_HEALTH',
             externalId,
-            distanceMeters: Math.round(data.distanceKm * 1000),
-            durationSeconds: Math.round(data.durationMinutes * 60),
+            distanceMeters,
+            durationSeconds,
+            avgPace,
             avgHeartRate: data.averageHeartRate ?? null,
             calories: data.calories ?? null,
           },
@@ -235,6 +303,44 @@ export class WorkoutsService {
       },
     });
 
-    return { status: 'synced', workoutId: workout.id };
+    return { status: 'synced', workoutId: workout.id, matched: false };
+  }
+
+  async syncFromAppleHealthBatch(athleteId: string, workouts: Array<{
+    id: string; type: string; startDate: string; endDate: string;
+    durationMinutes: number; distanceKm: number; calories: number;
+    averageHeartRate?: number; averagePaceMinPerKm?: number; source: 'APPLE_HEALTH';
+  }>) {
+    let synced = 0;
+    let skipped = 0;
+    for (const w of workouts) {
+      const result = await this.syncFromAppleHealth(athleteId, w);
+      if (result.status === 'synced') synced++;
+      else skipped++;
+    }
+    return { synced, skipped };
+  }
+
+  async submitFeedback(workoutId: string, athleteId: string, dto: SubmitFeedbackDto) {
+    const workout = await this.prisma.workout.findUnique({ where: { id: workoutId } });
+    if (!workout) throw new NotFoundException('Treino não encontrado');
+    if (workout.athleteId !== athleteId) throw new ForbiddenException('Acesso negado');
+
+    return this.prisma.workoutResult.upsert({
+      where: { workoutId },
+      create: {
+        workoutId,
+        distanceMeters: 0,
+        durationSeconds: 0,
+        rpe: dto.rpe,
+        sensationScore: dto.sensationScore,
+        athleteFeedback: dto.athleteFeedback,
+      },
+      update: {
+        ...(dto.rpe !== undefined && { rpe: dto.rpe }),
+        ...(dto.sensationScore !== undefined && { sensationScore: dto.sensationScore }),
+        ...(dto.athleteFeedback !== undefined && { athleteFeedback: dto.athleteFeedback }),
+      },
+    });
   }
 }

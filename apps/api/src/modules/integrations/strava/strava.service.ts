@@ -161,6 +161,44 @@ export class StravaService {
   }
 
   /**
+   * Register the Strava webhook subscription with Strava's API.
+   * Safe to call multiple times — returns 'already_registered' if already set up.
+   */
+  async registerWebhook(callbackUrl: string): Promise<{ status: string; subscriptionId?: number; message?: string }> {
+    const verifyToken = process.env.STRAVA_WEBHOOK_VERIFY_TOKEN;
+    if (!this.clientId || !this.clientSecret) {
+      return { status: 'error', message: 'STRAVA_CLIENT_ID ou STRAVA_CLIENT_SECRET não configurados' };
+    }
+    if (!verifyToken) {
+      return { status: 'error', message: 'STRAVA_WEBHOOK_VERIFY_TOKEN não configurado' };
+    }
+
+    const res = await fetch('https://www.strava.com/api/v3/push_subscriptions', {
+      method: 'POST',
+      signal: AbortSignal.timeout(15000),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: this.clientId,
+        client_secret: this.clientSecret,
+        callback_url: callbackUrl,
+        verify_token: verifyToken,
+      }),
+    });
+
+    const data = await res.json() as any;
+
+    if (res.status === 201) {
+      this.logger.log(`Strava webhook registrado: subscriptionId=${data.id}`);
+      return { status: 'registered', subscriptionId: data.id };
+    }
+    if (res.status === 422) {
+      return { status: 'already_registered', message: 'Webhook já está registrado no Strava' };
+    }
+    this.logger.error(`Strava webhook registration failed: ${res.status} ${JSON.stringify(data)}`);
+    return { status: 'error', message: `Strava retornou ${res.status}: ${JSON.stringify(data)}` };
+  }
+
+  /**
    * Sync a single activity by ID (called from Strava webhook)
    */
   async syncSingleActivity(userId: string, integration: FitnessIntegration, activityId: string) {

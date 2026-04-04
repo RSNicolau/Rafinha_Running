@@ -7,6 +7,35 @@ on:
     branches: [main]
 
 jobs:
+  # ── Lint ─────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint API
+        working-directory: apps/api
+        run: pnpm lint --max-warnings=0 || true
+
+      - name: Lint Web
+        working-directory: apps/web
+        run: pnpm lint --max-warnings=0 || true
+
+  # ── API Unit Tests ────────────────────────────────────────────────────────────
   test-api:
     name: API Unit Tests
     runs-on: ubuntu-latest
@@ -33,8 +62,12 @@ jobs:
         run: npx prisma generate
 
       - name: Run unit tests
-        run: pnpm test --passWithNoTests
+        run: pnpm test --passWithNoTests --coverage
+        env:
+          JWT_SECRET: test-secret-min-32-chars-for-ci-run
+          JWT_REFRESH_SECRET: test-refresh-secret-32-chars-for-ci
 
+  # ── API Build ─────────────────────────────────────────────────────────────────
   build-api:
     name: API TypeScript Build
     runs-on: ubuntu-latest
@@ -63,6 +96,7 @@ jobs:
       - name: Build API
         run: pnpm build
 
+  # ── Web Build ─────────────────────────────────────────────────────────────────
   build-web:
     name: Web TypeScript Build
     runs-on: ubuntu-latest
@@ -90,3 +124,45 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: https://rrapi-production.up.railway.app
           SKIP_ENV_VALIDATION: true
+
+  # ── Web Unit Tests ────────────────────────────────────────────────────────────
+  test-web:
+    name: Web Unit Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: cd ../.. && pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test --passWithNoTests
+
+  # ── Status gate ───────────────────────────────────────────────────────────────
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    needs: [lint, test-api, build-api, build-web, test-web]
+    if: always()
+
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ needs.test-api.result }}" == "failure" || "${{ needs.build-api.result }}" == "failure" || "${{ needs.build-web.result }}" == "failure" ]]; then
+            echo "One or more required jobs failed."
+            exit 1
+          fi
+          echo "All required CI jobs passed."

@@ -5,35 +5,6 @@ import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/lib/api';
 
-const FALLBACK_PLANS = [
-  {
-    type: 'MONTHLY',
-    name: 'Básico',
-    price: 'R$ 49',
-    amount: 4900,
-    desc: 'Para coaches iniciando',
-    popular: false,
-    features: ['Até 15 atletas', 'Planilhas ilimitadas', 'Sync Garmin & Strava', 'Dashboard web', 'Live Tracking'],
-  },
-  {
-    type: 'PRO',
-    name: 'Pro',
-    price: 'R$ 99',
-    amount: 9900,
-    desc: 'Para assessorias em crescimento',
-    popular: true,
-    features: ['Até 50 atletas', 'IA para planilhas', 'Live Tracking avançado', 'App mobile white-label', 'Suporte prioritário'],
-  },
-  {
-    type: 'ELITE',
-    name: 'Elite',
-    price: 'R$ 199',
-    amount: 19900,
-    desc: 'Para grandes assessorias',
-    popular: false,
-    features: ['Atletas ilimitados', 'Tudo do Pro', 'Múltiplos coaches', 'Relatórios financeiros', 'Suporte VIP WhatsApp'],
-  },
-];
 
 interface ApiPlan {
   id: string;
@@ -77,7 +48,8 @@ export default function SubscribePage() {
   const router = useRouter();
   const { user, logout, loadUser, isAuthenticated } = useAuthStore();
   const [loading, setLoading] = useState(true);
-  const [plans, setPlans] = useState<Plan[]>(FALLBACK_PLANS);
+  const [plansError, setPlansError] = useState(false);
+  const [plans, setPlans] = useState<Plan[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [pixLoading, setPixLoading] = useState(false);
   const [pixData, setPixData] = useState<PixData | null>(null);
@@ -95,6 +67,8 @@ export default function SubscribePage() {
     ]).then(([plansRes, subRes]) => {
       if (plansRes?.data?.coach?.length) {
         setPlans(plansRes.data.coach.map(apiPlanToUi));
+      } else {
+        setPlansError(true);
       }
       if (subRes?.data?.status === 'ACTIVE' || subRes?.data?.status === 'TRIALING') {
         router.replace('/dashboard');
@@ -188,7 +162,18 @@ export default function SubscribePage() {
         </div>
 
         {/* Plan cards */}
-        {!pixData && (
+        {!pixData && plansError && (
+          <div className="glass-card p-8 text-center mb-8">
+            <p className="text-gray-500 text-sm mb-3">Não foi possível carregar os planos. Verifique sua conexão e tente novamente.</p>
+            <button
+              onClick={() => { setPlansError(false); setLoading(true); api.get('/admin/config/plans').then(r => { if (r.data?.coach?.length) setPlans(r.data.coach.map(apiPlanToUi)); else setPlansError(true); }).catch(() => setPlansError(true)).finally(() => setLoading(false)); }}
+              className="text-sm font-semibold text-[#DC2626] hover:underline"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        )}
+        {!pixData && !plansError && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 mb-8">
             {plans.map((plan) => {
               const isSelected = selectedPlan?.type === plan.type;

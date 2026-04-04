@@ -23,6 +23,12 @@ interface AthleteUser {
   };
 }
 
+interface WorkoutResult {
+  rpe?: number | null;
+  sensationScore?: number | null;
+  athleteFeedback?: string | null;
+}
+
 interface Workout {
   id: string;
   date: string;
@@ -32,6 +38,8 @@ interface Workout {
   pace?: number;     // sec/km
   source?: 'GPS' | 'Manual' | string;
   completed?: boolean;
+  status?: string;
+  result?: WorkoutResult | null;
 }
 
 interface WorkoutStats {
@@ -85,6 +93,14 @@ function formatDate(dateStr: string | undefined): string {
   } catch {
     return dateStr;
   }
+}
+
+const SENSATION_EMOJI: Record<number, string> = { 1: '😫', 2: '😕', 3: '😐', 4: '🙂', 5: '💪' };
+
+function rpeColor(rpe: number): string {
+  if (rpe >= 8) return 'bg-red-50 text-red-600';
+  if (rpe >= 6) return 'bg-amber-50 text-amber-600';
+  return 'bg-emerald-50 text-emerald-600';
 }
 
 function levelLabel(level: string | undefined): string {
@@ -223,6 +239,8 @@ export default function AthleteDetailPage() {
   const [plan, setPlan] = useState<TrainingPlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [pushingGarmin, setPushingGarmin] = useState(false);
+  const [garminPushMsg, setGarminPushMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -327,6 +345,15 @@ export default function AthleteDetailPage() {
   }
 
   const p = athlete.athleteProfile;
+
+  // Compute alerts from recent feedback
+  const recentWithFeedback = workouts.slice(0, 10).filter(w => w.result?.rpe != null);
+  const highRpeCount = recentWithFeedback.filter(w => (w.result?.rpe ?? 0) >= 8).length;
+  const badSensationCount = recentWithFeedback.filter(w => (w.result?.sensationScore ?? 99) <= 2).length;
+  const alerts: string[] = [];
+  if (highRpeCount >= 3) alerts.push('⚠️ Atleta relatou alta fadiga recentemente (RPE ≥ 8 em ' + highRpeCount + ' treinos)');
+  if (badSensationCount >= 2) alerts.push('⚠️ Sensações negativas em ' + badSensationCount + ' treinos — considere ajustar a carga');
+
   const planProgress =
     plan && plan.totalWorkouts > 0
       ? Math.round((plan.completedWorkouts / plan.totalWorkouts) * 100)
@@ -389,6 +416,20 @@ export default function AthleteDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Alerts */}
+      {alerts.length > 0 && (
+        <div className="mb-6 space-y-2">
+          {alerts.map((alert, i) => (
+            <div key={i} className="flex items-start gap-3 p-4 rounded-xl bg-amber-50 border border-amber-100 text-sm text-amber-800">
+              <svg className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
+              </svg>
+              {alert}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Stats Row */}
       <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Estatísticas</h2>
@@ -460,6 +501,44 @@ export default function AthleteDetailPage() {
                 />
               </div>
               <p className="text-xs text-gray-500 mb-4">{planProgress}% concluído</p>
+
+              {/* Garmin push */}
+              {garminPushMsg && (
+                <div className={`text-xs px-3 py-2 rounded-lg mb-3 ${
+                  garminPushMsg.type === 'success'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                    : 'bg-red-50 text-red-700 border border-red-100'
+                }`}>
+                  {garminPushMsg.text}
+                </div>
+              )}
+              <button
+                onClick={async () => {
+                  if (!plan) return;
+                  setPushingGarmin(true);
+                  setGarminPushMsg(null);
+                  try {
+                    const { data } = await api.post(`/integrations/garmin/push-plan/${plan.id}`);
+                    setGarminPushMsg({
+                      type: 'success',
+                      text: `✓ ${data.pushed ?? 0} treino(s) enviado(s) ao Garmin do atleta`,
+                    });
+                  } catch (e: any) {
+                    const msg = e?.response?.data?.message || 'Atleta precisa conectar o Garmin no app';
+                    setGarminPushMsg({ type: 'error', text: msg });
+                  } finally {
+                    setPushingGarmin(false);
+                  }
+                }}
+                disabled={pushingGarmin}
+                className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-[#007CC3]/10 text-[#007CC3] hover:bg-[#007CC3]/20 transition mb-3 disabled:opacity-50 cursor-pointer w-full justify-center"
+              >
+                <svg className={`w-3.5 h-3.5 ${pushingGarmin ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {pushingGarmin ? 'Enviando ao Garmin...' : 'Enviar planilha ao Garmin'}
+              </button>
+
               <Link
                 href="/dashboard/plans"
                 className="text-xs text-primary font-medium hover:underline"
@@ -576,7 +655,7 @@ export default function AthleteDetailPage() {
             <table className="w-full text-sm min-w-[500px]">
               <thead>
                 <tr>
-                  {['Data', 'Tipo', 'Distância', 'Duração', 'Pace', 'Fonte'].map((h) => (
+                  {['Data', 'Tipo', 'Distância', 'Duração', 'Pace', 'Fonte', 'Feedback'].map((h) => (
                     <th
                       key={h}
                       className="text-left text-xs font-medium text-gray-400 uppercase tracking-wider pb-3 px-2"
@@ -604,6 +683,35 @@ export default function AthleteDetailPage() {
                       >
                         {w.source ?? 'Manual'}
                       </span>
+                    </td>
+                    <td className="py-3 px-2">
+                      {w.result?.rpe != null || w.result?.sensationScore != null ? (
+                        <div className="flex items-center gap-1.5">
+                          {w.result.sensationScore != null && (
+                            <span className="text-base leading-none" title={`Sensação: ${w.result.sensationScore}/5`}>
+                              {SENSATION_EMOJI[w.result.sensationScore] ?? ''}
+                            </span>
+                          )}
+                          {w.result.rpe != null && (
+                            <span
+                              className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${rpeColor(w.result.rpe)}`}
+                              title={w.result.athleteFeedback ?? undefined}
+                            >
+                              RPE {w.result.rpe}
+                            </span>
+                          )}
+                          {w.result.athleteFeedback && (
+                            <span
+                              className="text-xs text-gray-400 truncate max-w-[80px] cursor-help"
+                              title={w.result.athleteFeedback}
+                            >
+                              {w.result.athleteFeedback}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}

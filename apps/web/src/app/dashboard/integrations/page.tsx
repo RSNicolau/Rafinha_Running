@@ -5,7 +5,7 @@ import { api } from '@/lib/api';
 
 interface Integration {
   id: string;
-  provider: 'GARMIN' | 'STRAVA' | 'APPLE_HEALTH' | 'GOOGLE_FIT';
+  provider: 'GARMIN' | 'STRAVA' | 'APPLE_HEALTH' | 'GOOGLE_FIT' | 'COROS' | 'POLAR';
   isActive: boolean;
   lastSyncAt: string | null;
 }
@@ -28,7 +28,7 @@ const DIRECT_INTEGRATIONS = [
   {
     key: 'STRAVA' as const,
     name: 'Strava',
-    description: 'Hub universal — conecta Coros, Polar, Suunto, Samsung e qualquer dispositivo que sincroniza com Strava.',
+    description: 'Hub universal — conecta Suunto, Samsung, Wahoo e qualquer dispositivo que sincroniza com Strava.',
     color: '#FC4C02',
     badge: 'Hub',
     badgeColor: '#FC4C02',
@@ -36,6 +36,34 @@ const DIRECT_INTEGRATIONS = [
     icon: (
       <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
         <path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0 3 13.828h4.17"/>
+      </svg>
+    ),
+  },
+  {
+    key: 'COROS' as const,
+    name: 'COROS',
+    description: 'Sincronização direta via COROS Open API. Receba corridas do seu relógio COROS automaticamente.',
+    color: '#1A1A2E',
+    badge: 'Direto',
+    badgeColor: '#1A1A2E',
+    features: ['COROS PACE / APEX / VERTIX', 'Atividades automáticas', 'Pace, FC e elevação'],
+    icon: (
+      <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
+        <path d="M12 2a10 10 0 100 20A10 10 0 0012 2zm0 18a8 8 0 110-16 8 8 0 010 16zm-1-5h2v2h-2zm0-8h2v6h-2z"/>
+      </svg>
+    ),
+  },
+  {
+    key: 'POLAR' as const,
+    name: 'Polar Flow',
+    description: 'Sincronização via Polar AccessLink API v3. Importa exercícios do Polar Flow automaticamente.',
+    color: '#D90429',
+    badge: 'Direto',
+    badgeColor: '#D90429',
+    features: ['Polar Vantage / Pacer / Ignite', 'Webhook em tempo real', 'Dados de zona cardíaca'],
+    icon: (
+      <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
+        <path d="M3 12h2l3-8 4 16 3-8h6"/>
       </svg>
     ),
   },
@@ -70,12 +98,12 @@ const DIRECT_INTEGRATIONS = [
 ];
 
 const VIA_STRAVA = [
-  { name: 'Coros', color: '#1A1A2E', logo: '⌚' },
-  { name: 'Polar', color: '#D8001D', logo: '⌚' },
-  { name: 'Suunto', color: '#0078BE', logo: '⌚' },
-  { name: 'Samsung', color: '#1428A0', logo: '⌚' },
-  { name: 'Wahoo', color: '#E8002D', logo: '⌚' },
-  { name: 'Fitbit', color: '#00B0B9', logo: '⌚' },
+  { name: 'Suunto', color: '#0078BE' },
+  { name: 'Samsung', color: '#1428A0' },
+  { name: 'Wahoo', color: '#E8002D' },
+  { name: 'Fitbit', color: '#00B0B9' },
+  { name: 'Garmin Edge', color: '#007CC3' },
+  { name: 'Zwift', color: '#FC6719' },
 ];
 
 export default function IntegrationsPage() {
@@ -83,6 +111,10 @@ export default function IntegrationsPage() {
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [settingUpWebhook, setSettingUpWebhook] = useState(false);
+  const [webhookMsg, setWebhookMsg] = useState<string | null>(null);
+  const [settingUpPolarWebhook, setSettingUpPolarWebhook] = useState(false);
+  const [polarWebhookMsg, setPolarWebhookMsg] = useState<string | null>(null);
 
   useEffect(() => {
     api.get('/integrations')
@@ -137,6 +169,44 @@ export default function IntegrationsPage() {
       alert('Erro ao sincronizar');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleSetupStravaWebhook = async () => {
+    setSettingUpWebhook(true);
+    setWebhookMsg(null);
+    try {
+      const { data } = await api.post('/integrations/strava/setup-webhook');
+      setWebhookMsg(
+        data.status === 'registered'
+          ? `✓ Webhook Strava registrado! (ID: ${data.subscriptionId})`
+          : data.status === 'already_registered'
+          ? '✓ Webhook Strava já estava registrado.'
+          : `⚠ ${data.message}`,
+      );
+    } catch (e: any) {
+      setWebhookMsg(`Erro: ${e?.response?.data?.message || 'Falha ao registrar webhook'}`);
+    } finally {
+      setSettingUpWebhook(false);
+    }
+  };
+
+  const handleSetupPolarWebhook = async () => {
+    setSettingUpPolarWebhook(true);
+    setPolarWebhookMsg(null);
+    try {
+      const { data } = await api.post('/integrations/polar/setup-webhook');
+      setPolarWebhookMsg(
+        data.status === 'registered'
+          ? `✓ Webhook Polar registrado! (ID: ${data.webhookId})`
+          : data.status === 'already_registered'
+          ? '✓ Webhook Polar já estava registrado.'
+          : `⚠ ${data.message}`,
+      );
+    } catch (e: any) {
+      setPolarWebhookMsg(`Erro: ${e?.response?.data?.message || 'Falha ao registrar webhook'}`);
+    } finally {
+      setSettingUpPolarWebhook(false);
     }
   };
 
@@ -246,6 +316,65 @@ export default function IntegrationsPage() {
         })}
       </div>
 
+      {/* Strava Webhook Setup */}
+      <div className="glass-card p-5 mb-6 border border-amber-100/60 bg-amber-50/30">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-800 mb-0.5">Ativar webhook automático do Strava</p>
+            <p className="text-xs text-gray-500">
+              Execute uma vez após o deploy para que o Strava envie atividades em tempo real.
+              Requer <code className="bg-gray-100 px-1 rounded text-[11px]">STRAVA_CLIENT_ID</code>,{' '}
+              <code className="bg-gray-100 px-1 rounded text-[11px]">STRAVA_CLIENT_SECRET</code> e{' '}
+              <code className="bg-gray-100 px-1 rounded text-[11px]">STRAVA_WEBHOOK_VERIFY_TOKEN</code> configurados.
+            </p>
+            {webhookMsg && (
+              <p className={`text-xs mt-2 font-medium ${webhookMsg.startsWith('✓') ? 'text-emerald-600' : 'text-red-600'}`}>
+                {webhookMsg}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={handleSetupStravaWebhook}
+            disabled={settingUpWebhook}
+            className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-[#FC4C02]/10 text-[#FC4C02] hover:bg-[#FC4C02]/20 transition disabled:opacity-50 cursor-pointer"
+          >
+            <svg className={`w-4 h-4 ${settingUpWebhook ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+            </svg>
+            {settingUpWebhook ? 'Registrando...' : 'Registrar webhook'}
+          </button>
+        </div>
+      </div>
+
+      {/* Polar Webhook Setup */}
+      <div className="glass-card p-5 mb-4 border border-red-100/60 bg-red-50/20">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-800 mb-0.5">Ativar webhook automático do Polar</p>
+            <p className="text-xs text-gray-500">
+              Execute uma vez após o deploy para que o Polar envie exercícios em tempo real via AccessLink.
+              Requer <code className="bg-gray-100 px-1 rounded text-[11px]">POLAR_CLIENT_ID</code> e{' '}
+              <code className="bg-gray-100 px-1 rounded text-[11px]">POLAR_CLIENT_SECRET</code> configurados.
+            </p>
+            {polarWebhookMsg && (
+              <p className={`text-xs mt-2 font-medium ${polarWebhookMsg.startsWith('✓') ? 'text-emerald-600' : 'text-red-600'}`}>
+                {polarWebhookMsg}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={handleSetupPolarWebhook}
+            disabled={settingUpPolarWebhook}
+            className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-[#D90429]/10 text-[#D90429] hover:bg-[#D90429]/20 transition disabled:opacity-50 cursor-pointer"
+          >
+            <svg className={`w-4 h-4 ${settingUpPolarWebhook ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+            </svg>
+            {settingUpPolarWebhook ? 'Registrando...' : 'Registrar webhook'}
+          </button>
+        </div>
+      </div>
+
       {/* Via Strava section */}
       <div className="glass-card p-6 mb-6">
         <div className="flex items-center gap-3 mb-2">
@@ -275,6 +404,7 @@ export default function IntegrationsPage() {
               <span className="text-sm font-medium text-gray-700">{device.name}</span>
             </div>
           ))}
+
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-50 border border-gray-100">
             <span className="text-sm text-gray-400">+ 40 outros</span>
           </div>

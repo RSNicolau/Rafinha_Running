@@ -4,10 +4,12 @@ import { IntegrationsController } from './integrations.controller';
 import { WebhooksController } from './webhooks.controller';
 import { GarminService } from './garmin/garmin.service';
 import { StravaService } from './strava/strava.service';
+import { CorosService } from './coros/coros.service';
+import { PolarService } from './polar/polar.service';
 
 @Module({
   controllers: [IntegrationsController, WebhooksController],
-  providers: [IntegrationsService, GarminService, StravaService],
+  providers: [IntegrationsService, GarminService, StravaService, CorosService, PolarService],
   exports: [IntegrationsService],
 })
 export class IntegrationsModule {}

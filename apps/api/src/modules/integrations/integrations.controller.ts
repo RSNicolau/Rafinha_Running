@@ -1,15 +1,18 @@
 import {
-  Controller, Get, Post, Delete, Param, Query, UseGuards,
+  Controller, Get, Post, Delete, Param, Query, Body, UseGuards, Req,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { IntegrationProvider } from '@prisma/client';
+import { IntegrationProvider, UserRole } from '@prisma/client';
+import { Request } from 'express';
 import { IntegrationsService } from './integrations.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 
 @ApiTags('Integrações')
 @ApiBearerAuth()
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('integrations')
 export class IntegrationsController {
   constructor(private integrationsService: IntegrationsService) {}
@@ -52,6 +55,38 @@ export class IntegrationsController {
   @ApiOperation({ summary: 'Sincronizar atividades manualmente' })
   async sync(@CurrentUser('id') userId: string) {
     return this.integrationsService.syncActivities(userId);
+  }
+
+  // ── Strava Webhook Setup (ADMIN only) ──
+
+  @Post('strava/setup-webhook')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Registrar webhook do Strava automaticamente',
+    description: 'Chama a API do Strava para registrar a URL de webhook. Execute uma vez após o deploy. ' +
+      'Requer: STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET, STRAVA_WEBHOOK_VERIFY_TOKEN e API_BASE_URL.',
+  })
+  async setupStravaWebhook(@Req() req: Request, @Body('apiBaseUrl') apiBaseUrl?: string) {
+    const baseUrl = apiBaseUrl
+      || process.env.API_BASE_URL
+      || `${req.protocol}://${req.get('host')}/api`;
+    return this.integrationsService.setupStravaWebhook(baseUrl);
+  }
+
+  // ── Polar Webhook Setup (ADMIN only) ──
+
+  @Post('polar/setup-webhook')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Registrar webhook do Polar AccessLink automaticamente',
+    description: 'Registra a URL de webhook no Polar AccessLink para receber exercícios em tempo real. ' +
+      'Execute uma vez após o deploy. Requer: POLAR_CLIENT_ID, POLAR_CLIENT_SECRET.',
+  })
+  async setupPolarWebhook(@Req() req: Request, @Body('apiBaseUrl') apiBaseUrl?: string) {
+    const baseUrl = apiBaseUrl
+      || process.env.API_BASE_URL
+      || `${req.protocol}://${req.get('host')}/api`;
+    return this.integrationsService.setupPolarWebhook(baseUrl);
   }
 
   // ── Garmin Training API: Push workouts TO Garmin watch ──

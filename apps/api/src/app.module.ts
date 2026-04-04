@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { CustomThrottlerGuard } from './common/guards/custom-throttler.guard';
 import { PrismaModule } from './prisma/prisma.module';
+import { CacheModule } from './modules/cache/cache.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { TrainingPlansModule } from './modules/training-plans/training-plans.module';
@@ -26,6 +29,7 @@ import { HealthModule } from './modules/health/health.module';
       limit: 100,
     }]),
     PrismaModule,
+    CacheModule,
     AuthModule,
     UsersModule,
     TrainingPlansModule,
@@ -43,6 +47,9 @@ import { HealthModule } from './modules/health/health.module';
     InvitesModule,
     NutritionModule,
     HealthModule,
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: CustomThrottlerGuard },
   ],
 })
 export class AppModule {}

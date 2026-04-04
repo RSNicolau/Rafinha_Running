@@ -202,4 +202,55 @@ export class WebhooksController {
     }
     return { status: 'ok' };
   }
+
+  // ═══════════════════ POLAR WEBHOOKS ═══════════════════
+
+  @Post('polar')
+  @ApiOperation({ summary: 'Polar AccessLink exercise event webhook' })
+  async handlePolarWebhook(
+    @Req() req: Request,
+    @Headers('polar-webhook-signature') webhookSignature: string,
+    @Body() body: any,
+  ) {
+    // Validate signature if secret is configured
+    const secret = process.env.POLAR_WEBHOOK_SECRET;
+    if (secret && webhookSignature) {
+      const rawBody = (req as any).rawBody;
+      if (rawBody) {
+        const expected = crypto
+          .createHmac('sha256', secret)
+          .update(rawBody)
+          .digest('hex');
+        try {
+          const valid = crypto.timingSafeEqual(
+            Buffer.from(webhookSignature),
+            Buffer.from(expected),
+          );
+          if (!valid) {
+            this.logger.warn('Polar webhook signature mismatch');
+            throw new UnauthorizedException('Assinatura do webhook Polar inválida');
+          }
+        } catch {
+          throw new UnauthorizedException('Assinatura do webhook Polar inválida');
+        }
+      }
+    }
+
+    this.logger.log(`Polar webhook: ${body.event} for user ${body.user_id}`);
+
+    try {
+      if (body.event === 'EXERCISE') {
+        await this.integrationsService.handlePolarExercise({
+          userId:     String(body.user_id),
+          entity_id:  body.entity_id,
+          event_type: body.event,
+          timestamp:  body.timestamp,
+        });
+      }
+    } catch (err: any) {
+      this.logger.error(`Polar webhook error: ${err.message}`, err.stack);
+    }
+
+    return { status: 'ok' };
+  }
 }

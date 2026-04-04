@@ -3,7 +3,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { WorkoutsService } from './workouts.service';
-import { CreateWorkoutDto, SubmitResultDto } from './dto/workout.dto';
+import { CreateWorkoutDto, SubmitResultDto, SubmitFeedbackDto } from './dto/workout.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -61,10 +61,20 @@ export class WorkoutsController {
     return this.workoutsService.submitResult(id, athleteId, dto);
   }
 
+  @Patch(':id/feedback')
+  @Roles(UserRole.ATHLETE)
+  @ApiOperation({ summary: 'Enviar feedback subjetivo do treino (RPE, sensação, comentário)' })
+  async submitFeedback(@Param('id') id: string, @CurrentUser('id') athleteId: string, @Body() dto: SubmitFeedbackDto) {
+    return this.workoutsService.submitFeedback(id, athleteId, dto);
+  }
+
   @Post('sync/health')
   @Roles(UserRole.ATHLETE)
-  @ApiOperation({ summary: 'Sincronizar treino do Apple Health / HealthKit' })
+  @ApiOperation({ summary: 'Sincronizar treino(s) do Apple Health / HealthKit. Aceita objeto único ou array.' })
   async syncFromHealth(@CurrentUser('id') athleteId: string, @Body() body: any) {
+    if (Array.isArray(body)) {
+      return this.workoutsService.syncFromAppleHealthBatch(athleteId, body);
+    }
     return this.workoutsService.syncFromAppleHealth(athleteId, body);
   }
 }

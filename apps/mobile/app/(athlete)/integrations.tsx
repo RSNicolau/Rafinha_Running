@@ -7,13 +7,17 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../src/theme';
 import { GlassCard, GlassButton, GlassBadge } from '../../src/components/ui';
-import { useAuthStore } from '../../src/stores/auth.store';
 import { api } from '../../src/services/api';
 import { ptBR } from '../../src/i18n/pt-BR';
+import {
+  isHealthKitAvailable,
+  requestHealthKitPermissions,
+  syncHealthKitToAPI,
+} from '../../src/services/apple-health.service';
 
 interface Integration {
   id: string;
-  provider: 'GARMIN' | 'STRAVA' | 'APPLE_HEALTH' | 'GOOGLE_FIT';
+  provider: 'GARMIN' | 'STRAVA' | 'APPLE_HEALTH' | 'COROS' | 'POLAR';
   isActive: boolean;
   lastSyncAt: string | null;
   createdAt: string;
@@ -22,47 +26,61 @@ interface Integration {
 const PROVIDERS = [
   {
     key: 'GARMIN' as const,
-    name: ptBR.integrations.garmin,
+    name: 'Garmin',
     icon: 'watch-outline' as const,
     color: '#007CC3',
-    description: 'Sincronize treinos e atividades com seu relogio Garmin',
+    description: 'Sincronize treinos e atividades com seu relógio Garmin. Receba planilhas direto no relógio.',
+    isOAuth: true,
   },
   {
     key: 'STRAVA' as const,
-    name: ptBR.integrations.strava,
+    name: 'Strava',
     icon: 'bicycle-outline' as const,
     color: '#FC4C02',
-    description: 'Importe atividades do Strava automaticamente',
+    description: 'Importe corridas do Strava automaticamente via webhook.',
+    isOAuth: true,
   },
   {
+    key: 'COROS' as const,
+    name: 'COROS',
+    icon: 'radio-outline' as const,
+    color: '#1A1A2E',
+    description: 'Sincronize atividades do seu relógio COROS automaticamente.',
+    isOAuth: true,
+  },
+  {
+    key: 'POLAR' as const,
+    name: 'Polar Flow',
+    icon: 'pulse-outline' as const,
+    color: '#D90429',
+    description: 'Importe treinos do seu relógio Polar via Polar AccessLink.',
+    isOAuth: true,
+  },
+  ...(Platform.OS === 'ios' ? [{
     key: 'APPLE_HEALTH' as const,
-    name: ptBR.integrations.appleHealth,
+    name: 'Apple Health',
     icon: 'heart-outline' as const,
     color: '#FF2D55',
-    description: 'Sincronize dados de saude e atividades do Apple Health',
-  },
-  {
-    key: 'GOOGLE_FIT' as const,
-    name: ptBR.integrations.googleFit,
-    icon: 'fitness-outline' as const,
-    color: '#4285F4',
-    description: 'Conecte dados de atividades do Google Fit',
-  },
+    description: 'Sincronize corridas do Apple Health e Apple Watch automaticamente.',
+    isOAuth: false,
+  }] : []),
 ];
 
 export default function IntegrationsScreen() {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [connecting, setConnecting] = useState<string | null>(null);
+  const [appleHealthGranted, setAppleHealthGranted] = useState(false);
+  const [appleHealthSyncing, setAppleHealthSyncing] = useState(false);
 
   const fetchIntegrations = useCallback(async () => {
     try {
       const res = await api.get('/integrations');
       setIntegrations(res.data);
     } catch {
-      // silently fail
+      // silently fail — user may be offline
     } finally {
       setLoading(false);
     }
@@ -70,25 +88,29 @@ export default function IntegrationsScreen() {
 
   useEffect(() => {
     fetchIntegrations();
+    // Check if Apple Health permissions are already granted
+    if (isHealthKitAvailable()) {
+      requestHealthKitPermissions().then(setAppleHealthGranted);
+    }
   }, [fetchIntegrations]);
 
-  const handleConnect = async (provider: string) => {
+  // ── OAuth providers (Garmin / Strava) ────────────────────────────────────────
+
+  const handleOAuthConnect = async (provider: string) => {
     setConnecting(provider);
     try {
       const res = await api.post(`/integrations/${provider}/connect`);
       if (res.data?.url) {
-        if (Platform.OS === 'web') {
-          window.open(res.data.url, '_blank');
-        } else {
-          await Linking.openURL(res.data.url);
-        }
+        await Linking.openURL(res.data.url);
+        // After returning from browser, refresh the list
+        setTimeout(fetchIntegrations, 2000);
       }
     } catch (error: any) {
       const msg = error?.response?.data?.message || 'Falha ao conectar';
-      if (msg.includes('nao configurada') || msg.includes('client_id')) {
+      if (msg.includes('não configurada') || msg.includes('client_id')) {
         Alert.alert(
-          'Integracao Indisponivel',
-          `A integracao com ${getProviderName(provider)} ainda nao foi configurada pelo administrador. Entre em contato com o suporte para ativacao.`,
+          'Integração Indisponível',
+          `A integração com ${getProviderName(provider)} ainda não foi configurada. Entre em contato com o suporte.`,
         );
       } else {
         Alert.alert('Erro', msg);
@@ -120,12 +142,12 @@ export default function IntegrationsScreen() {
     );
   };
 
-  const handleSync = async () => {
+  const handleOAuthSync = async () => {
     setSyncing(true);
     try {
       const res = await api.post('/integrations/sync');
       const total = res.data?.synced?.reduce((acc: number, s: any) => acc + (s.synced || 0), 0) || 0;
-      Alert.alert('Sincronizacao', `${total} atividade(s) sincronizada(s)!`);
+      Alert.alert('Sincronização', `${total} atividade(s) sincronizada(s)!`);
       fetchIntegrations();
     } catch {
       Alert.alert('Erro', 'Falha ao sincronizar');
@@ -134,28 +156,64 @@ export default function IntegrationsScreen() {
     }
   };
 
+  // ── Apple Health ─────────────────────────────────────────────────────────────
+
+  const handleAppleHealthConnect = async () => {
+    setConnecting('APPLE_HEALTH');
+    try {
+      const granted = await requestHealthKitPermissions();
+      if (!granted) {
+        Alert.alert(
+          'Permissão Negada',
+          'Para sincronizar com o Apple Health, permita o acesso nas Configurações do iPhone.',
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            { text: 'Abrir Configurações', onPress: () => Linking.openURL('app-settings:') },
+          ],
+        );
+        return;
+      }
+      setAppleHealthGranted(true);
+      // Trigger initial sync right after connecting
+      handleAppleHealthSync();
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  const handleAppleHealthSync = async () => {
+    setAppleHealthSyncing(true);
+    try {
+      const result = await syncHealthKitToAPI(30);
+      const msg = result.synced > 0
+        ? `${result.synced} atividade(s) sincronizada(s) com sucesso!`
+        : 'Nenhuma atividade nova encontrada no Apple Health.';
+      Alert.alert('Apple Health', msg);
+    } catch {
+      Alert.alert('Erro', 'Falha ao sincronizar com Apple Health');
+    } finally {
+      setAppleHealthSyncing(false);
+    }
+  };
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+
   const getProviderName = (provider: string) => {
     const p = PROVIDERS.find((pr) => pr.key === provider);
     return p?.name || provider;
   };
 
-  const getConnectedIntegration = (provider: string) => {
-    return integrations.find((i) => i.provider === provider && i.isActive);
-  };
+  const getConnectedIntegration = (provider: string) =>
+    integrations.find((i) => i.provider === provider && i.isActive);
 
   const formatLastSync = (dateStr: string | null) => {
     if (!dateStr) return 'Nunca sincronizado';
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMin = Math.floor(diffMs / 60000);
-
+    const diffMin = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000);
     if (diffMin < 1) return 'Agora mesmo';
-    if (diffMin < 60) return `${diffMin} min atras`;
+    if (diffMin < 60) return `${diffMin} min atrás`;
     const diffHours = Math.floor(diffMin / 60);
-    if (diffHours < 24) return `${diffHours}h atras`;
-    const diffDays = Math.floor(diffHours / 24);
-    return `${diffDays} dia(s) atras`;
+    if (diffHours < 24) return `${diffHours}h atrás`;
+    return `${Math.floor(diffHours / 24)} dia(s) atrás`;
   };
 
   if (loading) {
@@ -172,11 +230,8 @@ export default function IntegrationsScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       {/* Header */}
       <View style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 14,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingHorizontal: 16, paddingVertical: 14,
       }}>
         <TouchableOpacity
           onPress={() => router.back()}
@@ -194,9 +249,12 @@ export default function IntegrationsScreen() {
         contentContainerStyle={{ padding: 16, paddingBottom: 48 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Provider Cards */}
         {PROVIDERS.map((provider) => {
-          const connected = getConnectedIntegration(provider.key);
+          const isAppleHealth = provider.key === 'APPLE_HEALTH';
+          const connected = isAppleHealth
+            ? appleHealthGranted
+            : !!getConnectedIntegration(provider.key);
+          const oauthIntegration = isAppleHealth ? null : getConnectedIntegration(provider.key);
 
           return (
             <View key={provider.key} style={{ marginBottom: 16 }}>
@@ -204,12 +262,9 @@ export default function IntegrationsScreen() {
                 {/* Provider Header */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
                   <View style={{
-                    width: 52,
-                    height: 52,
-                    borderRadius: 16,
-                    backgroundColor: provider.color + '15',
-                    alignItems: 'center',
-                    justifyContent: 'center',
+                    width: 52, height: 52, borderRadius: 16,
+                    backgroundColor: provider.color + '18',
+                    alignItems: 'center', justifyContent: 'center',
                   }}>
                     <Ionicons name={provider.icon} size={28} color={provider.color} />
                   </View>
@@ -225,55 +280,50 @@ export default function IntegrationsScreen() {
 
                 {connected ? (
                   <View style={{
-                    marginTop: 16,
-                    paddingTop: 16,
-                    borderTopWidth: 1,
-                    borderTopColor: colors.divider,
+                    marginTop: 16, paddingTop: 16,
+                    borderTopWidth: 1, borderTopColor: colors.divider,
                   }}>
-                    {/* Status Row */}
                     <View style={{
-                      flexDirection: 'row',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
+                      flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
                     }}>
                       <GlassBadge
                         label={ptBR.integrations.connected}
                         variant="success"
                         icon={<Ionicons name="checkmark-circle" size={12} color={colors.success} />}
                       />
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Ionicons name="time-outline" size={12} color={colors.textTertiary} />
-                        <Text style={{ fontSize: 11, color: colors.textTertiary }}>
-                          {formatLastSync(connected.lastSyncAt)}
-                        </Text>
-                      </View>
+                      {oauthIntegration && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <Ionicons name="time-outline" size={12} color={colors.textTertiary} />
+                          <Text style={{ fontSize: 11, color: colors.textTertiary }}>
+                            {formatLastSync(oauthIntegration.lastSyncAt)}
+                          </Text>
+                        </View>
+                      )}
                     </View>
 
-                    {/* Action Buttons */}
                     <View style={{
-                      flexDirection: 'row',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginTop: 14,
-                      gap: 10,
+                      flexDirection: 'row', justifyContent: 'space-between',
+                      alignItems: 'center', marginTop: 14, gap: 10,
                     }}>
                       <View style={{ flex: 1 }}>
                         <GlassButton
                           title={ptBR.integrations.syncNow}
-                          onPress={handleSync}
-                          loading={syncing}
+                          onPress={isAppleHealth ? handleAppleHealthSync : handleOAuthSync}
+                          loading={isAppleHealth ? appleHealthSyncing : syncing}
                           variant="secondary"
                           size="sm"
                           icon={<Ionicons name="sync-outline" size={16} color={colors.primary} />}
                           fullWidth
                         />
                       </View>
-                      <GlassButton
-                        title={ptBR.integrations.disconnect}
-                        onPress={() => handleDisconnect(connected)}
-                        variant="danger"
-                        size="sm"
-                      />
+                      {!isAppleHealth && oauthIntegration && (
+                        <GlassButton
+                          title={ptBR.integrations.disconnect}
+                          onPress={() => handleDisconnect(oauthIntegration)}
+                          variant="danger"
+                          size="sm"
+                        />
+                      )}
                     </View>
                   </View>
                 ) : (
@@ -286,8 +336,11 @@ export default function IntegrationsScreen() {
                       />
                     </View>
                     <GlassButton
-                      title={`${ptBR.integrations.connect} ${provider.name}`}
-                      onPress={() => handleConnect(provider.key)}
+                      title={`Conectar ${provider.name}`}
+                      onPress={() => isAppleHealth
+                        ? handleAppleHealthConnect()
+                        : handleOAuthConnect(provider.key)
+                      }
                       loading={connecting === provider.key}
                       fullWidth
                       variant="primary"
@@ -303,12 +356,9 @@ export default function IntegrationsScreen() {
         <GlassCard intensity="subtle" shadow="sm" style={{ marginTop: 8 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
             <View style={{
-              width: 40,
-              height: 40,
-              borderRadius: 12,
+              width: 40, height: 40, borderRadius: 12,
               backgroundColor: colors.info + '15',
-              alignItems: 'center',
-              justifyContent: 'center',
+              alignItems: 'center', justifyContent: 'center',
             }}>
               <Ionicons name="information-circle-outline" size={24} color={colors.info} />
             </View>
@@ -318,17 +368,15 @@ export default function IntegrationsScreen() {
           </View>
 
           {[
-            { icon: 'sync-outline' as const, text: 'Sincronizacao automatica de treinos e atividades' },
-            { icon: 'watch-outline' as const, text: 'Treinos enviados direto para seu relogio' },
-            { icon: 'analytics-outline' as const, text: 'Metricas detalhadas de desempenho e recuperacao' },
-            { icon: 'notifications-outline' as const, text: 'Alertas inteligentes baseados nos seus dados' },
+            { icon: 'sync-outline' as const, text: 'Sincronização automática de treinos e atividades' },
+            { icon: 'watch-outline' as const, text: 'Treinos enviados direto para seu relógio Garmin' },
+            { icon: 'analytics-outline' as const, text: 'Métricas detalhadas: pace, FC, elevação e mais' },
+            { icon: 'heart-outline' as const, text: 'Dados de saúde do Apple Watch sincronizados automaticamente' },
           ].map((item, idx) => (
             <View
               key={idx}
               style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 10,
+                flexDirection: 'row', alignItems: 'center', gap: 10,
                 paddingVertical: 8,
                 borderTopWidth: idx > 0 ? 1 : 0,
                 borderTopColor: colors.divider,

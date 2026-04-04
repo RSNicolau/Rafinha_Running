@@ -7,6 +7,7 @@ import * as Sentry from '@sentry/react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStore } from '../src/stores/auth.store';
 import { OfflineIndicator } from '../src/components/ui/OfflineIndicator';
+import { registerForPushNotifications } from '../src/services/push-notifications.service';
 
 // Keep splash screen visible while we initialise
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -52,6 +53,7 @@ const queryClient = new QueryClient({
 
 function RootLayout() {
   const loadStoredUser = useAuthStore((s) => s.loadStoredUser);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const [appReady, setAppReady] = React.useState(false);
 
   useEffect(() => {
@@ -66,6 +68,15 @@ function RootLayout() {
     }
     prepare();
   }, []);
+
+  // Register for push notifications once the user is authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      registerForPushNotifications().catch((err) => {
+        Sentry.captureException(err);
+      });
+    }
+  }, [isAuthenticated]);
 
   const onLayoutRootView = useCallback(async () => {
     if (appReady) {

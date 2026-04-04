@@ -75,24 +75,51 @@ export class AdminService {
     });
   }
 
-  async deleteUser(id: string) {
-    await this.prisma.user.update({ where: { id }, data: { isActive: false } });
-    return { success: true };
-  }
-
-  async hardDeleteUser(id: string) {
+  async deleteUser(id: string, actorId?: string) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('Usuário não encontrado');
 
-    // Soft delete: deactivate instead of hard delete to preserve FK integrity
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id },
-        data: { isActive: false },
+        data: { isActive: false, deletedAt: new Date() },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          actorId: actorId ?? id,
+          action: 'DEACTIVATE_USER',
+          entityType: 'User',
+          entityId: id,
+          metadata: { email: user.email, role: user.role },
+        },
+      }),
+    ]);
+
+    return { success: true };
+  }
+
+  async hardDeleteUser(id: string, actorId?: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+
+    // Soft delete: deactivate + cancel subscriptions + write audit log
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id },
+        data: { isActive: false, deletedAt: new Date() },
       }),
       this.prisma.subscription.updateMany({
         where: { userId: id },
         data: { status: 'CANCELED' as any },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          actorId: actorId ?? id,
+          action: 'DELETE_USER',
+          entityType: 'User',
+          entityId: id,
+          metadata: { email: user.email, role: user.role },
+        },
       }),
     ]);
 

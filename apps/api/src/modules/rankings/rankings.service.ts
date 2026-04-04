@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CacheService } from '../cache/cache.service';
 import { WorkoutStatus } from '@prisma/client';
 
 export interface RankingEntry {
@@ -11,12 +12,22 @@ export interface RankingEntry {
   unit: string;
 }
 
+const RANKINGS_TTL = 5 * 60; // 5 minutes
+
 @Injectable()
 export class RankingsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cache: CacheService,
+  ) {}
 
   async getTopByKm(period: 'all' | 'monthly' = 'all', limit = 20): Promise<RankingEntry[]> {
     limit = Math.min(Math.max(1, Number(limit) || 20), 100);
+
+    const cacheKey = `rankings:km:${period}:${limit}`;
+    const cached = await this.cache.get<RankingEntry[]>(cacheKey);
+    if (cached) return cached;
+
     let dateFilter = {};
 
     if (period === 'monthly') {
@@ -63,7 +74,7 @@ export class RankingsService {
           LIMIT ${limit}
         `;
 
-    return rawQuery.map((row, index) => ({
+    const ranking = rawQuery.map((row, index) => ({
       position: index + 1,
       userId: row.user_id,
       name: row.name,
@@ -71,10 +82,18 @@ export class RankingsService {
       value: Math.round(Number(row.total_meters) / 10) / 100, // metros -> km com 2 casas
       unit: 'km',
     }));
+
+    await this.cache.set(cacheKey, ranking, RANKINGS_TTL);
+    return ranking;
   }
 
   async getTopByWorkouts(limit = 20): Promise<RankingEntry[]> {
     limit = Math.min(Math.max(1, Number(limit) || 20), 100);
+
+    const cacheKey = `rankings:workouts:${limit}`;
+    const cached = await this.cache.get<RankingEntry[]>(cacheKey);
+    if (cached) return cached;
+
     const rawQuery = await this.prisma.$queryRaw<
       Array<{ user_id: string; name: string; avatar_url: string | null; total_workouts: bigint }>
     >`
@@ -88,7 +107,7 @@ export class RankingsService {
       LIMIT ${limit}
     `;
 
-    return rawQuery.map((row, index) => ({
+    const ranking = rawQuery.map((row, index) => ({
       position: index + 1,
       userId: row.user_id,
       name: row.name,
@@ -96,6 +115,9 @@ export class RankingsService {
       value: Number(row.total_workouts),
       unit: 'treinos',
     }));
+
+    await this.cache.set(cacheKey, ranking, RANKINGS_TTL);
+    return ranking;
   }
 
   async getTopByStreak(limit = 20): Promise<RankingEntry[]> {

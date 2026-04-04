@@ -56,6 +56,26 @@ export class AiTrainingService {
     const weeklyKmActual = this.calculateWeeklyKm(recentWorkouts);
     const athleteDateOfBirth = athlete.dateOfBirth;
 
+    // Analyze subjective feedback from recent workouts
+    const feedbackData = recentWorkouts.filter(w => w.rpe != null || w.sensationScore != null);
+    const avgRpe = feedbackData.length > 0
+      ? feedbackData.reduce((sum, w) => sum + (w.rpe ?? 5), 0) / feedbackData.length
+      : 5;
+    const avgSensation = feedbackData.length > 0
+      ? feedbackData.reduce((sum, w) => sum + (w.sensationScore ?? 3), 0) / feedbackData.length
+      : 3;
+
+    // Adjust volume based on feedback signals
+    let volumeMultiplier = 1.0;
+    if (avgRpe >= 9.5) volumeMultiplier = 0.70;
+    else if (avgRpe >= 8.5) volumeMultiplier = 0.85;
+    else if (avgRpe >= 8.0) volumeMultiplier = 0.92;
+    if (avgSensation <= 2.0) volumeMultiplier *= 0.90;
+
+    const feedbackNote = feedbackData.length > 0
+      ? `RPE médio recente: ${avgRpe.toFixed(1)}/10, sensação: ${avgSensation.toFixed(1)}/5.${volumeMultiplier < 1 ? ` Volume ajustado −${Math.round((1 - volumeMultiplier) * 100)}% com base no feedback.` : ''}`
+      : '';
+
     // Determine training zones
     const zones = this.calculateHRZones(maxHR);
 
@@ -65,7 +85,7 @@ export class AiTrainingService {
     // Generate workout templates for each week
     const planWorkouts: Array<WorkoutTemplate & { weekDay: number; weekNumber: number }> = [];
 
-    const baseKm = Math.max(weeklyKmActual * 0.8, this.getMinStartKm(level));
+    const baseKm = Math.max(weeklyKmActual * 0.8, this.getMinStartKm(level)) * volumeMultiplier;
 
     for (let week = 1; week <= dto.weeks; week++) {
       const phase = this.getPhase(week, dto.weeks);
@@ -103,7 +123,7 @@ export class AiTrainingService {
         weeks: dto.weeks,
         goal: dto.goal,
         level,
-        analysis: this.buildAnalysisReport(profile, athlete.dateOfBirth, recentWorkouts, avgPaceSeconds, weeklyKmActual),
+        analysis: { ...this.buildAnalysisReport(profile, athlete.dateOfBirth, recentWorkouts, avgPaceSeconds, weeklyKmActual), feedbackNote, volumeMultiplier },
       };
     }
 
@@ -133,7 +153,7 @@ export class AiTrainingService {
       weeks: dto.weeks,
       goal: dto.goal,
       level,
-      analysis: this.buildAnalysisReport(profile, athlete.dateOfBirth, recentWorkouts, avgPaceSeconds, weeklyKmActual),
+      analysis: { ...this.buildAnalysisReport(profile, athlete.dateOfBirth, recentWorkouts, avgPaceSeconds, weeklyKmActual), feedbackNote, volumeMultiplier },
       preview: planWorkouts.slice(0, 7).map((w) => ({
         week: w.weekNumber,
         day: w.weekDay,

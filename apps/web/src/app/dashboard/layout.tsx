@@ -10,6 +10,9 @@ const navItems = [
   { href: '/dashboard', label: 'Visão Geral', icon: 'grid', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/athletes', label: 'Atletas', icon: 'users', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/plans', label: 'Planilhas', icon: 'clipboard', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
+  { href: '/dashboard/rankings', label: 'Rankings', icon: 'trophy', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
+  { href: '/dashboard/events', label: 'Eventos', icon: 'calendar', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
+  { href: '/dashboard/chat', label: 'Chat', icon: 'chat', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/live', label: 'Live Tracking', icon: 'radio', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/integrations', label: 'Integrações', icon: 'integrations', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/billing', label: 'Assinatura', icon: 'billing', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
@@ -66,6 +69,21 @@ function NavIcon({ name, className }: { name: string; className?: string }) {
         <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" />
       </svg>
     ),
+    trophy: (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 18.75h-9m9 0a3 3 0 013 3h-15a3 3 0 013-3m9 0v-3.375c0-.621-.503-1.125-1.125-1.125h-.871M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.872m5.007 0H9.497m5.007 0a7.454 7.454 0 01-.982-3.172M9.497 14.25a7.454 7.454 0 00.981-3.172M5.25 4.236c-.982.143-1.954.317-2.916.52A6.003 6.003 0 007.73 9.728M5.25 4.236V4.5c0 2.108.966 3.99 2.48 5.228M5.25 4.236V2.721C7.456 2.41 9.71 2.25 12 2.25c2.291 0 4.545.16 6.75.47v1.516M7.73 9.728a6.726 6.726 0 002.748 1.35m8.272-6.842V4.5c0 2.108-.966 3.99-2.48 5.228m2.48-5.492a46.32 46.32 0 012.916.52 6.003 6.003 0 01-5.395 4.972m0 0a6.726 6.726 0 01-2.749 1.35m0 0a6.772 6.772 0 01-3.044 0" />
+      </svg>
+    ),
+    calendar: (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 9v7.5m-9-6h.008v.008H12v-.008zM12 15h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zM9.75 15h.008v.008H9.75V15zm0 2.25h.008v.008H9.75v-.008zM7.5 15h.008v.008H7.5V15zm0 2.25h.008v.008H7.5v-.008zm6.75-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008zm2.25-4.5h.008v.008H18v-.008zm0 2.25h.008v.008H18V15z" />
+      </svg>
+    ),
+    chat: (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+      </svg>
+    ),
   };
   return <>{icons[name]}</>;
 }
@@ -98,6 +116,14 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
     loadUser();
   }, []);
 
+  // Inject brand CSS variables for theming
+  useEffect(() => {
+    const primary = user?.branding?.primaryColor || '#DC2626';
+    const secondary = user?.branding?.secondaryColor || '#1F2937';
+    document.documentElement.style.setProperty('--color-primary', primary);
+    document.documentElement.style.setProperty('--color-secondary', secondary);
+  }, [user?.branding?.primaryColor, user?.branding?.secondaryColor]);
+
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.replace('/login');
@@ -121,10 +147,10 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
     <>
       {/* Logo */}
       <div className="h-16 flex items-center px-5 border-b border-gray-100 shrink-0">
-        {(user as any)?.branding?.logoUrl ? (
-          <img src={(user as any).branding.logoUrl} alt="Logo" className="h-9 w-auto object-contain" />
+        {user?.branding?.logoUrl ? (
+          <img src={user.branding.logoUrl} alt="Logo" className="h-10 w-auto object-contain max-w-[140px]" />
         ) : (
-          <img src="/logo.png" alt="Rafinha Running" className="h-9 w-auto" />
+          <img src="/logo.png" alt="Rafinha Running" className="h-10 w-auto" />
         )}
       </div>
 
@@ -211,7 +237,10 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
-          <img src="/logo.png" alt="RR" className="h-7 w-auto" />
+          {user?.branding?.logoUrl
+            ? <img src={user.branding.logoUrl} alt="Logo" className="h-7 w-auto object-contain max-w-[100px]" />
+            : <img src="/logo.png" alt="RR" className="h-7 w-auto" />
+          }
           <div className="flex-1" />
           {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && <DemoToggle />}
         </div>

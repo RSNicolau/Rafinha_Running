@@ -1,11 +1,15 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CacheService } from '../cache/cache.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cache: CacheService,
+  ) {}
 
   async findById(id: string) {
     const user = await this.prisma.user.findUnique({
@@ -109,7 +113,6 @@ export class UsersService {
         athlete: { select: { id: true, name: true, avatarUrl: true } },
       },
       orderBy: { scheduledDate: 'desc' },
-      take: 20,
     });
 
     // Group by athlete and count consecutive misses
@@ -150,6 +153,10 @@ export class UsersService {
   }
 
   async getCoachStats(coachId: string) {
+    const cacheKey = `coach_stats:${coachId}`;
+    const cached = await this.cache.get<{ totalAthletes: number; alertCount: number; adherencePercent: number }>(cacheKey);
+    if (cached) return cached;
+
     const athletes = await this.prisma.athleteProfile.findMany({ where: { coachId } });
     const athleteIds = athletes.map(a => a.userId);
 
@@ -170,10 +177,13 @@ export class UsersService {
       }),
     ]);
 
-    return {
+    const stats = {
       totalAthletes: athleteIds.length,
       alertCount: missed,
       adherencePercent: scheduled > 0 ? Math.round((completed / scheduled) * 100) : 0,
     };
+
+    await this.cache.set(cacheKey, stats, 2 * 60); // 2 minutes TTL
+    return stats;
   }
 }

@@ -118,6 +118,30 @@ export class PaymentsController {
     @CurrentUser() user: { id: string; name: string; email: string },
     @Body() dto: CreatePixPaymentDto,
   ) {
+    // Idempotency: return existing PENDING PIX if one was created in the last 30 minutes
+    const existingPending = await this.prisma.payment.findFirst({
+      where: {
+        userId: user.id,
+        status: PaymentStatus.PENDING,
+        provider: PaymentProvider.PAGARME,
+        planId: dto.planId ?? null,
+        createdAt: { gte: new Date(Date.now() - 30 * 60 * 1000) },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existingPending) {
+      this.logger.log(`Returning existing PENDING PIX ${existingPending.id} for user ${user.id}`);
+      return {
+        paymentId: existingPending.id,
+        orderId: existingPending.externalPaymentId,
+        status: 'pending',
+        pixQrCode: (existingPending as any).pixQrCode ?? null,
+        pixQrCodeUrl: (existingPending as any).pixQrCodeUrl ?? null,
+        pixExpiresAt: (existingPending as any).pixExpiresAt ?? null,
+        amount: existingPending.amount,
+      };
+    }
+
     // Create customer on Pagar.me
     const customerId = await this.pagarmeService.createCustomer({
       name: user.name,

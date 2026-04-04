@@ -140,26 +140,36 @@ export async function fetchRecentWorkouts(daysSince = 30): Promise<HealthWorkout
 
 // ─── Sync to RR API ──────────────────────────────────────────────────────────
 
-export async function syncHealthKitToAPI(daysSince = 7): Promise<{ synced: number; errors: number }> {
+export async function syncHealthKitToAPI(daysSince = 7): Promise<{ synced: number; skipped: number; errors: number }> {
   const granted = await requestHealthKitPermissions();
-  if (!granted) return { synced: 0, errors: 0 };
+  if (!granted) return { synced: 0, skipped: 0, errors: 0 };
 
   const workouts = await fetchRecentWorkouts(daysSince);
-  if (workouts.length === 0) return { synced: 0, errors: 0 };
+  if (workouts.length === 0) return { synced: 0, skipped: 0, errors: 0 };
 
-  let synced = 0;
-  let errors = 0;
-
-  for (const workout of workouts) {
-    try {
-      await api.post('/workouts/sync/health', workout);
-      synced++;
-    } catch {
-      errors++;
+  try {
+    // Send all workouts in a single batch call
+    const res = await api.post('/workouts/sync/health', workouts);
+    const data = res.data as { synced?: number; skipped?: number } | undefined;
+    return {
+      synced: data?.synced ?? workouts.length,
+      skipped: data?.skipped ?? 0,
+      errors: 0,
+    };
+  } catch {
+    // Fallback: send one by one if batch fails
+    let synced = 0;
+    let errors = 0;
+    for (const workout of workouts) {
+      try {
+        await api.post('/workouts/sync/health', workout);
+        synced++;
+      } catch {
+        errors++;
+      }
     }
+    return { synced, skipped: 0, errors };
   }
-
-  return { synced, errors };
 }
 
 // ─── Read heart rate samples ─────────────────────────────────────────────────

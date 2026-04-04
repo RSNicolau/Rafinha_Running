@@ -2,6 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { GarminService } from './garmin/garmin.service';
 import { StravaService } from './strava/strava.service';
+import { CorosService } from './coros/coros.service';
+import { PolarService } from './polar/polar.service';
 import { IntegrationProvider } from '@prisma/client';
 
 @Injectable()
@@ -10,6 +12,8 @@ export class IntegrationsService {
     private prisma: PrismaService,
     private garminService: GarminService,
     private stravaService: StravaService,
+    private corosService: CorosService,
+    private polarService: PolarService,
   ) {}
 
   async getUserIntegrations(userId: string) {
@@ -32,6 +36,10 @@ export class IntegrationsService {
         return this.garminService.getAuthUrl(userId);
       case IntegrationProvider.STRAVA:
         return this.stravaService.getAuthUrl(userId);
+      case IntegrationProvider.COROS:
+        return this.corosService.getAuthUrl(userId);
+      case IntegrationProvider.POLAR:
+        return this.polarService.getAuthUrl(userId);
       default:
         throw new NotFoundException(`Integração ${provider} não suportada`);
     }
@@ -47,6 +55,10 @@ export class IntegrationsService {
         return this.garminService.handleCallback(code, state);
       case IntegrationProvider.STRAVA:
         return this.stravaService.handleCallback(code, state);
+      case IntegrationProvider.COROS:
+        return this.corosService.handleCallback(code, state);
+      case IntegrationProvider.POLAR:
+        return this.polarService.handleCallback(code, state);
       default:
         throw new NotFoundException(`Integração ${provider} não suportada`);
     }
@@ -84,10 +96,30 @@ export class IntegrationsService {
         case IntegrationProvider.STRAVA:
           results.push(await this.stravaService.syncActivities(userId, integration));
           break;
+        case IntegrationProvider.COROS:
+          results.push(await this.corosService.syncActivities(userId, integration));
+          break;
+        case IntegrationProvider.POLAR:
+          results.push(await this.polarService.syncActivities(userId, integration));
+          break;
       }
     }
 
     return { synced: results };
+  }
+
+  // ── Strava Webhook Setup ──
+
+  async setupStravaWebhook(apiBaseUrl: string) {
+    const callbackUrl = `${apiBaseUrl}/webhooks/strava`;
+    return this.stravaService.registerWebhook(callbackUrl);
+  }
+
+  // ── Polar Webhook Setup ──
+
+  async setupPolarWebhook(apiBaseUrl: string) {
+    const callbackUrl = `${apiBaseUrl}/webhooks/polar`;
+    return this.polarService.registerWebhook(callbackUrl);
   }
 
   // ── Garmin Push (Training API) ──
@@ -108,7 +140,6 @@ export class IntegrationsService {
     aspectType: string;
     updates?: any;
   }) {
-    // Find user by Strava external ID
     const integration = await this.prisma.fitnessIntegration.findFirst({
       where: {
         externalUserId: data.athleteId,
@@ -125,18 +156,13 @@ export class IntegrationsService {
         integration,
         data.activityId,
       );
-    } else if (data.aspectType === 'update' && data.updates) {
-      // Handle activity title/description updates if needed
-      // For now just refresh sync timestamp
     } else if (data.aspectType === 'delete') {
-      // Mark the corresponding workout result as deleted by clearing external ID
       await this.prisma.workoutResult.updateMany({
         where: { externalId: data.activityId },
         data: { externalId: null },
       });
     }
 
-    // Update last sync timestamp
     await this.prisma.fitnessIntegration.update({
       where: { id: integration.id },
       data: { lastSyncAt: new Date() },
@@ -212,7 +238,6 @@ export class IntegrationsService {
 
     if (!integration) return;
 
-    // Update athlete profile with health metrics
     if (data.restingHR) {
       await this.prisma.athleteProfile.updateMany({
         where: { userId: integration.userId },
@@ -224,5 +249,16 @@ export class IntegrationsService {
       where: { id: integration.id },
       data: { lastSyncAt: new Date() },
     });
+  }
+
+  // ── Polar Webhook Handlers ──
+
+  async handlePolarExercise(data: {
+    userId: string;
+    entity_id: string;
+    event_type: string;
+    timestamp: string;
+  }) {
+    await this.polarService.handleWebhookExercise(data);
   }
 }

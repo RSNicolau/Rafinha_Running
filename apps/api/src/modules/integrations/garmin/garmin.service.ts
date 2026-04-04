@@ -96,6 +96,21 @@ export class GarminService {
 
     const tokenData = await this.exchangeCodeForToken(code);
 
+    // Fetch the Garmin user ID from the Health API — this is what webhooks send as userId
+    let garminUserId = tokenData.access_token; // fallback: use token as identifier
+    try {
+      const userRes = await fetch(`${GARMIN_API_BASE}/wellness-api/rest/user/id`, {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (userRes.ok) {
+        const userData = await userRes.json() as any;
+        garminUserId = userData.userId || userData.id || tokenData.access_token;
+      }
+    } catch {
+      this.logger.warn('Could not fetch Garmin user ID — falling back to access token as identifier');
+    }
+
     await this.prisma.fitnessIntegration.upsert({
       where: {
         userId_provider: { userId, provider: IntegrationProvider.GARMIN },
@@ -106,13 +121,14 @@ export class GarminService {
         accessToken: tokenData.access_token,
         refreshToken: tokenData.refresh_token,
         expiresAt: new Date(Date.now() + tokenData.expires_in * 1000),
-        externalUserId: userId,
+        externalUserId: garminUserId,
         isActive: true,
       },
       update: {
         accessToken: tokenData.access_token,
         refreshToken: tokenData.refresh_token,
         expiresAt: new Date(Date.now() + tokenData.expires_in * 1000),
+        externalUserId: garminUserId,
         isActive: true,
       },
     });
