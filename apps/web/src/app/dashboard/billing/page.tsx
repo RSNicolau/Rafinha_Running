@@ -121,8 +121,11 @@ export default function BillingPage() {
 
   // Card state
   const [cardLoading, setCardLoading] = useState<string | null>(null);
-  const [cardToken, setCardToken] = useState('');
   const [cardPlanType, setCardPlanType] = useState<string | null>(null);
+  const [cardNumber, setCardNumber] = useState('');
+  const [cardHolder, setCardHolder] = useState('');
+  const [cardExpiry, setCardExpiry] = useState('');
+  const [cardCvv, setCardCvv] = useState('');
 
   // Payment history
   const [history, setHistory] = useState<PaymentHistory | null>(null);
@@ -212,25 +215,63 @@ export default function BillingPage() {
     }
   };
 
+  const formatCardNumber = (v: string) =>
+    v.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
+
+  const formatExpiry = (v: string) => {
+    const d = v.replace(/\D/g, '').slice(0, 4);
+    return d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d;
+  };
+
   const handleCardPayment = async (plan: typeof PLANS[0]) => {
-    if (!cardToken.trim()) {
-      alert('Informe o token do cartão gerado pelo Pagar.me.js');
+    const raw = cardNumber.replace(/\s/g, '');
+    if (raw.length < 16 || !cardHolder.trim() || cardExpiry.length < 5 || cardCvv.length < 3) {
+      alert('Preencha todos os dados do cartão corretamente.');
       return;
     }
     setCardLoading(plan.type);
     try {
+      // Tokenize via Pagar.me API (using public encryption key)
+      const ek = process.env.NEXT_PUBLIC_PAGARME_EK;
+      let cardToken = '';
+      if (ek) {
+        const tokenRes = await fetch('https://api.pagar.me/core/v5/tokens?appId=' + ek, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'card',
+            card: {
+              number: raw,
+              holder_name: cardHolder.trim().toUpperCase(),
+              exp_month: Number(cardExpiry.slice(0, 2)),
+              exp_year: Number(cardExpiry.slice(3)),
+              cvv: cardCvv,
+            },
+          }),
+        });
+        if (!tokenRes.ok) {
+          const err = await tokenRes.json();
+          throw new Error(err?.message || 'Erro ao tokenizar cartão');
+        }
+        const tokenData = await tokenRes.json();
+        cardToken = tokenData.id;
+      } else {
+        // Dev mode: skip tokenization
+        cardToken = `dev_token_${Date.now()}`;
+      }
+
       const { data } = await api.post('/payments/card', {
         amount: plan.amount,
         description: `Plano ${plan.name} - RR Rafinha Running`,
         planId: plan.type,
-        cardToken: cardToken.trim(),
+        cardToken,
       });
-      alert(`Pagamento com cartão processado! Status: ${data.status}`);
-      setCardToken('');
+      alert(`Pagamento processado! Status: ${data.status}`);
+      setCardNumber(''); setCardHolder(''); setCardExpiry(''); setCardCvv('');
       setCardPlanType(null);
       loadHistory();
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'Erro ao processar pagamento com cartão');
+      alert(e?.message || e?.response?.data?.message || 'Erro ao processar pagamento');
     } finally {
       setCardLoading(null);
     }
@@ -402,34 +443,52 @@ export default function BillingPage() {
                   </button>
                 )}
 
-                {/* Card token input (inline, per plan) */}
+                {/* Card form */}
                 {cardPlanType === plan.type && !isCurrent && (
-                  <div className="mt-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
-                    <p className="text-xs text-gray-500 mb-2">
-                      Token gerado pelo{' '}
-                      <a
-                        href="https://docs.pagar.me/docs/pagarme-js"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-primary underline"
-                      >
-                        Pagar.me.js
-                      </a>{' '}
-                      no frontend
-                    </p>
+                  <div className="mt-3 p-4 bg-gray-50 rounded-xl border border-gray-100 space-y-2">
+                    <p className="text-xs font-semibold text-gray-600 mb-1">Dados do cartão</p>
                     <input
                       type="text"
-                      placeholder="token_xxxxxxxxxxxxxxxx"
-                      value={cardToken}
-                      onChange={(e) => setCardToken(e.target.value)}
-                      className="w-full text-xs font-mono px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-1 focus:ring-primary mb-2"
+                      inputMode="numeric"
+                      placeholder="Número do cartão"
+                      value={cardNumber}
+                      onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
+                      maxLength={19}
+                      className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-1 focus:ring-primary font-mono"
                     />
+                    <input
+                      type="text"
+                      placeholder="Nome impresso no cartão"
+                      value={cardHolder}
+                      onChange={(e) => setCardHolder(e.target.value.toUpperCase())}
+                      className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="MM/AA"
+                        value={cardExpiry}
+                        onChange={(e) => setCardExpiry(formatExpiry(e.target.value))}
+                        maxLength={5}
+                        className="w-1/2 text-sm px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                      />
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="CVV"
+                        value={cardCvv}
+                        onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                        maxLength={4}
+                        className="w-1/2 text-sm px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                      />
+                    </div>
                     <button
                       onClick={() => handleCardPayment(plan)}
-                      disabled={cardLoading === plan.type || !cardToken.trim()}
+                      disabled={cardLoading === plan.type}
                       className="w-full py-2 rounded-lg text-xs font-medium bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 cursor-pointer transition"
                     >
-                      {cardLoading === plan.type ? 'Processando...' : 'Confirmar Pagamento'}
+                      {cardLoading === plan.type ? 'Processando...' : `Pagar R$ ${(plan.amount / 100).toFixed(2).replace('.', ',')}`}
                     </button>
                   </div>
                 )}

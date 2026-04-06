@@ -10,6 +10,7 @@ import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { OAuth2Client } from 'google-auth-library';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import { UserRole } from '@prisma/client';
 
@@ -20,6 +21,7 @@ export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
+    private emailService: EmailService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -211,14 +213,11 @@ export class AuthService {
 
     this.logger.log(`Password reset token generated for ${email}`);
 
-    // In production: send email with reset link containing `token`
-    // For now return token so client can show a deep link
-    const resetUrl = `${process.env.APP_URL || 'http://localhost:8081'}/reset-password?token=${token}&email=${encodeURIComponent(email)}`;
+    await this.emailService.sendPasswordReset(email, user.name, token);
 
     return {
       message: 'Se o e-mail existir, você receberá um link de redefinição.',
-      // Only exposed in non-production for testing. Remove before going live.
-      ...(process.env.NODE_ENV !== 'production' && { resetUrl, token }),
+      ...(process.env.NODE_ENV !== 'production' && { token }),
     };
   }
 

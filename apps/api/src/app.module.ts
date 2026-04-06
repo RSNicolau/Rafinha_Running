@@ -21,6 +21,7 @@ import { BrandingModule } from './modules/branding/branding.module';
 import { InvitesModule } from './modules/invites/invites.module';
 import { NutritionModule } from './modules/nutrition/nutrition.module';
 import { HealthModule } from './modules/health/health.module';
+import { EmailModule } from './modules/email/email.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { HealthModule } from './modules/health/health.module';
     InvitesModule,
     NutritionModule,
     HealthModule,
+    EmailModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: CustomThrottlerGuard },

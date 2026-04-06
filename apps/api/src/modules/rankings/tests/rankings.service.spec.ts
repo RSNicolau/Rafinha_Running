@@ -77,7 +77,7 @@ describe('RankingsService', () => {
     it('should return workout count rankings', async () => {
       mockPrisma.$queryRaw.mockResolvedValue(mockRawWorkoutsResult);
 
-      const result = await service.getTopByWorkouts(20);
+      const result = await service.getTopByWorkouts('all', 20);
 
       expect(result).toHaveLength(2);
       expect(result[0].position).toBe(1);

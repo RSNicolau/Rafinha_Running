@@ -49,7 +49,7 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    api.get('/chat')
+    api.get('/conversations')
       .then((r) => setConversations(r.data || []))
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -59,10 +59,10 @@ export default function ChatPage() {
     setSelected(conv);
     setLoadingMsgs(true);
     try {
-      const { data } = await api.get(`/chat/${conv.id}/messages`);
+      const { data } = await api.get(`/conversations/${conv.id}/messages`);
       setMessages(data || []);
       // Mark as read
-      api.post(`/chat/${conv.id}/read`).catch(() => {});
+      api.post(`/conversations/${conv.id}/read`).catch(() => {});
     } catch {
       setMessages([]);
     } finally {
@@ -77,7 +77,7 @@ export default function ChatPage() {
     setInput('');
     setSending(true);
     try {
-      const { data } = await api.post(`/chat/${selected.id}/messages`, { content: text });
+      const { data } = await api.post(`/conversations/${selected.id}/messages`, { content: text });
       setMessages((prev) => [...prev, data]);
       setConversations((prev) =>
         prev.map((c) => c.id === selected.id ? { ...c, lastMessageAt: new Date().toISOString() } : c)

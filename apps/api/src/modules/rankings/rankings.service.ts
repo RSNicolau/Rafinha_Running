@@ -3,6 +3,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
 import { WorkoutStatus } from '@prisma/client';
 
+export type RankingPeriod = 'week' | 'month' | 'year' | 'all' | 'monthly';
+
 export interface RankingEntry {
   position: number;
   userId: string;
@@ -14,6 +16,34 @@ export interface RankingEntry {
 
 const RANKINGS_TTL = 5 * 60; // 5 minutes
 
+function periodToDateFilter(period: RankingPeriod): string {
+  switch (period) {
+    case 'week':
+      return `AND wr.created_at >= NOW() - INTERVAL '7 days'`;
+    case 'month':
+    case 'monthly':
+      return `AND wr.created_at >= date_trunc('month', CURRENT_DATE)`;
+    case 'year':
+      return `AND wr.created_at >= date_trunc('year', CURRENT_DATE)`;
+    default:
+      return '';
+  }
+}
+
+function workoutPeriodFilter(period: RankingPeriod): string {
+  switch (period) {
+    case 'week':
+      return `AND w.completed_at >= NOW() - INTERVAL '7 days'`;
+    case 'month':
+    case 'monthly':
+      return `AND w.completed_at >= date_trunc('month', CURRENT_DATE)`;
+    case 'year':
+      return `AND w.completed_at >= date_trunc('year', CURRENT_DATE)`;
+    default:
+      return '';
+  }
+}
+
 @Injectable()
 export class RankingsService {
   constructor(
@@ -21,65 +51,34 @@ export class RankingsService {
     private cache: CacheService,
   ) {}
 
-  async getTopByKm(period: 'all' | 'monthly' = 'all', limit = 20): Promise<RankingEntry[]> {
+  async getTopByKm(period: RankingPeriod = 'all', limit = 20): Promise<RankingEntry[]> {
     limit = Math.min(Math.max(1, Number(limit) || 20), 100);
 
     const cacheKey = `rankings:km:${period}:${limit}`;
     const cached = await this.cache.get<RankingEntry[]>(cacheKey);
     if (cached) return cached;
 
-    let dateFilter = {};
+    const dateClause = periodToDateFilter(period);
 
-    if (period === 'monthly') {
-      const now = new Date();
-      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      dateFilter = { createdAt: { gte: firstDayOfMonth } };
-    }
-
-    const results = await this.prisma.workoutResult.groupBy({
-      by: ['workoutId'],
-      _sum: { distanceMeters: true },
-      where: {
-        ...dateFilter,
-        workout: { status: WorkoutStatus.COMPLETED },
-      },
-    });
-
-    // Precisamos agregar por athleteId via workout
-    // Usar raw query para performance em larga escala
-    const periodLabel = period === 'monthly' ? 'mes' : 'geral';
-
-    const rawQuery = period === 'monthly'
-      ? await this.prisma.$queryRaw<Array<{ user_id: string; name: string; avatar_url: string | null; total_meters: bigint }>>`
-          SELECT w.athlete_id as user_id, u.name, u.avatar_url,
-                 SUM(wr.distance_meters) as total_meters
-          FROM workout_results wr
-          INNER JOIN workouts w ON w.id = wr.workout_id
-          INNER JOIN users u ON u.id = w.athlete_id
-          WHERE w.status = 'COMPLETED'
-            AND wr.created_at >= date_trunc('month', CURRENT_DATE)
-          GROUP BY w.athlete_id, u.name, u.avatar_url
-          ORDER BY total_meters DESC
-          LIMIT ${limit}
-        `
-      : await this.prisma.$queryRaw<Array<{ user_id: string; name: string; avatar_url: string | null; total_meters: bigint }>>`
-          SELECT w.athlete_id as user_id, u.name, u.avatar_url,
-                 SUM(wr.distance_meters) as total_meters
-          FROM workout_results wr
-          INNER JOIN workouts w ON w.id = wr.workout_id
-          INNER JOIN users u ON u.id = w.athlete_id
-          WHERE w.status = 'COMPLETED'
-          GROUP BY w.athlete_id, u.name, u.avatar_url
-          ORDER BY total_meters DESC
-          LIMIT ${limit}
-        `;
+    const rawQuery = await this.prisma.$queryRawUnsafe<Array<{ user_id: string; name: string; avatar_url: string | null; total_meters: bigint }>>(
+      `SELECT w.athlete_id as user_id, u.name, u.avatar_url,
+              SUM(wr.distance_meters) as total_meters
+       FROM workout_results wr
+       INNER JOIN workouts w ON w.id = wr.workout_id
+       INNER JOIN users u ON u.id = w.athlete_id
+       WHERE w.status = 'COMPLETED'
+         ${dateClause}
+       GROUP BY w.athlete_id, u.name, u.avatar_url
+       ORDER BY total_meters DESC
+       LIMIT ${limit}`
+    );
 
     const ranking = rawQuery.map((row, index) => ({
       position: index + 1,
       userId: row.user_id,
       name: row.name,
       avatarUrl: row.avatar_url,
-      value: Math.round(Number(row.total_meters) / 10) / 100, // metros -> km com 2 casas
+      value: Math.round(Number(row.total_meters) / 10) / 100,
       unit: 'km',
     }));
 
@@ -87,25 +86,28 @@ export class RankingsService {
     return ranking;
   }
 
-  async getTopByWorkouts(limit = 20): Promise<RankingEntry[]> {
+  async getTopByWorkouts(period: RankingPeriod = 'all', limit = 20): Promise<RankingEntry[]> {
     limit = Math.min(Math.max(1, Number(limit) || 20), 100);
 
-    const cacheKey = `rankings:workouts:${limit}`;
+    const cacheKey = `rankings:workouts:${period}:${limit}`;
     const cached = await this.cache.get<RankingEntry[]>(cacheKey);
     if (cached) return cached;
 
-    const rawQuery = await this.prisma.$queryRaw<
+    const dateClause = workoutPeriodFilter(period);
+
+    const rawQuery = await this.prisma.$queryRawUnsafe<
       Array<{ user_id: string; name: string; avatar_url: string | null; total_workouts: bigint }>
-    >`
-      SELECT w.athlete_id as user_id, u.name, u.avatar_url,
-             COUNT(*) as total_workouts
-      FROM workouts w
-      INNER JOIN users u ON u.id = w.athlete_id
-      WHERE w.status = 'COMPLETED'
-      GROUP BY w.athlete_id, u.name, u.avatar_url
-      ORDER BY total_workouts DESC
-      LIMIT ${limit}
-    `;
+    >(
+      `SELECT w.athlete_id as user_id, u.name, u.avatar_url,
+              COUNT(*) as total_workouts
+       FROM workouts w
+       INNER JOIN users u ON u.id = w.athlete_id
+       WHERE w.status = 'COMPLETED'
+         ${dateClause}
+       GROUP BY w.athlete_id, u.name, u.avatar_url
+       ORDER BY total_workouts DESC
+       LIMIT ${limit}`
+    );
 
     const ranking = rawQuery.map((row, index) => ({
       position: index + 1,

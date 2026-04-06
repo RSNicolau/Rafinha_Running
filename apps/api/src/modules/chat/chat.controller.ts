@@ -20,6 +20,15 @@ export class ChatController {
     return this.chatService.getConversations(userId, role);
   }
 
+  @Post()
+  @ApiOperation({ summary: 'Obter ou criar conversa entre atleta e coach' })
+  async getOrCreate(
+    @Body('athleteId') athleteId: string,
+    @Body('coachId') coachId: string,
+  ) {
+    return this.chatService.getOrCreateConversation(athleteId, coachId);
+  }
+
   @Get(':id/messages')
   @ApiOperation({ summary: 'Mensagens da conversa' })
   async getMessages(

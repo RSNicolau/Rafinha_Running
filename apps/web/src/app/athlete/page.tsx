@@ -31,20 +31,20 @@ interface Plan {
   status: string;
 }
 
-interface NutritionLog {
-  id?: string;
-  date: string;
-  calories?: number | null;
-  proteinGrams?: number | null;
-  carbsGrams?: number | null;
-  fatGrams?: number | null;
-  notes?: string | null;
+interface NutritionTotals {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
 }
 
-interface WaterLog {
-  id?: string;
-  date: string;
-  amountMl: number;
+interface MealForm {
+  mealName: string;
+  calories: number | '';
+  protein: number | '';
+  carbs: number | '';
+  fat: number | '';
+  notes: string;
 }
 
 const SENSATIONS = [
@@ -141,29 +141,33 @@ function FeedbackModal({ workout, onClose, onSaved }: { workout: Workout; onClos
 }
 
 const WATER_STEPS = [250, 350, 500];
+const EMPTY_MEAL: MealForm = { mealName: '', calories: '', protein: '', carbs: '', fat: '', notes: '' };
 
 function NutritionSection({ userId }: { userId?: string }) {
   const today = new Date().toISOString().slice(0, 10);
-  const [log, setLog] = useState<NutritionLog>({ date: today });
+  const [totals, setTotals] = useState<NutritionTotals | null>(null);
   const [water, setWater] = useState(0);
-  const [savingNutrition, setSavingNutrition] = useState(false);
+  const [waterGoal, setWaterGoal] = useState(3000);
+  const [savingMeal, setSavingMeal] = useState(false);
   const [savingWater, setSavingWater] = useState(false);
-  const [showNutritionForm, setShowNutritionForm] = useState(false);
-  const waterGoalMl = 2500;
+  const [showMealForm, setShowMealForm] = useState(false);
+  const [meal, setMeal] = useState<MealForm>(EMPTY_MEAL);
 
   useEffect(() => {
-    api.get(`/nutrition?date=${today}`).then(r => {
+    api.get(`/nutrition/day?date=${today}`).then(r => {
       const d = r.data;
-      if (d?.nutrition) setLog(d.nutrition);
-      if (d?.waterTotal != null) setWater(d.waterTotal);
+      if (d?.totals) setTotals(d.totals);
+      if (d?.water?.amount != null) setWater(d.water.amount);
+      if (d?.water?.goal != null) setWaterGoal(d.water.goal);
     }).catch(() => {});
   }, [today]);
 
   const handleAddWater = async (ml: number) => {
     setSavingWater(true);
+    const newAmount = water + ml;
     try {
-      const { data } = await api.post('/nutrition/water', { amountMl: ml, date: today });
-      setWater(prev => prev + ml);
+      await api.post('/nutrition/water', { amount: newAmount, date: today });
+      setWater(newAmount);
     } catch {
       // silent
     } finally {
@@ -171,20 +175,32 @@ function NutritionSection({ userId }: { userId?: string }) {
     }
   };
 
-  const handleSaveNutrition = async () => {
-    setSavingNutrition(true);
+  const handleSaveMeal = async () => {
+    if (!meal.mealName.trim()) return;
+    setSavingMeal(true);
     try {
-      await api.post('/nutrition', { ...log, date: today });
-      setShowNutritionForm(false);
+      await api.post('/nutrition/meal', {
+        date: today,
+        mealName: meal.mealName.trim(),
+        calories: Number(meal.calories) || 0,
+        protein: Number(meal.protein) || 0,
+        carbs: Number(meal.carbs) || 0,
+        fat: Number(meal.fat) || 0,
+        notes: meal.notes.trim() || undefined,
+      });
+      // refresh totals
+      const r = await api.get(`/nutrition/day?date=${today}`);
+      if (r.data?.totals) setTotals(r.data.totals);
+      setMeal(EMPTY_MEAL);
+      setShowMealForm(false);
     } catch {
       alert('Erro ao salvar. Tente novamente.');
     } finally {
-      setSavingNutrition(false);
+      setSavingMeal(false);
     }
   };
 
-  const waterPercent = Math.min(100, Math.round((water / waterGoalMl) * 100));
-  const hasNutrition = log.calories != null;
+  const waterPercent = Math.min(100, Math.round((water / waterGoal) * 100));
 
   return (
     <div className="space-y-3 mt-4">
@@ -193,7 +209,7 @@ function NutritionSection({ userId }: { userId?: string }) {
         <div className="flex items-center justify-between mb-3">
           <div>
             <h2 className="text-sm font-semibold text-gray-700">Hidratação</h2>
-            <p className="text-xs text-gray-400">Meta: {(waterGoalMl / 1000).toFixed(1)}L por dia</p>
+            <p className="text-xs text-gray-400">Meta: {(waterGoal / 1000).toFixed(1)}L por dia</p>
           </div>
           <div className="text-right">
             <p className="text-lg font-bold text-[#DC2626]">{water >= 1000 ? `${(water/1000).toFixed(1)}L` : `${water}ml`}</p>
@@ -201,7 +217,6 @@ function NutritionSection({ userId }: { userId?: string }) {
           </div>
         </div>
 
-        {/* Progress bar */}
         <div className="h-2.5 rounded-full bg-gray-100 overflow-hidden mb-4">
           <div
             className="h-full rounded-full transition-all duration-500"
@@ -209,7 +224,6 @@ function NutritionSection({ userId }: { userId?: string }) {
           />
         </div>
 
-        {/* Quick add buttons */}
         <div className="flex gap-2">
           {WATER_STEPS.map(ml => (
             <button
@@ -232,40 +246,49 @@ function NutritionSection({ userId }: { userId?: string }) {
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-gray-700">Nutrição de Hoje</h2>
           <button
-            onClick={() => setShowNutritionForm(v => !v)}
+            onClick={() => setShowMealForm(v => !v)}
             className="text-xs font-medium text-[#DC2626] hover:underline cursor-pointer"
           >
-            {showNutritionForm ? 'Cancelar' : hasNutrition ? 'Editar' : '+ Registrar'}
+            {showMealForm ? 'Cancelar' : '+ Refeição'}
           </button>
         </div>
 
-        {!showNutritionForm && hasNutrition ? (
-          <div className="grid grid-cols-2 gap-3">
+        {totals && (totals.calories > 0 || totals.protein > 0) ? (
+          <div className="grid grid-cols-2 gap-3 mb-3">
             {[
-              { label: 'Calorias', value: log.calories ? `${log.calories} kcal` : '—', color: 'text-amber-600' },
-              { label: 'Proteína', value: log.proteinGrams ? `${log.proteinGrams}g` : '—', color: 'text-blue-600' },
-              { label: 'Carboidratos', value: log.carbsGrams ? `${log.carbsGrams}g` : '—', color: 'text-emerald-600' },
-              { label: 'Gordura', value: log.fatGrams ? `${log.fatGrams}g` : '—', color: 'text-purple-600' },
+              { label: 'Calorias', value: `${totals.calories} kcal`, color: 'text-amber-600' },
+              { label: 'Proteína', value: `${totals.protein.toFixed(0)}g`, color: 'text-blue-600' },
+              { label: 'Carboidratos', value: `${totals.carbs.toFixed(0)}g`, color: 'text-emerald-600' },
+              { label: 'Gordura', value: `${totals.fat.toFixed(0)}g`, color: 'text-purple-600' },
             ].map(item => (
               <div key={item.label} className="bg-gray-50/80 rounded-xl p-3 text-center">
                 <p className={`text-base font-bold ${item.color}`}>{item.value}</p>
                 <p className="text-xs text-gray-400 mt-0.5">{item.label}</p>
               </div>
             ))}
-            {log.notes && <p className="col-span-2 text-xs text-gray-400 italic">{log.notes}</p>}
           </div>
-        ) : !showNutritionForm ? (
-          <p className="text-sm text-gray-400 text-center py-3">Nenhum registro para hoje. Clique em "+ Registrar" para adicionar.</p>
+        ) : !showMealForm ? (
+          <p className="text-sm text-gray-400 text-center py-3">Nenhuma refeição registrada hoje.</p>
         ) : null}
 
-        {showNutritionForm && (
-          <div className="space-y-3">
+        {showMealForm && (
+          <div className="space-y-3 border-t border-gray-100 pt-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Nome da refeição *</label>
+              <input
+                type="text"
+                placeholder="Ex: Café da manhã, Almoço..."
+                value={meal.mealName}
+                onChange={e => setMeal(p => ({ ...p, mealName: e.target.value }))}
+                className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-100 focus:border-[#DC2626]/40"
+              />
+            </div>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { key: 'calories', label: 'Calorias (kcal)', placeholder: '2000' },
-                { key: 'proteinGrams', label: 'Proteína (g)', placeholder: '150' },
-                { key: 'carbsGrams', label: 'Carboidratos (g)', placeholder: '250' },
-                { key: 'fatGrams', label: 'Gordura (g)', placeholder: '70' },
+                { key: 'calories', label: 'Calorias (kcal)', placeholder: '600' },
+                { key: 'protein', label: 'Proteína (g)', placeholder: '40' },
+                { key: 'carbs', label: 'Carboidratos (g)', placeholder: '80' },
+                { key: 'fat', label: 'Gordura (g)', placeholder: '20' },
               ].map(field => (
                 <div key={field.key}>
                   <label className="block text-xs text-gray-500 mb-1">{field.label}</label>
@@ -273,29 +296,19 @@ function NutritionSection({ userId }: { userId?: string }) {
                     type="number"
                     min={0}
                     placeholder={field.placeholder}
-                    value={(log as any)[field.key] ?? ''}
-                    onChange={e => setLog(p => ({ ...p, [field.key]: e.target.value ? Number(e.target.value) : null }))}
+                    value={(meal as any)[field.key]}
+                    onChange={e => setMeal(p => ({ ...p, [field.key]: e.target.value === '' ? '' : Number(e.target.value) }))}
                     className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-100 focus:border-[#DC2626]/40"
                   />
                 </div>
               ))}
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Observações</label>
-              <input
-                type="text"
-                placeholder="Ex: dia de dieta, pré-treino..."
-                value={log.notes ?? ''}
-                onChange={e => setLog(p => ({ ...p, notes: e.target.value || null }))}
-                className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-100 focus:border-[#DC2626]/40"
-              />
-            </div>
             <button
-              onClick={handleSaveNutrition}
-              disabled={savingNutrition}
+              onClick={handleSaveMeal}
+              disabled={savingMeal || !meal.mealName.trim()}
               className="w-full py-2.5 rounded-xl bg-[#DC2626] hover:bg-red-700 text-white text-sm font-semibold transition disabled:opacity-50 cursor-pointer"
             >
-              {savingNutrition ? 'Salvando...' : 'Salvar nutrição'}
+              {savingMeal ? 'Salvando...' : 'Salvar refeição'}
             </button>
           </div>
         )}

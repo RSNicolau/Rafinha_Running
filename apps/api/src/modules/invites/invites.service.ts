@@ -7,6 +7,7 @@ import {
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { EmailService } from '../email/email.service';
 import { CreateInviteDto, AcceptInviteDto } from './dto/invite.dto';
 import { NotificationType } from '@prisma/client';
 
@@ -15,6 +16,7 @@ export class InvitesService {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
+    private emailService: EmailService,
   ) {}
 
   async createInvite(coachId: string, dto: CreateInviteDto) {
@@ -33,6 +35,14 @@ export class InvitesService {
       data: { coachId, email: dto.email, expiresAt },
       include: { coach: { select: { name: true, tenantBranding: true } } },
     });
+
+    // Send invite email (fire-and-forget, don't block response)
+    this.emailService.sendAthleteInvite(
+      dto.email,
+      invite.coach.name,
+      invite.token,
+      invite.coach.tenantBranding?.tenantName ?? undefined,
+    ).catch(() => {});
 
     return invite;
   }
