@@ -249,13 +249,18 @@ export default function LiveTrackingPage() {
   const [selectedAthleteId, setSelectedAthleteId] = useState<string | null>(null);
 
   useEffect(() => {
-    const socket = io('/live', {
+    const apiBase = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1')
+      .replace('/api/v1', '');
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+
+    const socket = io(`${apiBase}/live`, {
       transports: ['websocket'],
       autoConnect: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
+      auth: { token },
     });
 
     socket.on('connect', () => { setIsConnected(true); setReconnecting(false); });
