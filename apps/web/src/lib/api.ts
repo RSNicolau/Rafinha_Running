@@ -33,7 +33,7 @@ api.interceptors.response.use(
         isRefreshing = true;
 
         try {
-          const { data } = await axios.post('/api/auth/refresh', { refreshToken });
+          const { data } = await axios.post('/api/v1/auth/refresh', { refreshToken });
           const newToken = data.accessToken;
 
           localStorage.setItem('rr_access_token', newToken);
