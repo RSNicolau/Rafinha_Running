@@ -11,6 +11,7 @@ import { useTheme } from '../../src/theme';
 import { GlassInput } from '../../src/components/ui';
 import { useAuthStore } from '../../src/stores/auth.store';
 import { useGoogleAuth } from '../../src/hooks/useGoogleAuth';
+import { useAppleAuth } from '../../src/hooks/useAppleAuth';
 import { ptBR } from '../../src/i18n/pt-BR';
 
 export default function LoginScreen() {
@@ -20,16 +21,31 @@ export default function LoginScreen() {
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
-  const { login, googleLogin, isLoading, error, clearError } = useAuthStore();
+  const { login, googleLogin, appleLogin, isLoading, error, clearError } = useAuthStore();
+  const { signIn: signInWithApple, isSupported: isAppleSupported } = useAppleAuth();
+
+  const navigateByRole = () => {
+    const user = useAuthStore.getState().user;
+    if (user?.role === 'COACH') router.replace('/(coach)');
+    else if (user?.role === 'ADMIN') router.replace('/(admin)');
+    else router.replace('/(athlete)');
+  };
 
   const handleGoogleSuccess = async (idToken: string) => {
     clearError();
     try {
       await googleLogin(idToken);
-      const user = useAuthStore.getState().user;
-      if (user?.role === 'COACH') router.replace('/(coach)');
-      else if (user?.role === 'ADMIN') router.replace('/(admin)');
-      else router.replace('/(athlete)');
+      navigateByRole();
+    } catch {}
+  };
+
+  const handleAppleSignIn = async () => {
+    clearError();
+    try {
+      const result = await signInWithApple();
+      if (!result) return; // user cancelled
+      await appleLogin(result.identityToken, result.fullName);
+      navigateByRole();
     } catch {}
   };
 
@@ -48,10 +64,7 @@ export default function LoginScreen() {
     if (!validate()) return;
     try {
       await login(email, password);
-      const user = useAuthStore.getState().user;
-      if (user?.role === 'COACH') router.replace('/(coach)');
-      else if (user?.role === 'ADMIN') router.replace('/(admin)');
-      else router.replace('/(athlete)');
+      navigateByRole();
     } catch {}
   };
 
@@ -246,6 +259,29 @@ export default function LoginScreen() {
                 Continuar com Google
               </Text>
             </Pressable>
+
+            {/* Apple — iOS only */}
+            {isAppleSupported && (
+              <Pressable
+                onPress={handleAppleSignIn}
+                disabled={isLoading}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  paddingVertical: 13,
+                  borderRadius: 14,
+                  borderWidth: 1,
+                  marginTop: 10,
+                  borderColor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)',
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#000',
+                  opacity: isLoading ? 0.6 : 1,
+                }}
+              >
+                <Ionicons name="logo-apple" size={17} color={isDark ? colors.text : '#FFF'} />
+                <Text style={{ fontSize: 13, fontWeight: '600', color: isDark ? colors.text : '#FFF' }}>
+                  Continuar com Apple
+                </Text>
+              </Pressable>
+            )}
           </View>
 
           {/* Register */}

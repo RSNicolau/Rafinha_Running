@@ -69,6 +69,12 @@ export const authService = {
     return response.data;
   },
 
+  async appleLogin(identityToken: string, fullName?: string): Promise<AuthResponse> {
+    const response = await api.post<AuthResponse>('/auth/apple', { identityToken, fullName });
+    await this.saveTokens(response.data);
+    return response.data;
+  },
+
   async logout(): Promise<void> {
     await storage.deleteItem('accessToken');
     await storage.deleteItem('refreshToken');

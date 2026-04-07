@@ -2,7 +2,7 @@ import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { RegisterDto, LoginDto, RefreshTokenDto, GoogleAuthDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto, RefreshTokenDto, GoogleAuthDto, AppleAuthDto } from './dto/auth.dto';
 
 @ApiTags('Autenticação')
 @Controller('auth')
@@ -36,6 +36,14 @@ export class AuthController {
   @ApiOperation({ summary: 'Login com Google' })
   async googleLogin(@Body() dto: GoogleAuthDto) {
     return this.authService.googleLogin(dto.idToken);
+  }
+
+  @Post('apple')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: 'Login com Apple (Sign in with Apple)' })
+  async appleLogin(@Body() dto: AppleAuthDto) {
+    return this.authService.appleLogin(dto.identityToken, dto.fullName);
   }
 
   @Post('forgot-password')

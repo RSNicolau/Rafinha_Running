@@ -19,6 +19,7 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
   googleLogin: (idToken: string) => Promise<void>;
+  appleLogin: (identityToken: string, fullName?: string) => Promise<void>;
   logout: () => Promise<void>;
   loadStoredUser: () => Promise<void>;
   clearError: () => void;
@@ -64,6 +65,18 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ user: response.user, isAuthenticated: true, isLoading: false });
     } catch (err: any) {
       const message = err.response?.data?.message || 'Erro ao fazer login com Google';
+      set({ error: message, isLoading: false });
+      throw err;
+    }
+  },
+
+  appleLogin: async (identityToken: string, fullName?: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const response = await authService.appleLogin(identityToken, fullName);
+      set({ user: response.user, isAuthenticated: true, isLoading: false });
+    } catch (err: any) {
+      const message = err.response?.data?.message || 'Erro ao fazer login com Apple';
       set({ error: message, isLoading: false });
       throw err;
     }

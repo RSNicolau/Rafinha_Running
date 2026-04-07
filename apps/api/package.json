@@ -33,6 +33,7 @@
     "@sentry/profiling-node": "^8.0.0",
     "@supabase/supabase-js": "^2.47.0",
     "@types/helmet": "^4.0.0",
+    "apple-signin-auth": "^2.0.0",
     "bcrypt": "^5.1.1",
     "bullmq": "^5.0.0",
     "class-transformer": "^0.5.1",

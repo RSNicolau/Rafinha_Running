@@ -9,6 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import { randomBytes } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { OAuth2Client } from 'google-auth-library';
+import * as appleSignin from 'apple-signin-auth';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
@@ -172,6 +173,78 @@ export class AuthService {
           athleteProfile: { create: {} },
         },
       });
+    }
+
+    const tokens = await this.generateTokens(user.id, user.role);
+
+    return {
+      ...tokens,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        avatarUrl: user.avatarUrl,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      },
+    };
+  }
+
+  async appleLogin(identityToken: string, fullName?: string) {
+    let applePayload: any;
+    try {
+      // Apple's clientId for native iOS is the bundle ID
+      // For web/service it's the Service ID — support both via env
+      const clientId = process.env.APPLE_CLIENT_ID || 'com.rafinharunning.app';
+      applePayload = await appleSignin.verifyIdToken(identityToken, {
+        audience: clientId,
+        ignoreExpiration: false,
+      });
+    } catch {
+      throw new UnauthorizedException('Token Apple inválido');
+    }
+
+    const { sub: appleUserId, email } = applePayload;
+
+    if (!appleUserId) {
+      throw new UnauthorizedException('Token Apple inválido');
+    }
+
+    // Try to find by appleId first, then fall back to email
+    let user = await this.prisma.user.findFirst({
+      where: { appleId: appleUserId },
+    });
+
+    if (!user && email) {
+      user = await this.prisma.user.findUnique({ where: { email } });
+      if (user && !user.appleId) {
+        // Link existing account to Apple ID
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: { appleId: appleUserId },
+        });
+      }
+    }
+
+    if (!user) {
+      // New user — create account
+      const randomPassword = await bcrypt.hash(Math.random().toString(36), 12);
+      const name = fullName?.trim() || (email ? email.split('@')[0] : `Atleta_${appleUserId.slice(0, 6)}`);
+      user = await this.prisma.user.create({
+        data: {
+          email: email ?? null,
+          passwordHash: randomPassword,
+          name,
+          role: 'ATHLETE' as any,
+          appleId: appleUserId,
+          athleteProfile: { create: {} },
+        },
+      });
+    }
+
+    if (!user.isActive) {
+      throw new UnauthorizedException('Conta desativada');
     }
 
     const tokens = await this.generateTokens(user.id, user.role);

@@ -43,3 +43,14 @@ export class GoogleAuthDto {
   @IsString({ message: 'Token Google é obrigatório' })
   idToken: string;
 }
+
+export class AppleAuthDto {
+  @ApiProperty({ description: 'Apple identity token from expo-apple-authentication' })
+  @IsString({ message: 'Identity token Apple é obrigatório' })
+  identityToken: string;
+
+  @ApiProperty({ description: 'User full name (only provided on first login)', required: false })
+  @IsString()
+  @IsOptional()
+  fullName?: string;
+}
