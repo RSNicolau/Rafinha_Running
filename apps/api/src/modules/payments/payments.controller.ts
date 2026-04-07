@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Body, Query, Param, Req, UseGuards,
+  Controller, Get, Post, Put, Body, Query, Param, Req, UseGuards,
   RawBodyRequest, UnauthorizedException, Headers, HttpCode, HttpStatus,
   Logger, NotFoundException,
 } from '@nestjs/common';
@@ -56,6 +56,42 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Cancelar assinatura' })
   async cancelSubscription(@CurrentUser('id') userId: string) {
     return this.paymentsService.cancelSubscription(userId);
+  }
+
+  // ─── Per-coach payment gateway settings ────────────────────────────────────
+
+  @Get('settings')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'))
+  @ApiOperation({ summary: 'Configurações do gateway de pagamento do coach' })
+  async getPaymentSettings(@CurrentUser('id') coachId: string) {
+    return this.paymentsService.getPaymentSettings(coachId);
+  }
+
+  @Put('settings')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'))
+  @ApiOperation({ summary: 'Atualizar configurações do gateway de pagamento' })
+  async updatePaymentSettings(
+    @CurrentUser('id') coachId: string,
+    @Body() body: {
+      provider: string;
+      paymentEnabled: boolean;
+      pagarmeApiKey?: string;
+      pagarmeWebhookSecret?: string;
+      stripeSecretKey?: string;
+      stripeWebhookSecret?: string;
+    },
+  ) {
+    return this.paymentsService.updatePaymentSettings(coachId, body);
+  }
+
+  @Post('settings/test')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'))
+  @ApiOperation({ summary: 'Testar conexão com o gateway configurado' })
+  async testPaymentConnection(@CurrentUser('id') coachId: string) {
+    return this.paymentsService.testPaymentConnection(coachId);
   }
 
   @Get('payments/history')

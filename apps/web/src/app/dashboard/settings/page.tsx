@@ -148,6 +148,20 @@ export default function SettingsPage() {
   const [brainFeedback, setBrainFeedback] = useState<FeedbackState>(null);
   const [brainTestResult, setBrainTestResult] = useState<{ ok: boolean; latencyMs: number; model: string } | null>(null);
 
+  // Payment gateway settings (COACH only)
+  const [paymentSettings, setPaymentSettings] = useState<{ provider: string; paymentEnabled: boolean; hasPagarmeKey: boolean; hasStripeKey: boolean } | null>(null);
+  const [paymentProvider, setPaymentProvider] = useState<'pagarme' | 'stripe'>('pagarme');
+  const [paymentEnabled, setPaymentEnabled] = useState(false);
+  const [pagarmeApiKey, setPagarmeApiKey] = useState('');
+  const [pagarmeWebhook, setPagarmeWebhook] = useState('');
+  const [stripeKey, setStripeKey] = useState('');
+  const [stripeWebhook, setStripeWebhook] = useState('');
+  const [showPaymentKeys, setShowPaymentKeys] = useState(false);
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [testingPayment, setTestingPayment] = useState(false);
+  const [paymentFeedback, setPaymentFeedback] = useState<FeedbackState>(null);
+  const [paymentTestResult, setPaymentTestResult] = useState<{ ok: boolean; latencyMs: number } | null>(null);
+
   // Branding (COACH only)
   const [brandingForm, setBrandingForm] = useState<BrandingForm>({
     tenantName: '',
@@ -209,6 +223,12 @@ export default function SettingsPage() {
         setBrainProvider(data.provider);
         setBrainByok(data.byok);
         setBrainModel(data.model ?? '');
+      }).catch(() => {});
+
+      api.get('/payments/settings').then(({ data }) => {
+        setPaymentSettings(data);
+        setPaymentProvider(data.provider ?? 'pagarme');
+        setPaymentEnabled(data.paymentEnabled ?? false);
       }).catch(() => {});
     }
   }, [storeUser]);
@@ -317,6 +337,44 @@ export default function SettingsPage() {
       setBrandingFeedback({ type: 'error', message: msg });
     } finally {
       setSavingBranding(false);
+    }
+  };
+
+  const handleSavePaymentSettings = async () => {
+    setSavingPayment(true);
+    setPaymentFeedback(null);
+    setPaymentTestResult(null);
+    try {
+      await api.put('/payments/settings', {
+        provider: paymentProvider,
+        paymentEnabled,
+        ...(pagarmeApiKey ? { pagarmeApiKey } : {}),
+        ...(pagarmeWebhook ? { pagarmeWebhookSecret: pagarmeWebhook } : {}),
+        ...(stripeKey ? { stripeSecretKey: stripeKey } : {}),
+        ...(stripeWebhook ? { stripeWebhookSecret: stripeWebhook } : {}),
+      });
+      setPaymentFeedback({ type: 'success', message: 'Configurações de pagamento salvas.' });
+      setPagarmeApiKey(''); setPagarmeWebhook(''); setStripeKey(''); setStripeWebhook('');
+      const { data } = await api.get('/payments/settings');
+      setPaymentSettings(data);
+    } catch (err: any) {
+      setPaymentFeedback({ type: 'error', message: err.response?.data?.message || 'Erro ao salvar.' });
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
+  const handleTestPaymentConnection = async () => {
+    setTestingPayment(true);
+    setPaymentTestResult(null);
+    setPaymentFeedback(null);
+    try {
+      const { data } = await api.post('/payments/settings/test');
+      setPaymentTestResult({ ok: true, latencyMs: data.latencyMs });
+    } catch (err: any) {
+      setPaymentFeedback({ type: 'error', message: err.response?.data?.message || 'Conexão falhou.' });
+    } finally {
+      setTestingPayment(false);
     }
   };
 
@@ -962,6 +1020,149 @@ export default function SettingsPage() {
               </button>
             </div>
             <Feedback state={brainFeedback} />
+          </div>
+        )}
+
+        {/* Gateway de Pagamento — COACH only */}
+        {isCoach && (
+          <div className="glass-card p-6">
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Gateway de Pagamento</h2>
+            <p className="text-xs text-gray-400 mb-5">Sua conta própria — atletas pagam direto para você</p>
+
+            <div className="space-y-5">
+              {/* Enable toggle */}
+              <div className="flex items-center justify-between p-4 rounded-xl bg-gray-50 border border-gray-100">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Pagamentos ativos</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Permite que atletas paguem pelo app</p>
+                </div>
+                <Toggle checked={paymentEnabled} onChange={setPaymentEnabled} />
+              </div>
+
+              {/* Provider selector */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Gateway</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { id: 'pagarme', label: 'Pagar.me', sub: 'Recomendado para BR', hasKey: paymentSettings?.hasPagarmeKey },
+                    { id: 'stripe',  label: 'Stripe',   sub: 'Internacional',        hasKey: paymentSettings?.hasStripeKey },
+                  ] as const).map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setPaymentProvider(p.id)}
+                      className={`relative p-3 rounded-xl border text-left transition-all ${
+                        paymentProvider === p.id
+                          ? 'border-primary/50 bg-primary/5'
+                          : 'border-gray-200 bg-white hover:border-primary/30'
+                      }`}
+                    >
+                      <p className="text-xs font-semibold text-gray-800">{p.label}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">{p.sub}</p>
+                      {p.hasKey && (
+                        <span className="absolute top-2 right-2 text-[9px] font-medium bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full">configurado</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Pagar.me fields */}
+              {paymentProvider === 'pagarme' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">
+                      API Key <span className="text-gray-300">(dash.pagar.me → Configurações → API Keys)</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPaymentKeys ? 'text' : 'password'}
+                        value={pagarmeApiKey}
+                        onChange={e => setPagarmeApiKey(e.target.value)}
+                        placeholder={paymentSettings?.hasPagarmeKey ? '••••• (salva — cole para atualizar)' : 'sk_live_...'}
+                        className="w-full px-3.5 py-2.5 pr-10 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition font-mono"
+                      />
+                      <button type="button" onClick={() => setShowPaymentKeys(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          {showPaymentKeys
+                            ? <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                            : <><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></>
+                          }
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">Webhook Secret</label>
+                    <input
+                      type={showPaymentKeys ? 'text' : 'password'}
+                      value={pagarmeWebhook}
+                      onChange={e => setPagarmeWebhook(e.target.value)}
+                      placeholder="whsec_..."
+                      className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition font-mono"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Stripe fields */}
+              {paymentProvider === 'stripe' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">
+                      Secret Key <span className="text-gray-300">(dashboard.stripe.com → Developers → API Keys)</span>
+                    </label>
+                    <input
+                      type={showPaymentKeys ? 'text' : 'password'}
+                      value={stripeKey}
+                      onChange={e => setStripeKey(e.target.value)}
+                      placeholder={paymentSettings?.hasStripeKey ? '••••• (salva — cole para atualizar)' : 'sk_live_...'}
+                      className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">Webhook Secret</label>
+                    <input
+                      type={showPaymentKeys ? 'text' : 'password'}
+                      value={stripeWebhook}
+                      onChange={e => setStripeWebhook(e.target.value)}
+                      placeholder="whk_..."
+                      className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition font-mono"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <p className="text-[10px] text-gray-400">Chaves criptografadas com AES-256 antes de salvar</p>
+
+              {/* Test result */}
+              {paymentTestResult && (
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                  <svg className="w-4 h-4 text-emerald-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <p className="text-xs text-emerald-700 font-medium">Conexão OK — respondeu em {paymentTestResult.latencyMs}ms</p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-5 flex items-center gap-3">
+              <button
+                onClick={handleSavePaymentSettings}
+                disabled={savingPayment}
+                className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-60 text-white text-sm font-medium rounded-xl transition cursor-pointer flex items-center gap-2"
+              >
+                {savingPayment && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                Salvar
+              </button>
+              <button
+                onClick={handleTestPaymentConnection}
+                disabled={testingPayment || savingPayment || (!paymentSettings?.hasPagarmeKey && !paymentSettings?.hasStripeKey)}
+                className="px-5 py-2.5 border border-gray-200 hover:bg-gray-50 disabled:opacity-40 text-gray-700 text-sm font-medium rounded-xl transition cursor-pointer flex items-center gap-2"
+              >
+                {testingPayment && <span className="w-3.5 h-3.5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />}
+                Testar conexão
+              </button>
+            </div>
+            <Feedback state={paymentFeedback} />
           </div>
         )}
 

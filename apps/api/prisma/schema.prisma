@@ -222,6 +222,14 @@ model CoachProfile {
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
+  // Payment gateway — Modelo 2 (each coach uses own account)
+  paymentProvider      String?  @default("pagarme") @map("payment_provider") // pagarme | stripe
+  pagarmeApiKey        String?  @map("pagarme_api_key")          // encrypted AES-256
+  pagarmeWebhookSecret String?  @map("pagarme_webhook_secret")   // encrypted AES-256
+  stripeSecretKey      String?  @map("stripe_secret_key")        // encrypted AES-256
+  stripeWebhookSecret  String?  @map("stripe_webhook_secret")    // encrypted AES-256
+  paymentEnabled       Boolean  @default(false) @map("payment_enabled")
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("coach_profiles")
