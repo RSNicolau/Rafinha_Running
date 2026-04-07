@@ -134,6 +134,12 @@ enum EventRegistrationStatus {
   WAITLIST
 }
 
+enum AIAssistantTone {
+  FRIENDLY
+  PROFESSIONAL
+  MOTIVATIONAL
+}
+
 // ============================================
 // MODELS
 // ============================================
@@ -185,6 +191,15 @@ model User {
 
   nutritionLogs NutritionLog[]
   waterLogs     WaterLog[]
+  aiAssistantConfig AIAssistantConfig?
+
+  garminHealthSnapshots GarminHealthSnapshot[] @relation("AthleteGarminSnapshots")
+  onboardingForm        OnboardingForm?        @relation("CoachOnboardingForm")
+  onboardingProfile     OnboardingProfile?     @relation("AthleteOnboarding")
+  coachOnboardings      OnboardingProfile[]    @relation("CoachOnboardings")
+  athleteAssessments    PhysicalAssessment[]   @relation("AthleteAssessments")
+  coachAssessments      PhysicalAssessment[]   @relation("CoachAssessments")
+  coachBrainSessions    CoachBrainSession[]    @relation("CoachBrainSessions")
 
   @@map("users")
 }
@@ -192,6 +207,7 @@ model User {
 model CoachProfile {
   id              String   @id @default(uuid())
   userId          String   @unique @map("user_id")
+  slug            String?  @unique
   bio             String?
   specializations String[] @default([])
   certifications  String[] @default([])
@@ -616,4 +632,200 @@ model TenantBranding {
   coach User @relation(fields: [coachId], references: [id], onDelete: Cascade)
 
   @@map("tenant_brandings")
+}
+
+model AIAssistantConfig {
+  id            String          @id @default(uuid())
+  coachId       String          @unique @map("coach_id")
+  assistantName String          @default("Rafinha") @map("assistant_name")
+  tone          AIAssistantTone @default(FRIENDLY)
+  personaPrompt String?         @map("persona_prompt")
+  voiceEnabled  Boolean         @default(false) @map("voice_enabled")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+  coach         User            @relation(fields: [coachId], references: [id], onDelete: Cascade)
+
+  @@map("ai_assistant_configs")
+}
+
+// ============================================
+// GARMIN HEALTH SNAPSHOTS
+// ============================================
+
+model GarminHealthSnapshot {
+  id             String   @id @default(uuid())
+  athleteId      String   @map("athlete_id")
+  date           DateTime @map("date") @db.Date
+  sleepScore     Int?     @map("sleep_score")
+  sleepHours     Float?   @map("sleep_hours")
+  hrv            Int?
+  stressScore    Int?     @map("stress_score")
+  restingHR      Int?     @map("resting_hr")
+  steps          Int?
+  spo2           Float?
+  caloriesActive Int?     @map("calories_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  athlete User @relation("AthleteGarminSnapshots", fields: [athleteId], references: [id], onDelete: Cascade)
+
+  @@unique([athleteId, date])
+  @@index([athleteId])
+  @@map("garmin_health_snapshots")
+}
+
+// ============================================
+// ONBOARDING
+// ============================================
+
+enum QuestionType {
+  TEXT
+  TEXTAREA
+  SELECT
+  MULTISELECT
+  NUMBER
+  TIME
+  DATE
+  SCALE
+  BOOLEAN
+}
+
+enum OnboardingStatus {
+  IN_PROGRESS
+  PENDING_REVIEW
+  APPROVED
+  PLAN_GENERATED
+}
+
+model OnboardingForm {
+  id          String               @id @default(uuid())
+  coachId     String               @unique @map("coach_id")
+  title       String               @default("Questionário de Anamnese")
+  description String?
+  isActive    Boolean              @default(true) @map("is_active")
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+
+  coach     User                 @relation("CoachOnboardingForm", fields: [coachId], references: [id], onDelete: Cascade)
+  questions OnboardingQuestion[]
+
+  @@map("onboarding_forms")
+}
+
+model OnboardingQuestion {
+  id          String       @id @default(uuid())
+  formId      String       @map("form_id")
+  order       Int
+  question    String
+  type        QuestionType
+  options     Json?
+  required    Boolean      @default(true)
+  placeholder String?
+  aiHint      String?      @map("ai_hint")
+  isActive    Boolean      @default(true) @map("is_active")
+
+  form OnboardingForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@index([formId, order])
+  @@map("onboarding_questions")
+}
+
+model OnboardingProfile {
+  id            String           @id @default(uuid())
+  athleteId     String           @unique @map("athlete_id")
+  coachId       String           @map("coach_id")
+  answers       Json
+  parsedProfile Json?            @map("parsed_profile")
+  aiSummary     String?          @map("ai_summary")
+  status        OnboardingStatus @default(PENDING_REVIEW)
+  completedAt   DateTime?        @map("completed_at")
+  reviewedAt    DateTime?        @map("reviewed_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  athlete User @relation("AthleteOnboarding", fields: [athleteId], references: [id], onDelete: Cascade)
+  coach   User @relation("CoachOnboardings", fields: [coachId], references: [id])
+
+  @@index([coachId, status])
+  @@map("onboarding_profiles")
+}
+
+// ============================================
+// PHYSICAL ASSESSMENTS
+// ============================================
+
+model PhysicalAssessment {
+  id             String   @id @default(uuid())
+  athleteId      String   @map("athlete_id")
+  coachId        String   @map("coach_id")
+  assessedAt     DateTime @map("assessed_at")
+
+  weightKg       Float?   @map("weight_kg")
+  heightCm       Float?   @map("height_cm")
+  bmi            Float?
+  bodyFatPct     Float?   @map("body_fat_pct")
+  muscleMassPct  Float?   @map("muscle_mass_pct")
+
+  restingHR      Int?     @map("resting_hr")
+  maxHR          Int?     @map("max_hr")
+  vo2max         Float?
+
+  best5kTime     Int?     @map("best_5k_time")
+  best10kTime    Int?     @map("best_10k_time")
+  vdot           Float?
+
+  flexScore      Int?     @map("flex_score")
+  strengthScore  Int?     @map("strength_score")
+
+  hrZones        Json?    @map("hr_zones")
+  paceZones      Json?    @map("pace_zones")
+
+  aiAnalysis     String?  @map("ai_analysis")
+  coachNotes     String?  @map("coach_notes")
+
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  athlete User @relation("AthleteAssessments", fields: [athleteId], references: [id], onDelete: Cascade)
+  coach   User @relation("CoachAssessments", fields: [coachId], references: [id])
+
+  @@index([athleteId, assessedAt])
+  @@map("physical_assessments")
+}
+
+// ============================================
+// COACH BRAIN — AI SESSIONS & JOBS
+// ============================================
+
+model CoachBrainSession {
+  id        String   @id @default(uuid())
+  coachId   String   @map("coach_id")
+  title     String?
+  messages  Json     @default("[]")
+  context   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  coach User @relation("CoachBrainSessions", fields: [coachId], references: [id], onDelete: Cascade)
+
+  @@index([coachId])
+  @@map("coach_brain_sessions")
+}
+
+model AIJob {
+  id         String    @id @default(uuid())
+  type       String
+  status     String    @default("PENDING")
+  retries    Int       @default(0)
+  maxRetries Int       @default(3) @map("max_retries")
+  payload    Json
+  result     Json?
+  error      String?
+  coachId    String?   @map("coach_id")
+  athleteId  String?   @map("athlete_id")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, retries])
+  @@index([coachId])
+  @@map("ai_jobs")
 }

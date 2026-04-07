@@ -161,17 +161,36 @@ export class WebhooksController {
     this.logger.log(`Garmin health webhook received`);
 
     try {
-      const healthSummaries = body.wellnessDetails || body.dailies || [];
-      for (const summary of healthSummaries) {
-        if (summary.userId && summary.restingHeartRateInBeatsPerMinute) {
-          await this.integrationsService.handleGarminHealth({
-            userId: summary.userId,
-            restingHR: summary.restingHeartRateInBeatsPerMinute,
-            stressLevel: summary.averageStressLevel,
-            totalSteps: summary.totalSteps,
-            date: summary.calendarDate,
-          });
+      // Garmin Health API sends dailies, sleeps, and epoch summaries
+      const dailies = body.dailies || body.wellnessDetails || [];
+      const sleeps = body.sleeps || [];
+
+      // Build a map of userId → sleepData
+      const sleepMap: Record<string, { sleepScore?: number; sleepHours?: number }> = {};
+      for (const sleep of sleeps) {
+        if (sleep.userId) {
+          sleepMap[sleep.userId] = {
+            sleepScore: sleep.overallSleepScore?.value ?? sleep.averageSpO2Value,
+            sleepHours: sleep.durationInSeconds ? sleep.durationInSeconds / 3600 : undefined,
+          };
         }
+      }
+
+      for (const summary of dailies) {
+        if (!summary.userId) continue;
+        const sleepData = sleepMap[summary.userId] || {};
+        await this.integrationsService.handleGarminHealth({
+          userId: summary.userId,
+          restingHR: summary.restingHeartRateInBeatsPerMinute,
+          stressLevel: summary.averageStressLevel,
+          totalSteps: summary.totalSteps,
+          date: summary.calendarDate,
+          hrv: summary.lastNightAvg5MinHrv ?? summary.hrvStatus?.lastNight5MinHigh,
+          sleepScore: sleepData.sleepScore,
+          sleepHours: sleepData.sleepHours,
+          spo2: summary.averageSpo2Value,
+          caloriesActive: summary.activeKilocalories,
+        });
       }
     } catch (err: any) {
       this.logger.error(`Garmin health webhook error: ${err.message}`);
@@ -201,6 +220,45 @@ export class WebhooksController {
       this.logger.error(`Garmin deregistration error: ${err.message}`);
     }
     return { status: 'ok' };
+  }
+
+  // ═══════════════════ COROS WEBHOOKS ═══════════════════
+
+  @Post('coros')
+  @ApiOperation({ summary: 'COROS activity push notification' })
+  async handleCorosWebhook(
+    @Body() body: any,
+  ) {
+    this.logger.log(`COROS webhook: ${JSON.stringify(body).slice(0, 200)}`);
+
+    try {
+      const sportDataList = body.sportDataList || [];
+      for (const activity of sportDataList) {
+        if (activity.mode === 100) { // Running activities only
+          await this.integrationsService.handleCorosActivity({
+            openId: body.openId || activity.openId,
+            activityId: String(activity.labelId || activity.activityId),
+            mode: activity.mode,
+            startTime: activity.startTime,
+            endTime: activity.endTime,
+            totalTime: activity.totalTime,
+            distance: activity.distance,
+            avgHeartRate: activity.avgHeartRate,
+            maxHeartRate: activity.maxHeartRate,
+            calorie: activity.calorie,
+          });
+        }
+      }
+
+      // Handle deauth event
+      if (body.type === 'deauth' && body.openId) {
+        await this.integrationsService.handleCorosDeauth(body.openId);
+      }
+    } catch (err: any) {
+      this.logger.error(`COROS webhook error: ${err.message}`, err.stack);
+    }
+
+    return { message: 'ok' };
   }
 
   // ═══════════════════ POLAR WEBHOOKS ═══════════════════

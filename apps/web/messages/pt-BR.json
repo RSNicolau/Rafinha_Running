@@ -1,0 +1,85 @@
+{
+  "common": {
+    "loading": "Carregando...",
+    "save": "Salvar",
+    "cancel": "Cancelar",
+    "confirm": "Confirmar",
+    "delete": "Excluir",
+    "edit": "Editar",
+    "back": "Voltar",
+    "next": "Próximo",
+    "close": "Fechar",
+    "search": "Buscar",
+    "filter": "Filtrar",
+    "export": "Exportar",
+    "import": "Importar",
+    "required": "Obrigatório",
+    "optional": "Opcional"
+  },
+  "auth": {
+    "login": "Entrar",
+    "logout": "Sair",
+    "register": "Cadastrar",
+    "email": "E-mail",
+    "password": "Senha",
+    "confirmPassword": "Confirmar senha",
+    "forgotPassword": "Esqueci minha senha",
+    "noAccount": "Não tem conta?",
+    "hasAccount": "Já tem conta?",
+    "loginTitle": "Bem-vindo de volta",
+    "registerTitle": "Crie sua conta",
+    "loginError": "E-mail ou senha incorretos",
+    "sessionExpired": "Sua sessão expirou. Faça login novamente."
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "welcome": "Bem-vindo",
+    "athletes": "Atletas",
+    "workouts": "Treinos",
+    "plans": "Planos",
+    "chat": "Chat",
+    "rankings": "Rankings",
+    "events": "Eventos",
+    "settings": "Configurações",
+    "billing": "Assinatura"
+  },
+  "landing": {
+    "hero": {
+      "title": "Plataforma completa para assessoria de corrida",
+      "subtitle": "Gerencie seus atletas, crie treinos personalizados e acompanhe a evolução em tempo real.",
+      "cta": "Começar agora",
+      "ctaSecondary": "Ver planos"
+    },
+    "features": {
+      "title": "Tudo que você precisa",
+      "tracking": "Live Tracking GPS",
+      "trackingDesc": "Acompanhe seus atletas em tempo real durante os treinos.",
+      "plans": "Planos personalizados",
+      "plansDesc": "Crie planos de treino adaptados para cada atleta.",
+      "integrations": "Integrações",
+      "integrationsDesc": "Conecte com Garmin, Strava, Apple Health e mais."
+    }
+  },
+  "workouts": {
+    "title": "Treinos",
+    "scheduled": "Agendado",
+    "completed": "Concluído",
+    "missed": "Não realizado",
+    "inProgress": "Em andamento",
+    "distance": "Distância",
+    "duration": "Duração",
+    "pace": "Pace",
+    "heartRate": "Frequência cardíaca"
+  },
+  "subscription": {
+    "title": "Assinatura",
+    "active": "Ativa",
+    "inactive": "Inativa",
+    "canceled": "Cancelada",
+    "upgrade": "Fazer upgrade",
+    "cancel": "Cancelar plano",
+    "renewsOn": "Renova em",
+    "expiresOn": "Expira em",
+    "plan": "Plano"
+  }
+}

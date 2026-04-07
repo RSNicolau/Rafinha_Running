@@ -11,6 +11,7 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
+    "@ducanh2912/next-pwa": "^10.2.9",
     "@sentry/nextjs": "^8.0.0",
     "@types/mapbox-gl": "^3.5.0",
     "axios": "^1.7.9",
@@ -20,6 +21,7 @@
     "lucide-react": "^0.475.0",
     "mapbox-gl": "^3.20.0",
     "next": "14.2.35",
+    "next-intl": "^4.9.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "recharts": "^2.15.3",

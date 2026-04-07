@@ -176,6 +176,12 @@ function LoginContent() {
               {fieldErrors.password && <p className="mt-1 text-xs text-red-500">{fieldErrors.password}</p>}
             </div>
 
+            <div className="flex justify-end">
+              <a href="/forgot-password" className="text-xs text-[#DC2626] hover:text-red-800 transition font-medium">
+                Esqueci minha senha
+              </a>
+            </div>
+
             <button
               type="submit"
               disabled={isLoading}

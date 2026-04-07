@@ -4,6 +4,9 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import dynamic from 'next/dynamic';
+
+const GarminRecoveryCard = dynamic(() => import('../_components/GarminRecoveryCard'), { ssr: false });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -227,6 +230,262 @@ function EvolutionChart({ weeks }: { weeks: { week: string; km: number }[] }) {
   );
 }
 
+// ─── Assessments Section ─────────────────────────────────────────────────────
+
+interface Assessment {
+  id: string;
+  assessedAt: string;
+  weightKg?: number | null;
+  bmi?: number | null;
+  vo2max?: number | null;
+  vdot?: number | null;
+  restingHR?: number | null;
+  best5kTime?: number | null;
+  best10kTime?: number | null;
+  hrZones?: Record<string, { min: number; max: number; label: string }> | null;
+  paceZones?: Record<string, string> | null;
+  aiAnalysis?: string | null;
+  coachNotes?: string | null;
+}
+
+function formatTimeMMSS(seconds: number | null | undefined): string {
+  if (!seconds) return '—';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function AssessmentsSection({ athleteId }: { athleteId: string }) {
+  const [assessments, setAssessments] = useState<Assessment[]>([]);
+  const [loadingA, setLoadingA] = useState(true);
+  const [showNewModal, setShowNewModal] = useState(false);
+  const [comparing, setComparing] = useState(false);
+  const [comparison, setComparison] = useState<{ analysis: string | null; message?: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    assessedAt: new Date().toISOString().split('T')[0],
+    weightKg: '', heightCm: '', bodyFatPct: '', restingHR: '', maxHR: '',
+    vo2max: '', best5kTime: '', best10kTime: '', flexScore: '', strengthScore: '',
+    coachNotes: '',
+  });
+
+  useEffect(() => {
+    api.get(`/physical-assessments/athlete/${athleteId}`)
+      .then(r => setAssessments(r.data))
+      .catch(() => {})
+      .finally(() => setLoadingA(false));
+  }, [athleteId]);
+
+  const parseTime = (s: string): number | undefined => {
+    if (!s) return undefined;
+    const parts = s.split(':');
+    if (parts.length === 2) return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+    return parseInt(s);
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const { data } = await api.post('/physical-assessments', {
+        athleteId,
+        assessedAt: form.assessedAt,
+        weightKg: form.weightKg ? parseFloat(form.weightKg) : undefined,
+        heightCm: form.heightCm ? parseFloat(form.heightCm) : undefined,
+        bodyFatPct: form.bodyFatPct ? parseFloat(form.bodyFatPct) : undefined,
+        restingHR: form.restingHR ? parseInt(form.restingHR) : undefined,
+        maxHR: form.maxHR ? parseInt(form.maxHR) : undefined,
+        vo2max: form.vo2max ? parseFloat(form.vo2max) : undefined,
+        best5kTime: parseTime(form.best5kTime),
+        best10kTime: parseTime(form.best10kTime),
+        flexScore: form.flexScore ? parseInt(form.flexScore) : undefined,
+        strengthScore: form.strengthScore ? parseInt(form.strengthScore) : undefined,
+        coachNotes: form.coachNotes || undefined,
+      });
+      setAssessments(prev => [data, ...prev]);
+      setShowNewModal(false);
+    } catch {
+      alert('Erro ao salvar avaliação');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCompare = async () => {
+    setComparing(true);
+    try {
+      const { data } = await api.get(`/physical-assessments/athlete/${athleteId}/compare`);
+      setComparison(data);
+    } catch {
+      setComparison({ analysis: null, message: 'Erro ao gerar comparação' });
+    } finally {
+      setComparing(false);
+    }
+  };
+
+  return (
+    <div className="glass-card p-6">
+      <div className="flex items-center justify-between mb-5">
+        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Avaliações Físicas</h2>
+        <div className="flex gap-2">
+          {assessments.length >= 2 && (
+            <button
+              onClick={handleCompare}
+              disabled={comparing}
+              className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-[#DC2626]/30 text-[#DC2626] hover:bg-red-50 transition disabled:opacity-50 cursor-pointer"
+            >
+              {comparing ? 'Analisando...' : '✨ Comparar com IA'}
+            </button>
+          )}
+          <button
+            onClick={() => setShowNewModal(true)}
+            className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-primary text-white hover:bg-primary/90 transition cursor-pointer"
+          >
+            + Nova Avaliação
+          </button>
+        </div>
+      </div>
+
+      {/* AI Comparison result */}
+      {comparison?.analysis && (
+        <div className="mb-5 p-4 rounded-xl bg-gradient-to-br from-red-50 to-orange-50 border border-red-100">
+          <p className="text-[10px] font-semibold text-[#DC2626] uppercase tracking-wider mb-2">✨ Análise IA — Comparação</p>
+          <p className="text-sm text-gray-700 leading-relaxed">{comparison.analysis}</p>
+        </div>
+      )}
+      {comparison?.message && !comparison.analysis && (
+        <div className="mb-5 p-3 rounded-xl bg-gray-50 text-xs text-gray-500">{comparison.message}</div>
+      )}
+
+      {loadingA ? (
+        <div className="space-y-2">{[1,2].map(i => <div key={i} className="h-12 bg-gray-100 rounded-xl animate-pulse" />)}</div>
+      ) : assessments.length === 0 ? (
+        <div className="text-center py-8">
+          <p className="text-sm text-gray-400">Nenhuma avaliação física registrada</p>
+          <p className="text-xs text-gray-300 mt-1">Clique em "+ Nova Avaliação" para registrar</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {assessments.map((a) => (
+            <div key={a.id} className="border border-gray-100 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-semibold text-gray-900">
+                  {new Date(a.assessedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                </p>
+                {a.vdot && (
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-primary/10 text-primary">
+                    VDOT {a.vdot}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 text-center mb-3">
+                {a.weightKg && <MetricMini label="Peso" value={`${a.weightKg}kg`} />}
+                {a.bmi && <MetricMini label="IMC" value={String(a.bmi)} />}
+                {a.vo2max && <MetricMini label="VO2max" value={String(a.vo2max)} />}
+                {a.restingHR && <MetricMini label="FC Rep." value={`${a.restingHR}bpm`} />}
+                {a.best5kTime && <MetricMini label="5K" value={formatTimeMMSS(a.best5kTime)} />}
+                {a.best10kTime && <MetricMini label="10K" value={formatTimeMMSS(a.best10kTime)} />}
+              </div>
+              {a.paceZones && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {Object.entries(a.paceZones).map(([zone, pace]) => (
+                    <span key={zone} className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-mono">
+                      Z{zone.replace('z', '')} {pace}/km
+                    </span>
+                  ))}
+                </div>
+              )}
+              {a.aiAnalysis && (
+                <p className="text-xs text-gray-500 italic mt-2 border-t border-gray-50 pt-2">{a.aiAnalysis}</p>
+              )}
+              {a.coachNotes && (
+                <p className="text-xs text-gray-400 mt-1">Notas: {a.coachNotes}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* New Assessment Modal */}
+      {showNewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-semibold text-gray-900">Nova Avaliação Física</h3>
+              <button onClick={() => setShowNewModal(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <form onSubmit={handleSave} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Data da Avaliação</label>
+                <input type="date" value={form.assessedAt} onChange={e => setForm(p => ({ ...p, assessedAt: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-primary" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: 'Peso (kg)', key: 'weightKg', placeholder: 'ex: 70.5' },
+                  { label: 'Altura (cm)', key: 'heightCm', placeholder: 'ex: 175' },
+                  { label: 'Gordura corporal (%)', key: 'bodyFatPct', placeholder: 'ex: 18.5' },
+                  { label: 'FC Repouso (bpm)', key: 'restingHR', placeholder: 'ex: 60' },
+                  { label: 'FC Máxima (bpm)', key: 'maxHR', placeholder: 'ex: 185' },
+                  { label: 'VO2max', key: 'vo2max', placeholder: 'ex: 52' },
+                  { label: 'Melhor 5K (mm:ss)', key: 'best5kTime', placeholder: 'ex: 25:30' },
+                  { label: 'Melhor 10K (mm:ss)', key: 'best10kTime', placeholder: 'ex: 52:00' },
+                  { label: 'Flexibilidade (0-10)', key: 'flexScore', placeholder: 'ex: 7' },
+                  { label: 'Força (0-10)', key: 'strengthScore', placeholder: 'ex: 6' },
+                ].map(({ label, key, placeholder }) => (
+                  <div key={key}>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+                    <input
+                      type="text"
+                      value={(form as any)[key]}
+                      onChange={e => setForm(p => ({ ...p, [key]: e.target.value }))}
+                      placeholder={placeholder}
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-primary"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Notas do Coach</label>
+                <textarea
+                  value={form.coachNotes}
+                  onChange={e => setForm(p => ({ ...p, coachNotes: e.target.value }))}
+                  rows={3}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:border-primary resize-none"
+                  placeholder="Observações gerais sobre a avaliação..."
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setShowNewModal(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:border-gray-300 transition cursor-pointer">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={saving}
+                  className="flex-1 py-2.5 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary/90 transition disabled:opacity-50 cursor-pointer">
+                  {saving ? 'Salvando...' : 'Salvar Avaliação'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MetricMini({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] text-gray-400 uppercase tracking-wider">{label}</p>
+      <p className="text-sm font-bold text-gray-900">{value}</p>
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AthleteDetailPage() {
@@ -430,6 +689,11 @@ export default function AthleteDetailPage() {
           ))}
         </div>
       )}
+
+      {/* Garmin Recovery Card */}
+      <div className="mb-6">
+        <GarminRecoveryCard athleteId={id} />
+      </div>
 
       {/* Stats Row */}
       <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Estatísticas</h2>
@@ -723,13 +987,16 @@ export default function AthleteDetailPage() {
 
       {/* Evolution Chart */}
       {weeklyData.length > 1 && (
-        <div className="glass-card p-6">
+        <div className="glass-card p-6 mb-6">
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">
             Evolução — Km por Semana
           </h2>
           <EvolutionChart weeks={weeklyData} />
         </div>
       )}
+
+      {/* Assessments section */}
+      <AssessmentsSection athleteId={id} />
     </div>
   );
 }

@@ -19,7 +19,7 @@
       "ios": { "simulator": false },
       "android": { "buildType": "apk" },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://rrapi-production.up.railway.app/api"
+        "EXPO_PUBLIC_API_URL": "https://rrapi-production.up.railway.app/api/v1"
       }
     },
     "production": {
@@ -27,7 +27,7 @@
       "ios": { "buildConfiguration": "Release" },
       "android": { "buildType": "app-bundle" },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://rrapi-production.up.railway.app/api"
+        "EXPO_PUBLIC_API_URL": "https://rrapi-production.up.railway.app/api/v1"
       }
     }
   },
@@ -35,7 +35,7 @@
     "production": {
       "ios": {
         "appleId": "rodrigo@rafinharunning.com",
-        "ascAppId": "XXXXXXXXXX",
+        "ascAppId": "TODO_SET_ASC_APP_ID",
         "appleTeamId": "LPMFPMB2ZG"
       },
       "android": {

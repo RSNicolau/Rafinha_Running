@@ -14,6 +14,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { FitnessIntegration, IntegrationProvider, WorkoutSource, WorkoutStatus } from '@prisma/client';
+import { encrypt, decrypt } from '../../../common/utils/encryption';
 
 const COROS_AUTH_URL   = 'https://open.coros.com/oauth2/authorize';
 const COROS_TOKEN_URL  = 'https://open.coros.com/oauth2/accesstoken';
@@ -105,15 +106,15 @@ export class CorosService {
       create: {
         userId,
         provider:       IntegrationProvider.COROS,
-        accessToken:    tokenData.access_token,
-        refreshToken:   tokenData.refresh_token,
+        accessToken:    encrypt(tokenData.access_token),
+        refreshToken:   encrypt(tokenData.refresh_token),
         expiresAt:      new Date(Date.now() + tokenData.expires_in * 1000),
         externalUserId: tokenData.openId,
         isActive:       true,
       },
       update: {
-        accessToken:    tokenData.access_token,
-        refreshToken:   tokenData.refresh_token,
+        accessToken:    encrypt(tokenData.access_token),
+        refreshToken:   encrypt(tokenData.refresh_token),
         expiresAt:      new Date(Date.now() + tokenData.expires_in * 1000),
         externalUserId: tokenData.openId,
         isActive:       true,
@@ -222,7 +223,7 @@ export class CorosService {
   private async refreshAccessToken(integration: FitnessIntegration): Promise<CorosTokenResponse> {
     const body = new URLSearchParams({
       grant_type:    'refresh_token',
-      refresh_token: integration.refreshToken!,
+      refresh_token: decrypt(integration.refreshToken!),
       client_id:     this.clientId,
       client_secret: this.clientSecret,
     });
@@ -277,7 +278,7 @@ export class CorosService {
 
   private async ensureValidToken(integration: FitnessIntegration): Promise<string> {
     if (integration.expiresAt && integration.expiresAt > new Date()) {
-      return integration.accessToken;
+      return decrypt(integration.accessToken);
     }
 
     if (!integration.refreshToken) {
@@ -290,8 +291,8 @@ export class CorosService {
     await this.prisma.fitnessIntegration.update({
       where: { id: integration.id },
       data: {
-        accessToken:  newTokens.access_token,
-        refreshToken: newTokens.refresh_token,
+        accessToken:  encrypt(newTokens.access_token),
+        refreshToken: encrypt(newTokens.refresh_token),
         expiresAt:    new Date(Date.now() + newTokens.expires_in * 1000),
       },
     });

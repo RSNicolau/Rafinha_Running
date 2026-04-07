@@ -4,6 +4,7 @@ import { GarminService } from './garmin/garmin.service';
 import { StravaService } from './strava/strava.service';
 import { CorosService } from './coros/coros.service';
 import { PolarService } from './polar/polar.service';
+import { GoogleFitService } from './google-fit/google-fit.service';
 import { IntegrationProvider } from '@prisma/client';
 
 @Injectable()
@@ -14,6 +15,7 @@ export class IntegrationsService {
     private stravaService: StravaService,
     private corosService: CorosService,
     private polarService: PolarService,
+    private googleFitService: GoogleFitService,
   ) {}
 
   async getUserIntegrations(userId: string) {
@@ -40,6 +42,8 @@ export class IntegrationsService {
         return this.corosService.getAuthUrl(userId);
       case IntegrationProvider.POLAR:
         return this.polarService.getAuthUrl(userId);
+      case IntegrationProvider.GOOGLE_FIT:
+        return this.googleFitService.getAuthUrl(userId);
       default:
         throw new NotFoundException(`Integração ${provider} não suportada`);
     }
@@ -59,6 +63,8 @@ export class IntegrationsService {
         return this.corosService.handleCallback(code, state);
       case IntegrationProvider.POLAR:
         return this.polarService.handleCallback(code, state);
+      case IntegrationProvider.GOOGLE_FIT:
+        return this.googleFitService.handleCallback(code, state);
       default:
         throw new NotFoundException(`Integração ${provider} não suportada`);
     }
@@ -102,6 +108,9 @@ export class IntegrationsService {
         case IntegrationProvider.POLAR:
           results.push(await this.polarService.syncActivities(userId, integration));
           break;
+        case IntegrationProvider.GOOGLE_FIT:
+          results.push(await this.googleFitService.syncActivities(userId, integration));
+          break;
       }
     }
 
@@ -130,6 +139,20 @@ export class IntegrationsService {
 
   async pushPlanToGarmin(planId: string) {
     return this.garminService.pushPlanToGarmin(planId);
+  }
+
+  // ── Garmin Health ──
+
+  async getMyGarminHealthToday(userId: string) {
+    return this.garminService.getMyHealthToday(userId);
+  }
+
+  async getAthleteGarminHealthToday(coachId: string, athleteId: string) {
+    return this.garminService.getHealthToday(coachId, athleteId);
+  }
+
+  async getAthleteGarminHealthHistory(coachId: string, athleteId: string, days: number) {
+    return this.garminService.getHealthHistory(coachId, athleteId, days);
   }
 
   // ── Strava Webhook Handlers ──
@@ -227,6 +250,11 @@ export class IntegrationsService {
     stressLevel?: number;
     totalSteps?: number;
     date?: string;
+    hrv?: number;
+    sleepScore?: number;
+    sleepHours?: number;
+    spo2?: number;
+    caloriesActive?: number;
   }) {
     const integration = await this.prisma.fitnessIntegration.findFirst({
       where: {
@@ -238,6 +266,41 @@ export class IntegrationsService {
 
     if (!integration) return;
 
+    const snapshotDate = data.date ? new Date(data.date) : new Date();
+
+    // Upsert full health snapshot
+    await this.prisma.garminHealthSnapshot.upsert({
+      where: {
+        athleteId_date: {
+          athleteId: integration.userId,
+          date: snapshotDate,
+        },
+      },
+      create: {
+        athleteId: integration.userId,
+        date: snapshotDate,
+        restingHR: data.restingHR,
+        stressScore: data.stressLevel,
+        steps: data.totalSteps,
+        hrv: data.hrv,
+        sleepScore: data.sleepScore,
+        sleepHours: data.sleepHours,
+        spo2: data.spo2,
+        caloriesActive: data.caloriesActive,
+      },
+      update: {
+        restingHR: data.restingHR ?? undefined,
+        stressScore: data.stressLevel ?? undefined,
+        steps: data.totalSteps ?? undefined,
+        hrv: data.hrv ?? undefined,
+        sleepScore: data.sleepScore ?? undefined,
+        sleepHours: data.sleepHours ?? undefined,
+        spo2: data.spo2 ?? undefined,
+        caloriesActive: data.caloriesActive ?? undefined,
+      },
+    });
+
+    // Update resting HR on athlete profile if provided
     if (data.restingHR) {
       await this.prisma.athleteProfile.updateMany({
         where: { userId: integration.userId },
@@ -245,9 +308,84 @@ export class IntegrationsService {
       });
     }
 
+    // Auto-adjust alert: HRV < 70% of 7-day average → alert coach
+    if (data.hrv) {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const recentSnapshots = await this.prisma.garminHealthSnapshot.findMany({
+        where: {
+          athleteId: integration.userId,
+          date: { gte: sevenDaysAgo },
+          hrv: { not: null },
+        },
+        select: { hrv: true },
+      });
+
+      if (recentSnapshots.length >= 3) {
+        const avgHrv = recentSnapshots.reduce((sum, s) => sum + (s.hrv || 0), 0) / recentSnapshots.length;
+        if (data.hrv < avgHrv * 0.7) {
+          // Low HRV alert — create notification for coach
+          const athlete = await this.prisma.user.findUnique({
+            where: { id: integration.userId },
+            include: { athleteProfile: { include: { coach: true } } },
+          });
+          if (athlete?.athleteProfile?.coachId) {
+            await this.prisma.notification.create({
+              data: {
+                userId: athlete.athleteProfile.coachId,
+                type: 'SYSTEM',
+                title: `⚠️ HRV Baixo — ${athlete.name}`,
+                body: `HRV de ${data.hrv}ms (média 7d: ${Math.round(avgHrv)}ms). Considere ajustar o treino de hoje para recuperação.`,
+                data: { athleteId: integration.userId, hrv: data.hrv, avgHrv: Math.round(avgHrv) },
+              },
+            });
+          }
+        }
+      }
+    }
+
     await this.prisma.fitnessIntegration.update({
       where: { id: integration.id },
       data: { lastSyncAt: new Date() },
+    });
+  }
+
+  // ── COROS Webhook Handlers ──
+
+  async handleCorosActivity(data: {
+    openId: string;
+    activityId: string;
+    mode: number;
+    startTime: number;
+    endTime: number;
+    totalTime: number;
+    distance: number;
+    avgHeartRate?: number;
+    maxHeartRate?: number;
+    calorie?: number;
+  }) {
+    const integration = await this.prisma.fitnessIntegration.findFirst({
+      where: {
+        externalUserId: data.openId,
+        provider: IntegrationProvider.COROS,
+        isActive: true,
+      },
+    });
+
+    if (!integration) return;
+
+    // Trigger a full sync for this user to process the new activity
+    await this.corosService.syncActivities(integration.userId, integration);
+  }
+
+  async handleCorosDeauth(openId: string) {
+    await this.prisma.fitnessIntegration.updateMany({
+      where: {
+        externalUserId: openId,
+        provider: IntegrationProvider.COROS,
+      },
+      data: { isActive: false },
     });
   }
 

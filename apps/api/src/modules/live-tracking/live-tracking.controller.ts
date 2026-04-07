@@ -11,19 +11,19 @@ export class LiveTrackingController {
   constructor(private readonly liveTrackingService: LiveTrackingService) {}
 
   @Get('active')
-  getActiveAthletes() {
+  async getActiveAthletes() {
     return this.liveTrackingService.getLiveAthletes();
   }
 
   @Get(':athleteId/position')
-  getAthletePosition(@Param('athleteId') athleteId: string) {
-    const position = this.liveTrackingService.getCurrentPosition(athleteId);
+  async getAthletePosition(@Param('athleteId') athleteId: string) {
+    const position = await this.liveTrackingService.getCurrentPosition(athleteId);
     return { athleteId, position, isLive: !!position };
   }
 
   @Get(':athleteId/route')
-  getAthleteRoute(@Param('athleteId') athleteId: string) {
-    const route = this.liveTrackingService.getSessionRoute(athleteId);
+  async getAthleteRoute(@Param('athleteId') athleteId: string) {
+    const route = await this.liveTrackingService.getSessionRoute(athleteId);
     return { athleteId, route, pointCount: route.length };
   }
 }

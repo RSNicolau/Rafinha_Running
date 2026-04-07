@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Delete, Param, Query, Body, UseGuards, Req,
+  Controller, Get, Post, Delete, Param, Query, Body, UseGuards, Req, ParseIntPipe, DefaultValuePipe,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -107,5 +107,34 @@ export class IntegrationsController {
   })
   async pushPlanToGarmin(@Param('planId') planId: string) {
     return this.integrationsService.pushPlanToGarmin(planId);
+  }
+
+  // ── Garmin Health API ──
+
+  @Get('garmin/health/me')
+  @ApiOperation({ summary: 'Meus dados de saúde Garmin hoje (atleta)' })
+  async getMyGarminHealthToday(@CurrentUser('id') userId: string) {
+    return this.integrationsService.getMyGarminHealthToday(userId);
+  }
+
+  @Get('garmin/health/today/:athleteId')
+  @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Dados de saúde Garmin hoje de um atleta (coach)' })
+  async getAthleteGarminHealthToday(
+    @CurrentUser('id') coachId: string,
+    @Param('athleteId') athleteId: string,
+  ) {
+    return this.integrationsService.getAthleteGarminHealthToday(coachId, athleteId);
+  }
+
+  @Get('garmin/health/history/:athleteId')
+  @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Histórico de saúde Garmin de um atleta (coach)' })
+  async getAthleteGarminHealthHistory(
+    @CurrentUser('id') coachId: string,
+    @Param('athleteId') athleteId: string,
+    @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
+  ) {
+    return this.integrationsService.getAthleteGarminHealthHistory(coachId, athleteId, days);
   }
 }

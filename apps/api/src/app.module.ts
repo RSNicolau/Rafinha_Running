@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { LoggerModule } from 'nestjs-pino';
 import { CustomThrottlerGuard } from './common/guards/custom-throttler.guard';
 import { PrismaModule } from './prisma/prisma.module';
 import { CacheModule } from './modules/cache/cache.module';
@@ -22,9 +23,24 @@ import { InvitesModule } from './modules/invites/invites.module';
 import { NutritionModule } from './modules/nutrition/nutrition.module';
 import { HealthModule } from './modules/health/health.module';
 import { EmailModule } from './modules/email/email.module';
+import { SchedulerModule } from './modules/scheduler/scheduler.module';
+import { AiAssistantModule } from './modules/ai-assistant/ai-assistant.module';
+import { OnboardingModule } from './modules/onboarding/onboarding.module';
+import { PhysicalAssessmentsModule } from './modules/physical-assessments/physical-assessments.module';
+import { CoachBrainModule } from './modules/coach-brain/coach-brain.module';
 
 @Module({
   imports: [
+    LoggerModule.forRoot({
+      pinoHttp: {
+        transport: process.env.NODE_ENV !== 'production'
+          ? { target: 'pino-pretty', options: { colorize: true, singleLine: true } }
+          : undefined,
+        level: process.env.NODE_ENV !== 'production' ? 'debug' : 'info',
+        autoLogging: true,
+        redact: ['req.headers.authorization'],
+      },
+    }),
     ThrottlerModule.forRoot([{
       ttl: 60000,
       limit: 100,
@@ -49,6 +65,11 @@ import { EmailModule } from './modules/email/email.module';
     NutritionModule,
     HealthModule,
     EmailModule,
+    SchedulerModule,
+    AiAssistantModule,
+    OnboardingModule,
+    PhysicalAssessmentsModule,
+    CoachBrainModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: CustomThrottlerGuard },

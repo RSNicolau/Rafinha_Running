@@ -68,6 +68,73 @@ export class EmailService {
     );
   }
 
+  async sendSubscriptionReminder(to: string, name: string, expiresAt: Date): Promise<void> {
+    const platformName = process.env.PLATFORM_NAME || 'Rafinha Running';
+    const expiresDate = expiresAt.toLocaleDateString('pt-BR');
+    await this.send(
+      to,
+      `Sua assinatura expira em breve — ${platformName}`,
+      `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px">
+        <h2 style="color:#DC2626;margin-bottom:8px">Sua assinatura expira em breve</h2>
+        <p>Olá, <strong>${name}</strong>!</p>
+        <p>Sua assinatura da <strong>${platformName}</strong> expira em <strong>${expiresDate}</strong>.</p>
+        <p>Renove para continuar usando todos os recursos da plataforma.</p>
+        <a href="${this.appUrl}/subscribe" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#DC2626;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+          Renovar assinatura
+        </a>
+        <hr style="border:none;border-top:1px solid #E5E7EB;margin:24px 0"/>
+        <p style="color:#9CA3AF;font-size:12px">${platformName} &bull; Treinamento de corrida personalizado</p>
+      </div>`,
+    );
+  }
+
+  async sendWeeklyDigest(to: string, coachName: string, athleteCount: number, completedWorkouts: number, totalWorkouts: number): Promise<void> {
+    const platformName = process.env.PLATFORM_NAME || 'Rafinha Running';
+    const adherence = totalWorkouts > 0 ? Math.round((completedWorkouts / totalWorkouts) * 100) : 0;
+    await this.send(
+      to,
+      `Resumo semanal — ${platformName}`,
+      `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px">
+        <h2 style="color:#DC2626;margin-bottom:8px">Resumo Semanal</h2>
+        <p>Olá, <strong>${coachName}</strong>! Aqui está o resumo da última semana:</p>
+        <div style="background:#F9FAFB;border-radius:8px;padding:16px;margin:16px 0">
+          <p style="margin:4px 0"><strong>Atletas ativos:</strong> ${athleteCount}</p>
+          <p style="margin:4px 0"><strong>Treinos concluídos:</strong> ${completedWorkouts}/${totalWorkouts}</p>
+          <p style="margin:4px 0"><strong>Adesão média:</strong> ${adherence}%</p>
+        </div>
+        <a href="${this.appUrl}/dashboard" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#DC2626;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+          Acessar dashboard
+        </a>
+        <hr style="border:none;border-top:1px solid #E5E7EB;margin:24px 0"/>
+        <p style="color:#9CA3AF;font-size:12px">${platformName} &bull; Treinamento de corrida personalizado</p>
+      </div>`,
+    );
+  }
+
+  async sendAthleteCredentials(to: string, name: string, tempPassword: string): Promise<void> {
+    const platformName = process.env.PLATFORM_NAME || 'Rafinha Running';
+    const loginUrl = `${process.env.FRONTEND_URL || this.appUrl}/login`;
+    await this.send(
+      to,
+      `Seus dados de acesso — ${platformName}`,
+      `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px">
+        <h2 style="color:#DC2626;margin-bottom:8px">Bem-vindo(a) à ${platformName}, ${name}!</h2>
+        <p>Seu questionário foi recebido. Aqui estão seus dados de acesso à plataforma:</p>
+        <div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:16px;margin:16px 0">
+          <p style="margin:4px 0"><strong>Email:</strong> ${to}</p>
+          <p style="margin:4px 0"><strong>Senha temporária:</strong> <code style="background:#EEF2FF;padding:2px 6px;border-radius:4px;font-size:14px">${tempPassword}</code></p>
+        </div>
+        <p style="color:#6B7280;font-size:13px">Por segurança, troque sua senha após o primeiro acesso.</p>
+        <a href="${loginUrl}" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#DC2626;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+          Acessar agora
+        </a>
+        <p style="color:#6B7280;font-size:13px">Seu coach irá analisar suas respostas e entrar em contato em breve com seu plano de treino personalizado.</p>
+        <hr style="border:none;border-top:1px solid #E5E7EB;margin:24px 0"/>
+        <p style="color:#9CA3AF;font-size:12px">${platformName} &bull; Treinamento de corrida personalizado</p>
+      </div>`,
+    );
+  }
+
   async sendWelcome(to: string, name: string): Promise<void> {
     const platformName = process.env.PLATFORM_NAME || 'Rafinha Running';
     await this.send(

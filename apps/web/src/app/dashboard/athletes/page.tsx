@@ -33,6 +33,7 @@ export default function AthletesPage() {
   const [sentInviteLink, setSentInviteLink] = useState('');
   const [pendingInvites, setPendingInvites] = useState<Invite[]>([]);
   const [copied, setCopied] = useState('');
+  const [pendingOnboardingCount, setPendingOnboardingCount] = useState(0);
 
   const loadAthletes = () => {
     if (isDemoMode) {
@@ -59,7 +60,15 @@ export default function AthletesPage() {
       .catch(() => {});
   };
 
-  useEffect(() => { loadAthletes(); loadInvites(); }, [isDemoMode]);
+  useEffect(() => {
+    loadAthletes();
+    loadInvites();
+    if (!isDemoMode) {
+      api.get('/onboarding/pending').then(res => {
+        setPendingOnboardingCount(Array.isArray(res.data) ? res.data.length : 0);
+      }).catch(() => {});
+    }
+  }, [isDemoMode]);
 
   const filtered = athletes.filter((a) =>
     a.user.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -100,7 +109,18 @@ export default function AthletesPage() {
     <div>
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">Atletas</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">Atletas</h1>
+            {pendingOnboardingCount > 0 && (
+              <Link
+                href="/dashboard/onboarding"
+                className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-100 hover:bg-red-200 text-red-700 text-xs font-semibold transition"
+              >
+                <span className="w-2 h-2 rounded-full bg-red-500" />
+                {pendingOnboardingCount} novo{pendingOnboardingCount !== 1 ? 's' : ''}
+              </Link>
+            )}
+          </div>
           <p className="text-sm text-gray-500 mt-1">{athletes.length} atletas cadastrados</p>
         </div>
         <button

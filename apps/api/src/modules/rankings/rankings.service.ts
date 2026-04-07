@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
+import { Cacheable } from '../../common/decorators/cacheable.decorator';
 import { WorkoutStatus } from '@prisma/client';
 
 export type RankingPeriod = 'week' | 'month' | 'year' | 'all' | 'monthly';
@@ -122,6 +123,7 @@ export class RankingsService {
     return ranking;
   }
 
+  @Cacheable(300)
   async getTopByStreak(limit = 20): Promise<RankingEntry[]> {
     // Calcular streak: dias consecutivos com treinos concluidos
     // Buscar todos os atletas com treinos completos, agrupados por dia

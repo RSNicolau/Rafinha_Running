@@ -8,7 +8,7 @@ export function setAuthLogout(fn: () => Promise<void>) {
   _logoutFn = fn;
 }
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
 
 // Web-safe storage helpers
 const getItem = async (key: string) =>

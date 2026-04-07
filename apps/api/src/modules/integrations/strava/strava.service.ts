@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { FitnessIntegration, IntegrationProvider, WorkoutSource, WorkoutStatus } from '@prisma/client';
+import { encrypt, decrypt } from '../../../common/utils/encryption';
 
 const STRAVA_TOKEN_URL = 'https://www.strava.com/oauth/token';
 const STRAVA_API_BASE = 'https://www.strava.com/api/v3';
@@ -72,15 +73,15 @@ export class StravaService {
       create: {
         userId,
         provider: IntegrationProvider.STRAVA,
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token,
+        accessToken: encrypt(tokenData.access_token),
+        refreshToken: encrypt(tokenData.refresh_token),
         expiresAt: new Date(tokenData.expires_at * 1000),
         externalUserId: String(tokenData.athlete?.id || ''),
         isActive: true,
       },
       update: {
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token,
+        accessToken: encrypt(tokenData.access_token),
+        refreshToken: encrypt(tokenData.refresh_token),
         expiresAt: new Date(tokenData.expires_at * 1000),
         isActive: true,
       },
@@ -327,7 +328,7 @@ export class StravaService {
 
   private async ensureValidToken(integration: FitnessIntegration): Promise<string> {
     if (integration.expiresAt && integration.expiresAt > new Date()) {
-      return integration.accessToken;
+      return decrypt(integration.accessToken);
     }
 
     if (!integration.refreshToken) {
@@ -335,13 +336,13 @@ export class StravaService {
     }
 
     this.logger.log(`Renovando token Strava para integração ${integration.id}`);
-    const newTokens = await this.refreshAccessToken(integration.refreshToken);
+    const newTokens = await this.refreshAccessToken(decrypt(integration.refreshToken));
 
     await this.prisma.fitnessIntegration.update({
       where: { id: integration.id },
       data: {
-        accessToken: newTokens.access_token,
-        refreshToken: newTokens.refresh_token,
+        accessToken: encrypt(newTokens.access_token),
+        refreshToken: encrypt(newTokens.refresh_token),
         expiresAt: new Date(newTokens.expires_at * 1000),
       },
     });

@@ -6,10 +6,11 @@ import { GarminService } from './garmin/garmin.service';
 import { StravaService } from './strava/strava.service';
 import { CorosService } from './coros/coros.service';
 import { PolarService } from './polar/polar.service';
+import { GoogleFitService } from './google-fit/google-fit.service';
 
 @Module({
   controllers: [IntegrationsController, WebhooksController],
-  providers: [IntegrationsService, GarminService, StravaService, CorosService, PolarService],
+  providers: [IntegrationsService, GarminService, StravaService, CorosService, PolarService, GoogleFitService],
   exports: [IntegrationsService],
 })
 export class IntegrationsModule {}

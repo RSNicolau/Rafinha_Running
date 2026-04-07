@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { encrypt, decrypt } from '../../../common/utils/encryption';
 import {
   FitnessIntegration, IntegrationProvider, Workout,
   WorkoutSource, WorkoutStatus,
@@ -118,15 +119,15 @@ export class GarminService {
       create: {
         userId,
         provider: IntegrationProvider.GARMIN,
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token,
+        accessToken: encrypt(tokenData.access_token),
+        refreshToken: encrypt(tokenData.refresh_token),
         expiresAt: new Date(Date.now() + tokenData.expires_in * 1000),
         externalUserId: garminUserId,
         isActive: true,
       },
       update: {
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token,
+        accessToken: encrypt(tokenData.access_token),
+        refreshToken: encrypt(tokenData.refresh_token),
         expiresAt: new Date(Date.now() + tokenData.expires_in * 1000),
         externalUserId: garminUserId,
         isActive: true,
@@ -523,7 +524,7 @@ export class GarminService {
   /** Ensure we have a valid (non-expired) access token, refreshing if needed */
   private async ensureValidToken(integration: FitnessIntegration): Promise<string> {
     if (integration.expiresAt && integration.expiresAt > new Date()) {
-      return integration.accessToken;
+      return decrypt(integration.accessToken);
     }
 
     if (!integration.refreshToken) {
@@ -531,13 +532,13 @@ export class GarminService {
     }
 
     this.logger.log(`Renovando token Garmin para integração ${integration.id}`);
-    const newTokens = await this.refreshAccessToken(integration.refreshToken);
+    const newTokens = await this.refreshAccessToken(decrypt(integration.refreshToken));
 
     await this.prisma.fitnessIntegration.update({
       where: { id: integration.id },
       data: {
-        accessToken: newTokens.access_token,
-        refreshToken: newTokens.refresh_token,
+        accessToken: encrypt(newTokens.access_token),
+        refreshToken: encrypt(newTokens.refresh_token),
         expiresAt: new Date(Date.now() + newTokens.expires_in * 1000),
       },
     });
@@ -578,5 +579,132 @@ export class GarminService {
     const minutes = Math.floor(paceSeconds / 60);
     const seconds = Math.round(paceSeconds % 60);
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  /**
+   * GET /integrations/garmin/health/today/:athleteId
+   * Returns today's Garmin health snapshot with semáforo calculation
+   */
+  async getHealthToday(coachId: string, athleteId: string) {
+    // Verify the requesting coach has access to this athlete
+    const athlete = await this.prisma.user.findFirst({
+      where: {
+        id: athleteId,
+        athleteProfile: { coachId },
+      },
+    });
+    if (!athlete) {
+      throw new BadRequestException('Atleta não encontrado ou acesso negado');
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const snapshot = await this.prisma.garminHealthSnapshot.findFirst({
+      where: {
+        athleteId,
+        date: { gte: today },
+      },
+    });
+
+    // Compute 7-day HRV average for semáforo
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const recentSnapshots = await this.prisma.garminHealthSnapshot.findMany({
+      where: { athleteId, date: { gte: sevenDaysAgo }, hrv: { not: null } },
+      orderBy: { date: 'desc' },
+    });
+
+    const avgHrv = recentSnapshots.length
+      ? recentSnapshots.reduce((s, r) => s + (r.hrv || 0), 0) / recentSnapshots.length
+      : null;
+
+    let semaforo: 'green' | 'yellow' | 'red' = 'green';
+    let semaforo_label = 'Pronto para treinar';
+
+    if (snapshot) {
+      const badHrv = snapshot.hrv && avgHrv && snapshot.hrv < avgHrv * 0.7;
+      const badSleep = snapshot.sleepHours !== null && snapshot.sleepHours !== undefined && snapshot.sleepHours < 5;
+      const highStress = snapshot.stressScore !== null && snapshot.stressScore !== undefined && snapshot.stressScore > 75;
+
+      if (badHrv || badSleep) {
+        semaforo = 'red';
+        semaforo_label = badSleep ? 'Sono insuficiente — descanse' : 'HRV baixo — recuperação recomendada';
+      } else if (highStress || (snapshot.hrv && avgHrv && snapshot.hrv < avgHrv * 0.85)) {
+        semaforo = 'yellow';
+        semaforo_label = 'Estresse elevado — treino moderado';
+      }
+    }
+
+    return {
+      snapshot,
+      avgHrv: avgHrv ? Math.round(avgHrv) : null,
+      semaforo,
+      semaforo_label,
+      hasData: !!snapshot,
+    };
+  }
+
+  /**
+   * GET /integrations/garmin/health/history/:athleteId
+   * Returns last 30 days of Garmin health snapshots for a coach's athlete
+   */
+  async getHealthHistory(coachId: string, athleteId: string, days = 30) {
+    const athlete = await this.prisma.user.findFirst({
+      where: { id: athleteId, athleteProfile: { coachId } },
+    });
+    if (!athlete) throw new BadRequestException('Atleta não encontrado ou acesso negado');
+
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+
+    return this.prisma.garminHealthSnapshot.findMany({
+      where: { athleteId, date: { gte: since } },
+      orderBy: { date: 'asc' },
+    });
+  }
+
+  /**
+   * GET /integrations/garmin/health/me
+   * Returns the authenticated athlete's own health today snapshot
+   */
+  async getMyHealthToday(userId: string) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const snapshot = await this.prisma.garminHealthSnapshot.findFirst({
+      where: { athleteId: userId, date: { gte: today } },
+    });
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const recent = await this.prisma.garminHealthSnapshot.findMany({
+      where: { athleteId: userId, date: { gte: sevenDaysAgo }, hrv: { not: null } },
+    });
+
+    const avgHrv = recent.length
+      ? recent.reduce((s, r) => s + (r.hrv || 0), 0) / recent.length
+      : null;
+
+    let semaforo: 'green' | 'yellow' | 'red' = 'green';
+    let semaforo_label = 'Pronto para treinar';
+
+    if (snapshot) {
+      const badHrv = snapshot.hrv && avgHrv && snapshot.hrv < avgHrv * 0.7;
+      const badSleep = snapshot.sleepHours !== null && snapshot.sleepHours !== undefined && snapshot.sleepHours < 5;
+      const highStress = snapshot.stressScore !== null && snapshot.stressScore !== undefined && snapshot.stressScore > 75;
+
+      if (badHrv || badSleep) {
+        semaforo = 'red';
+        semaforo_label = badSleep ? 'Sono insuficiente — descanse' : 'HRV baixo — recuperação recomendada';
+      } else if (highStress || (snapshot.hrv && avgHrv && snapshot.hrv < avgHrv * 0.85)) {
+        semaforo = 'yellow';
+        semaforo_label = 'Estresse elevado — treino moderado';
+      }
+    }
+
+    return { snapshot, avgHrv: avgHrv ? Math.round(avgHrv) : null, semaforo, semaforo_label, hasData: !!snapshot };
   }
 }

@@ -119,8 +119,13 @@ export default function SettingsPage() {
   // Aparência
   const [darkMode, setDarkMode] = useState(false);
 
-  // Branding (COACH only)
+  // AI Assistant config (COACH only)
   const isCoach = storeUser?.role === 'COACH' || storeUser?.role === 'ADMIN' || storeUser?.role === 'SUPER_ADMIN';
+  const [aiConfig, setAiConfig] = useState({ assistantName: 'Rafinha', tone: 'FRIENDLY', personaPrompt: '', voiceEnabled: false });
+  const [savingAi, setSavingAi] = useState(false);
+  const [aiFeedback, setAiFeedback] = useState<FeedbackState>(null);
+
+  // Branding (COACH only)
   const [brandingForm, setBrandingForm] = useState<BrandingForm>({
     tenantName: '',
     primaryColor: '#DC2626',
@@ -160,8 +165,12 @@ export default function SettingsPage() {
     const stored = localStorage.getItem('rr_dark_mode');
     if (stored === 'true') setDarkMode(true);
 
-    // Load branding for coaches
+    // Load AI config and branding for coaches
     if (storeUser?.role === 'COACH' || storeUser?.role === 'ADMIN' || storeUser?.role === 'SUPER_ADMIN') {
+      api.get('/ai-assistant/config').then(({ data }) => {
+        setAiConfig({ assistantName: data.assistantName ?? 'Rafinha', tone: data.tone ?? 'FRIENDLY', personaPrompt: data.personaPrompt ?? '', voiceEnabled: data.voiceEnabled ?? false });
+      }).catch(() => {});
+
       api.get('/config/branding').then(({ data }) => {
         setBrandingForm({
           tenantName: data.tenantName || '',
@@ -278,6 +287,19 @@ export default function SettingsPage() {
       setBrandingFeedback({ type: 'error', message: msg });
     } finally {
       setSavingBranding(false);
+    }
+  };
+
+  const handleSaveAiConfig = async () => {
+    setSavingAi(true);
+    setAiFeedback(null);
+    try {
+      await api.put('/ai-assistant/config', aiConfig);
+      setAiFeedback({ type: 'success', message: 'Configuração da IA salva com sucesso.' });
+    } catch (err: any) {
+      setAiFeedback({ type: 'error', message: err.response?.data?.message || 'Erro ao salvar configuração.' });
+    } finally {
+      setSavingAi(false);
     }
   };
 
@@ -660,6 +682,84 @@ export default function SettingsPage() {
             </div>
 
             <Feedback state={brandingFeedback} />
+          </div>
+        )}
+
+        {/* IA Assistente — COACH only */}
+        {isCoach && (
+          <div className="glass-card p-6">
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">IA Assistente</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Nome da IA</label>
+                <input
+                  type="text"
+                  value={aiConfig.assistantName}
+                  onChange={e => setAiConfig(c => ({ ...c, assistantName: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
+                  placeholder="Ex: Rafinha"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Tom de comunicação</label>
+                <select
+                  value={aiConfig.tone}
+                  onChange={e => setAiConfig(c => ({ ...c, tone: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
+                >
+                  <option value="FRIENDLY">Amigável e próximo</option>
+                  <option value="PROFESSIONAL">Profissional e técnico</option>
+                  <option value="MOTIVATIONAL">Motivador e energético</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Prompt de persona (opcional)</label>
+                <textarea
+                  value={aiConfig.personaPrompt}
+                  onChange={e => setAiConfig(c => ({ ...c, personaPrompt: e.target.value }))}
+                  rows={3}
+                  className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition resize-none"
+                  placeholder="Ex: Fale sempre com energia, use gírias do esporte e encoraje muito os atletas."
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Resposta por voz</p>
+                  <p className="text-xs text-gray-400 mt-0.5">A IA lê as respostas em voz alta (Chrome/Safari)</p>
+                </div>
+                <Toggle checked={aiConfig.voiceEnabled} onChange={v => setAiConfig(c => ({ ...c, voiceEnabled: v }))} />
+              </div>
+            </div>
+            <div className="mt-5">
+              <button
+                onClick={handleSaveAiConfig}
+                disabled={savingAi}
+                className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-60 text-white text-sm font-medium rounded-xl transition cursor-pointer flex items-center gap-2"
+              >
+                {savingAi && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                Salvar Configuração IA
+              </button>
+            </div>
+            <Feedback state={aiFeedback} />
+          </div>
+        )}
+
+        {/* Onboarding Form — COACH only */}
+        {isCoach && (
+          <div className="glass-card p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Questionário de Anamnese</h2>
+                <p className="text-sm text-gray-600">Configure as perguntas para novos atletas</p>
+                <p className="text-xs text-gray-400 mt-0.5">O atleta preenche online, a IA analisa e sugere um plano</p>
+              </div>
+              <a
+                href="/dashboard/settings/onboarding-form"
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary/90 transition shrink-0"
+              >
+                Editar Formulário →
+              </a>
+            </div>
           </div>
         )}
 

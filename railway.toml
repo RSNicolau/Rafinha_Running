@@ -4,7 +4,7 @@ buildCommand = "cd apps/api && npx prisma generate && (npx prisma migrate deploy
 
 [deploy]
 startCommand = "node /app/apps/api/dist/main"
-healthcheckPath = "/health"
+healthcheckPath = "/api/health"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3

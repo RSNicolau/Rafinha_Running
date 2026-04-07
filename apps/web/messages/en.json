@@ -1,0 +1,85 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "edit": "Edit",
+    "back": "Back",
+    "next": "Next",
+    "close": "Close",
+    "search": "Search",
+    "filter": "Filter",
+    "export": "Export",
+    "import": "Import",
+    "required": "Required",
+    "optional": "Optional"
+  },
+  "auth": {
+    "login": "Sign in",
+    "logout": "Sign out",
+    "register": "Sign up",
+    "email": "Email",
+    "password": "Password",
+    "confirmPassword": "Confirm password",
+    "forgotPassword": "Forgot password",
+    "noAccount": "Don't have an account?",
+    "hasAccount": "Already have an account?",
+    "loginTitle": "Welcome back",
+    "registerTitle": "Create your account",
+    "loginError": "Invalid email or password",
+    "sessionExpired": "Your session has expired. Please sign in again."
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "welcome": "Welcome",
+    "athletes": "Athletes",
+    "workouts": "Workouts",
+    "plans": "Plans",
+    "chat": "Chat",
+    "rankings": "Rankings",
+    "events": "Events",
+    "settings": "Settings",
+    "billing": "Billing"
+  },
+  "landing": {
+    "hero": {
+      "title": "Complete platform for running coaching",
+      "subtitle": "Manage your athletes, create personalized workouts and track their progress in real time.",
+      "cta": "Get started",
+      "ctaSecondary": "View plans"
+    },
+    "features": {
+      "title": "Everything you need",
+      "tracking": "Live GPS Tracking",
+      "trackingDesc": "Track your athletes in real time during workouts.",
+      "plans": "Personalized plans",
+      "plansDesc": "Create training plans tailored to each athlete.",
+      "integrations": "Integrations",
+      "integrationsDesc": "Connect with Garmin, Strava, Apple Health and more."
+    }
+  },
+  "workouts": {
+    "title": "Workouts",
+    "scheduled": "Scheduled",
+    "completed": "Completed",
+    "missed": "Missed",
+    "inProgress": "In progress",
+    "distance": "Distance",
+    "duration": "Duration",
+    "pace": "Pace",
+    "heartRate": "Heart rate"
+  },
+  "subscription": {
+    "title": "Subscription",
+    "active": "Active",
+    "inactive": "Inactive",
+    "canceled": "Canceled",
+    "upgrade": "Upgrade plan",
+    "cancel": "Cancel plan",
+    "renewsOn": "Renews on",
+    "expiresOn": "Expires on",
+    "plan": "Plan"
+  }
+}

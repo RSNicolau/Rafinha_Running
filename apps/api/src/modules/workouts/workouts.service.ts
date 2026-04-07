@@ -195,7 +195,10 @@ export class WorkoutsService {
     distanceKm: number;
     calories: number;
     averageHeartRate?: number;
+    maxHeartRate?: number;
     averagePaceMinPerKm?: number;
+    elevationGain?: number;
+    splits?: Array<{ km: number; paceMinPerKm: number }>;
     source: 'APPLE_HEALTH';
   }) {
     const externalId = `apple_health_${data.id}`;
@@ -253,7 +256,9 @@ export class WorkoutsService {
           durationSeconds,
           avgPace,
           avgHeartRate: data.averageHeartRate ?? null,
+          maxHeartRate: data.maxHeartRate ?? null,
           calories: data.calories ?? null,
+          elevationGain: data.elevationGain ?? null,
         },
         update: {
           source: 'APPLE_HEALTH',
@@ -262,7 +267,9 @@ export class WorkoutsService {
           durationSeconds,
           avgPace,
           avgHeartRate: data.averageHeartRate ?? null,
+          maxHeartRate: data.maxHeartRate ?? null,
           calories: data.calories ?? null,
+          elevationGain: data.elevationGain ?? null,
         },
       });
       await this.prisma.workout.update({
@@ -297,7 +304,9 @@ export class WorkoutsService {
             durationSeconds,
             avgPace,
             avgHeartRate: data.averageHeartRate ?? null,
+            maxHeartRate: data.maxHeartRate ?? null,
             calories: data.calories ?? null,
+            elevationGain: data.elevationGain ?? null,
           },
         },
       },
@@ -309,7 +318,9 @@ export class WorkoutsService {
   async syncFromAppleHealthBatch(athleteId: string, workouts: Array<{
     id: string; type: string; startDate: string; endDate: string;
     durationMinutes: number; distanceKm: number; calories: number;
-    averageHeartRate?: number; averagePaceMinPerKm?: number; source: 'APPLE_HEALTH';
+    averageHeartRate?: number; maxHeartRate?: number; averagePaceMinPerKm?: number;
+    elevationGain?: number; splits?: Array<{ km: number; paceMinPerKm: number }>;
+    source: 'APPLE_HEALTH';
   }>) {
     let synced = 0;
     let skipped = 0;

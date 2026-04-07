@@ -7,7 +7,7 @@ import {
   ConnectedSocket,
   MessageBody,
 } from '@nestjs/websockets';
-import { Logger, UnauthorizedException } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { LiveTrackingService } from './live-tracking.service';
@@ -65,34 +65,29 @@ export class LiveTrackingGateway implements OnGatewayConnection, OnGatewayDiscon
     }
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     const user = this.connectedUsers.get(client.id);
     if (user) {
       this.logger.log(`User ${user.userId} disconnected from live tracking`);
       this.connectedUsers.delete(client.id);
     }
-    this.liveTrackingService.handleDisconnect(client.id);
+    await this.liveTrackingService.handleDisconnect(client.id);
   }
 
-  /**
-   * Athlete starts a live tracking session.
-   * Only the authenticated athlete can start their own session.
-   */
   @SubscribeMessage('start-tracking')
-  handleStartTracking(
+  async handleStartTracking(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { athleteId: string; workoutId?: string },
   ) {
     const user = this.connectedUsers.get(client.id);
     if (!user) return { error: 'Não autenticado' };
 
-    // Athletes can only track themselves
     if (user.role === 'ATHLETE' && user.userId !== data.athleteId) {
       return { error: 'Não autorizado' };
     }
 
     this.logger.log(`Athlete ${data.athleteId} started tracking`);
-    this.liveTrackingService.startSession(client.id, data.athleteId, data.workoutId);
+    await this.liveTrackingService.startSession(client.id, data.athleteId, data.workoutId);
 
     this.server.to(`coach:${data.athleteId}`).emit('athlete-started', {
       athleteId: data.athleteId,
@@ -103,30 +98,22 @@ export class LiveTrackingGateway implements OnGatewayConnection, OnGatewayDiscon
     return { status: 'tracking-started' };
   }
 
-  /**
-   * Athlete sends location/metrics update.
-   * Only the owner of the session can send updates.
-   */
   @SubscribeMessage('location-update')
-  handleLocationUpdate(
+  async handleLocationUpdate(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: LiveTrackingData,
   ) {
     const user = this.connectedUsers.get(client.id);
     if (!user) return;
 
-    // Athletes can only update their own session
     if (user.role === 'ATHLETE' && user.userId !== data.athleteId) return;
 
-    this.liveTrackingService.updateLocation(data);
+    await this.liveTrackingService.updateLocation(data);
     this.server.to(`coach:${data.athleteId}`).emit('athlete-update', data);
   }
 
-  /**
-   * Athlete stops tracking.
-   */
   @SubscribeMessage('stop-tracking')
-  handleStopTracking(
+  async handleStopTracking(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { athleteId: string },
   ) {
@@ -138,7 +125,7 @@ export class LiveTrackingGateway implements OnGatewayConnection, OnGatewayDiscon
     }
 
     this.logger.log(`Athlete ${data.athleteId} stopped tracking`);
-    const summary = this.liveTrackingService.endSession(data.athleteId);
+    const summary = await this.liveTrackingService.endSession(data.athleteId);
 
     this.server.to(`coach:${data.athleteId}`).emit('athlete-stopped', {
       athleteId: data.athleteId,
@@ -149,10 +136,6 @@ export class LiveTrackingGateway implements OnGatewayConnection, OnGatewayDiscon
     return { status: 'tracking-stopped', summary };
   }
 
-  /**
-   * Coach subscribes to an athlete's live feed.
-   * Only coaches who are responsible for this athlete may watch.
-   */
   @SubscribeMessage('watch-athlete')
   async handleWatchAthlete(
     @ConnectedSocket() client: Socket,
@@ -163,7 +146,6 @@ export class LiveTrackingGateway implements OnGatewayConnection, OnGatewayDiscon
 
     if (user.role === 'ATHLETE') return { error: 'Acesso negado' };
 
-    // Coaches must be responsible for this athlete (or be admin)
     if (user.role === 'COACH') {
       const profile = await this.prisma.athleteProfile.findFirst({
         where: { userId: data.athleteId, coachId: user.userId },
@@ -174,7 +156,7 @@ export class LiveTrackingGateway implements OnGatewayConnection, OnGatewayDiscon
     client.join(`coach:${data.athleteId}`);
     this.logger.log(`Coach ${user.userId} watching athlete ${data.athleteId}`);
 
-    const current = this.liveTrackingService.getCurrentPosition(data.athleteId);
+    const current = await this.liveTrackingService.getCurrentPosition(data.athleteId);
     if (current) client.emit('athlete-update', current);
 
     return { status: 'watching', isLive: !!current };
@@ -189,11 +171,8 @@ export class LiveTrackingGateway implements OnGatewayConnection, OnGatewayDiscon
     return { status: 'unwatched' };
   }
 
-  /**
-   * Get all currently live athletes (coach/admin only).
-   */
   @SubscribeMessage('get-live-athletes')
-  handleGetLiveAthletes(@ConnectedSocket() client: Socket) {
+  async handleGetLiveAthletes(@ConnectedSocket() client: Socket) {
     const user = this.connectedUsers.get(client.id);
     if (!user || user.role === 'ATHLETE') return [];
     return this.liveTrackingService.getLiveAthletes();

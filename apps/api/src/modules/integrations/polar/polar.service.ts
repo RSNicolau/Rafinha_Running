@@ -24,6 +24,7 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { FitnessIntegration, IntegrationProvider, WorkoutSource, WorkoutStatus } from '@prisma/client';
+import { encrypt, decrypt } from '../../../common/utils/encryption';
 
 const POLAR_AUTH_URL   = 'https://flow.polar.com/oauth2/authorization';
 const POLAR_TOKEN_URL  = 'https://polarremote.com/v2/oauth2/token';
@@ -123,14 +124,14 @@ export class PolarService {
       create: {
         userId,
         provider:       IntegrationProvider.POLAR,
-        accessToken:    tokenData.access_token,
+        accessToken:    encrypt(tokenData.access_token),
         refreshToken:   null, // Polar access tokens don't expire (no refresh needed)
         expiresAt:      null,
         externalUserId: polarUserId,
         isActive:       true,
       },
       update: {
-        accessToken:    tokenData.access_token,
+        accessToken:    encrypt(tokenData.access_token),
         externalUserId: polarUserId,
         isActive:       true,
       },
@@ -147,7 +148,7 @@ export class PolarService {
     this.logger.log(`Sincronizando atividades Polar para usuário ${userId}`);
 
     const polarUserId = integration.externalUserId;
-    const accessToken = integration.accessToken;
+    const accessToken = decrypt(integration.accessToken);
 
     // 1. Create exercise transaction
     const txRes = await fetch(
@@ -319,7 +320,7 @@ export class PolarService {
     try {
       const exRes = await fetch(data.entity_id, {
         headers: {
-          Authorization: `Bearer ${integration.accessToken}`,
+          Authorization: `Bearer ${decrypt(integration.accessToken)}`,
           Accept:        'application/json',
         },
         signal: AbortSignal.timeout(10000),

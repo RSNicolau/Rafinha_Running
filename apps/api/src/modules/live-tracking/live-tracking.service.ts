@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { CacheService } from '../cache/cache.service';
 import { LiveTrackingData } from './live-tracking.gateway';
 
 interface LiveSession {
@@ -7,67 +8,81 @@ interface LiveSession {
   workoutId?: string;
   startedAt: number;
   lastUpdate: LiveTrackingData | null;
-  route: Array<{ lat: number; lng: number; timestamp: number }>;
   totalDistance: number;
   maxPace: number;
   avgPace: number;
   maxHeartRate: number;
 }
 
+const SESSION_TTL = 4 * 60 * 60; // 4 hours
+const ROUTE_TTL = 4 * 60 * 60;
+
 @Injectable()
 export class LiveTrackingService {
   private readonly logger = new Logger('LiveTrackingService');
-  private sessions = new Map<string, LiveSession>(); // athleteId -> session
-  private clientToAthlete = new Map<string, string>(); // clientId -> athleteId
 
-  startSession(clientId: string, athleteId: string, workoutId?: string) {
-    this.sessions.set(athleteId, {
+  constructor(private readonly cache: CacheService) {}
+
+  private sessionKey(athleteId: string) {
+    return `live:session:${athleteId}`;
+  }
+  private routeKey(athleteId: string) {
+    return `live:route:${athleteId}`;
+  }
+  private clientKey(clientId: string) {
+    return `live:client:${clientId}`;
+  }
+
+  async startSession(clientId: string, athleteId: string, workoutId?: string) {
+    const session: LiveSession = {
       athleteId,
       clientId,
       workoutId,
       startedAt: Date.now(),
       lastUpdate: null,
-      route: [],
       totalDistance: 0,
       maxPace: 0,
       avgPace: 0,
       maxHeartRate: 0,
-    });
-    this.clientToAthlete.set(clientId, athleteId);
+    };
+
+    await this.cache.set(this.sessionKey(athleteId), session, SESSION_TTL);
+    await this.cache.set(this.clientKey(clientId), athleteId, SESSION_TTL);
+    // Clear any previous route
+    await this.cache.del(this.routeKey(athleteId));
   }
 
-  updateLocation(data: LiveTrackingData) {
-    const session = this.sessions.get(data.athleteId);
+  async updateLocation(data: LiveTrackingData) {
+    const session = await this.cache.get<LiveSession>(this.sessionKey(data.athleteId));
     if (!session) return;
 
     session.lastUpdate = data;
     session.totalDistance = data.distance;
 
-    // Track route points (every 5 seconds max to avoid memory issues)
-    const lastRoute = session.route[session.route.length - 1];
-    if (!lastRoute || data.timestamp - lastRoute.timestamp >= 5000) {
-      session.route.push({
-        lat: data.latitude,
-        lng: data.longitude,
-        timestamp: data.timestamp,
-      });
-    }
-
-    // Track max values
     if (data.pace > session.maxPace) session.maxPace = data.pace;
     if (data.heartRate && data.heartRate > session.maxHeartRate) {
       session.maxHeartRate = data.heartRate;
     }
-
-    // Running average pace: elapsed is in seconds, distance in meters → min/km
     if (data.elapsed > 0 && data.distance > 0) {
       session.avgPace = (data.elapsed / 60) / (data.distance / 1000);
     }
+
+    await this.cache.set(this.sessionKey(data.athleteId), session, SESSION_TTL);
+
+    // Append route point (stored as JSON array in cache)
+    const route = await this.cache.get<Array<{ lat: number; lng: number; timestamp: number }>>(this.routeKey(data.athleteId)) || [];
+    const lastRoute = route[route.length - 1];
+    if (!lastRoute || data.timestamp - lastRoute.timestamp >= 5000) {
+      route.push({ lat: data.latitude, lng: data.longitude, timestamp: data.timestamp });
+      await this.cache.set(this.routeKey(data.athleteId), route, ROUTE_TTL);
+    }
   }
 
-  endSession(athleteId: string) {
-    const session = this.sessions.get(athleteId);
+  async endSession(athleteId: string) {
+    const session = await this.cache.get<LiveSession>(this.sessionKey(athleteId));
     if (!session) return null;
+
+    const route = await this.cache.get<Array<{ lat: number; lng: number; timestamp: number }>>(this.routeKey(athleteId)) || [];
 
     const summary = {
       athleteId,
@@ -76,40 +91,54 @@ export class LiveTrackingService {
       totalDistance: session.totalDistance,
       avgPace: Math.round(session.avgPace * 100) / 100,
       maxHeartRate: session.maxHeartRate,
-      routePoints: session.route.length,
+      routePoints: route.length,
     };
 
-    this.clientToAthlete.delete(session.clientId);
-    this.sessions.delete(athleteId);
+    await this.cache.del(this.clientKey(session.clientId));
+    await this.cache.del(this.sessionKey(athleteId));
+    await this.cache.del(this.routeKey(athleteId));
 
     this.logger.log(`Session ended for ${athleteId}: ${JSON.stringify(summary)}`);
     return summary;
   }
 
-  handleDisconnect(clientId: string) {
-    const athleteId = this.clientToAthlete.get(clientId);
+  async handleDisconnect(clientId: string) {
+    const athleteId = await this.cache.get<string>(this.clientKey(clientId));
     if (athleteId) {
-      this.endSession(athleteId);
+      await this.endSession(athleteId);
     }
   }
 
-  getCurrentPosition(athleteId: string): LiveTrackingData | null {
-    return this.sessions.get(athleteId)?.lastUpdate || null;
+  async getCurrentPosition(athleteId: string): Promise<LiveTrackingData | null> {
+    const session = await this.cache.get<LiveSession>(this.sessionKey(athleteId));
+    return session?.lastUpdate || null;
   }
 
-  getLiveAthletes(): Array<{
+  async getLiveAthletes(): Promise<Array<{
     athleteId: string;
     lastUpdate: LiveTrackingData | null;
     startedAt: number;
-  }> {
-    return Array.from(this.sessions.values()).map((s) => ({
-      athleteId: s.athleteId,
-      lastUpdate: s.lastUpdate,
-      startedAt: s.startedAt,
-    }));
+  }>> {
+    // Scan for all live session keys
+    const keys = await this.cache.getKeysByPattern('live:session:*');
+    const results: Array<{ athleteId: string; lastUpdate: LiveTrackingData | null; startedAt: number }> = [];
+
+    for (const key of keys) {
+      const athleteId = key.replace('live:session:', '');
+      const session = await this.cache.get<LiveSession>(key);
+      if (session) {
+        results.push({
+          athleteId,
+          lastUpdate: session.lastUpdate,
+          startedAt: session.startedAt,
+        });
+      }
+    }
+
+    return results;
   }
 
-  getSessionRoute(athleteId: string) {
-    return this.sessions.get(athleteId)?.route || [];
+  async getSessionRoute(athleteId: string) {
+    return await this.cache.get<Array<{ lat: number; lng: number; timestamp: number }>>(this.routeKey(athleteId)) || [];
   }
 }
