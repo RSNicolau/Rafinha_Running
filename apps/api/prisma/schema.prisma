@@ -157,6 +157,12 @@ model User {
   timezone     String    @default("America/Sao_Paulo") @map("timezone")
   appleId      String?   @unique @map("apple_id")
   deletedAt    DateTime? @map("deleted_at")
+
+  // AI provider settings (coach only)
+  aiProvider   String    @default("anthropic") @map("ai_provider") // anthropic | openai | gemini | grok
+  aiModel      String?   @map("ai_model")      // override default model per provider
+  aiByok       Boolean   @default(false) @map("ai_byok") // true = coach uses own API key
+  aiApiKey     String?   @map("ai_api_key")    // encrypted, only used when aiByok=true
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 

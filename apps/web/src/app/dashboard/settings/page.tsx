@@ -125,6 +125,29 @@ export default function SettingsPage() {
   const [savingAi, setSavingAi] = useState(false);
   const [aiFeedback, setAiFeedback] = useState<FeedbackState>(null);
 
+  // CoachBrain AI provider settings (COACH only)
+  type AIProvider = 'anthropic' | 'openai' | 'gemini' | 'grok';
+  interface ProviderInfo { id: AIProvider; label: string; defaultModel: string; platformAvailable: boolean }
+  interface AIProviderSettings {
+    provider: AIProvider;
+    model: string | null;
+    byok: boolean;
+    hasApiKey: boolean;
+    providerLabel: string;
+    defaultModel: string;
+    availableProviders: ProviderInfo[];
+  }
+  const [brainSettings, setBrainSettings] = useState<AIProviderSettings | null>(null);
+  const [brainByok, setBrainByok] = useState(false);
+  const [brainProvider, setBrainProvider] = useState<AIProvider>('anthropic');
+  const [brainModel, setBrainModel] = useState('');
+  const [brainApiKey, setBrainApiKey] = useState('');
+  const [showBrainKey, setShowBrainKey] = useState(false);
+  const [savingBrain, setSavingBrain] = useState(false);
+  const [testingBrain, setTestingBrain] = useState(false);
+  const [brainFeedback, setBrainFeedback] = useState<FeedbackState>(null);
+  const [brainTestResult, setBrainTestResult] = useState<{ ok: boolean; latencyMs: number; model: string } | null>(null);
+
   // Branding (COACH only)
   const [brandingForm, setBrandingForm] = useState<BrandingForm>({
     tenantName: '',
@@ -179,6 +202,13 @@ export default function SettingsPage() {
           bannerUrl: data.bannerUrl || '',
           welcomeMsg: data.welcomeMsg || '',
         });
+      }).catch(() => {});
+
+      api.get('/coach-brain/settings').then(({ data }) => {
+        setBrainSettings(data);
+        setBrainProvider(data.provider);
+        setBrainByok(data.byok);
+        setBrainModel(data.model ?? '');
       }).catch(() => {});
     }
   }, [storeUser]);
@@ -287,6 +317,43 @@ export default function SettingsPage() {
       setBrandingFeedback({ type: 'error', message: msg });
     } finally {
       setSavingBranding(false);
+    }
+  };
+
+  const handleSaveBrainSettings = async () => {
+    setSavingBrain(true);
+    setBrainFeedback(null);
+    setBrainTestResult(null);
+    try {
+      await api.put('/coach-brain/settings', {
+        provider: brainProvider,
+        model: brainModel || undefined,
+        byok: brainByok,
+        apiKey: brainByok && brainApiKey ? brainApiKey : undefined,
+      });
+      setBrainFeedback({ type: 'success', message: 'Configurações do CoachBrain salvas.' });
+      setBrainApiKey(''); // clear key field after save
+      // Refresh settings
+      const { data } = await api.get('/coach-brain/settings');
+      setBrainSettings(data);
+    } catch (err: any) {
+      setBrainFeedback({ type: 'error', message: err.response?.data?.message || 'Erro ao salvar.' });
+    } finally {
+      setSavingBrain(false);
+    }
+  };
+
+  const handleTestBrainConnection = async () => {
+    setTestingBrain(true);
+    setBrainTestResult(null);
+    setBrainFeedback(null);
+    try {
+      const { data } = await api.post('/coach-brain/settings/test');
+      setBrainTestResult({ ok: true, latencyMs: data.latencyMs, model: data.model });
+    } catch (err: any) {
+      setBrainFeedback({ type: 'error', message: err.response?.data?.message || 'Conexão falhou.' });
+    } finally {
+      setTestingBrain(false);
     }
   };
 
@@ -741,6 +808,160 @@ export default function SettingsPage() {
               </button>
             </div>
             <Feedback state={aiFeedback} />
+          </div>
+        )}
+
+        {/* CoachBrain — Provedor de IA */}
+        {isCoach && (
+          <div className="glass-card p-6">
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">CoachBrain — Provedor de IA</h2>
+            <p className="text-xs text-gray-400 mb-5">Escolha qual modelo de IA alimenta seu assistente</p>
+
+            <div className="space-y-5">
+              {/* Mode toggle */}
+              <div className="flex items-center justify-between p-4 rounded-xl bg-gray-50 border border-gray-100">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {brainByok ? 'Chave própria (BYOK)' : 'Chave da plataforma'}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {brainByok
+                      ? 'Você usa sua própria API key — custo vai na sua conta'
+                      : 'A plataforma fornece a chave — incluída no plano'}
+                  </p>
+                </div>
+                <Toggle checked={brainByok} onChange={(v) => { setBrainByok(v); setBrainFeedback(null); setBrainTestResult(null); }} />
+              </div>
+
+              {/* Provider selector */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Provedor</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(brainSettings?.availableProviders ?? [
+                    { id: 'anthropic', label: 'Claude (Anthropic)', defaultModel: 'claude-opus-4-6', platformAvailable: true },
+                    { id: 'openai',    label: 'GPT-4o (OpenAI)',    defaultModel: 'gpt-4o',          platformAvailable: false },
+                    { id: 'gemini',    label: 'Gemini (Google)',    defaultModel: 'gemini-2.0-flash-exp', platformAvailable: false },
+                    { id: 'grok',      label: 'Grok (xAI)',         defaultModel: 'grok-3',          platformAvailable: false },
+                  ] as ProviderInfo[]).map((p) => {
+                    const isSelected = brainProvider === p.id;
+                    const unavailable = !brainByok && !p.platformAvailable;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        disabled={unavailable}
+                        onClick={() => { setBrainProvider(p.id as AIProvider); setBrainModel(''); }}
+                        className={`relative p-3 rounded-xl border text-left transition-all ${
+                          isSelected
+                            ? 'border-primary/50 bg-primary/5'
+                            : unavailable
+                              ? 'border-gray-100 bg-gray-50/50 opacity-50 cursor-not-allowed'
+                              : 'border-gray-200 bg-white hover:border-primary/30'
+                        }`}
+                      >
+                        <p className="text-xs font-semibold text-gray-800">{p.label}</p>
+                        <p className="text-[10px] text-gray-400 mt-0.5">{p.defaultModel}</p>
+                        {!brainByok && p.platformAvailable && (
+                          <span className="absolute top-2 right-2 text-[9px] font-medium bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full">incluso</span>
+                        )}
+                        {!brainByok && !p.platformAvailable && (
+                          <span className="absolute top-2 right-2 text-[9px] font-medium bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full">BYOK</span>
+                        )}
+                        {isSelected && (
+                          <span className="absolute top-2 right-2 w-3.5 h-3.5 rounded-full bg-primary flex items-center justify-center">
+                            <svg className="w-2 h-2 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Custom model (optional) */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">
+                  Modelo específico <span className="text-gray-300">(opcional — deixe vazio para usar o padrão)</span>
+                </label>
+                <input
+                  type="text"
+                  value={brainModel}
+                  onChange={e => setBrainModel(e.target.value)}
+                  placeholder={
+                    brainProvider === 'anthropic' ? 'claude-opus-4-6' :
+                    brainProvider === 'openai'    ? 'gpt-4o' :
+                    brainProvider === 'gemini'    ? 'gemini-2.0-flash-exp' : 'grok-3'
+                  }
+                  className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition font-mono"
+                />
+              </div>
+
+              {/* BYOK API Key */}
+              {brainByok && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">
+                    Sua API Key ({
+                      brainProvider === 'anthropic' ? 'console.anthropic.com' :
+                      brainProvider === 'openai'    ? 'platform.openai.com' :
+                      brainProvider === 'gemini'    ? 'aistudio.google.com' : 'console.x.ai'
+                    })
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showBrainKey ? 'text' : 'password'}
+                      value={brainApiKey}
+                      onChange={e => setBrainApiKey(e.target.value)}
+                      placeholder={brainSettings?.hasApiKey ? '••••••• (chave salva — cole para atualizar)' : 'Cole sua API key aqui'}
+                      className="w-full px-3.5 py-2.5 pr-10 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowBrainKey(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showBrainKey ? (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-1">A chave é criptografada antes de ser salva</p>
+                </div>
+              )}
+
+              {/* Test result */}
+              {brainTestResult && (
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                  <svg className="w-4 h-4 text-emerald-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <p className="text-xs text-emerald-700 font-medium">
+                    Conexão OK — {brainTestResult.model} respondeu em {brainTestResult.latencyMs}ms
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-5 flex items-center gap-3">
+              <button
+                onClick={handleSaveBrainSettings}
+                disabled={savingBrain}
+                className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-60 text-white text-sm font-medium rounded-xl transition cursor-pointer flex items-center gap-2"
+              >
+                {savingBrain && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                Salvar
+              </button>
+              <button
+                onClick={handleTestBrainConnection}
+                disabled={testingBrain || savingBrain}
+                className="px-5 py-2.5 border border-gray-200 hover:bg-gray-50 disabled:opacity-60 text-gray-700 text-sm font-medium rounded-xl transition cursor-pointer flex items-center gap-2"
+              >
+                {testingBrain && <span className="w-3.5 h-3.5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />}
+                Testar conexão
+              </button>
+            </div>
+            <Feedback state={brainFeedback} />
           </div>
         )}
 
