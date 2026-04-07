@@ -6,7 +6,10 @@ import { CreateSubscriptionDto } from './dto/subscription.dto';
 import { PaymentProvider, SubscriptionStatus } from '@prisma/client';
 import * as crypto from 'crypto';
 
-const ENCRYPTION_KEY = process.env.API_KEY_ENCRYPTION_SECRET || process.env.JWT_SECRET || 'fallback-32-char-key-for-dev-only';
+const ENCRYPTION_KEY = process.env.API_KEY_ENCRYPTION_SECRET || 'fallback-32-char-key-for-dev-only';
+if (!process.env.API_KEY_ENCRYPTION_SECRET) {
+  console.error('[PaymentsService] WARNING: API_KEY_ENCRYPTION_SECRET not set. Payment gateway keys are NOT securely encrypted. Set this env var in production.');
+}
 
 function encryptKey(plaintext: string): string {
   const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);

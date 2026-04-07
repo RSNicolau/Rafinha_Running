@@ -123,7 +123,9 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Webhook Stripe' })
   async stripeWebhook(@Req() req: RawBodyRequest<Request>) {
     const signature = req.headers['stripe-signature'] as string;
-    return this.stripeService.handleWebhook(req.rawBody!, signature);
+    if (!signature) throw new UnauthorizedException('Assinatura do webhook Stripe ausente');
+    if (!req.rawBody) throw new UnauthorizedException('Raw body ausente');
+    return this.stripeService.handleWebhook(req.rawBody, signature);
   }
 
   @Post('webhooks/mercadopago')

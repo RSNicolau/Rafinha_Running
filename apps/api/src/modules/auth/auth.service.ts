@@ -229,11 +229,13 @@ export class AuthService {
 
     if (!user) {
       // New user — create account
+      // Apple doesn't always return email (user can hide it). Generate a unique placeholder to avoid NULL unique constraint violations.
+      const resolvedEmail = email ?? `apple_${appleUserId}@privaterelay.appleid.com`;
       const randomPassword = await bcrypt.hash(Math.random().toString(36), 12);
       const name = fullName?.trim() || (email ? email.split('@')[0] : `Atleta_${appleUserId.slice(0, 6)}`);
       user = await this.prisma.user.create({
         data: {
-          email: email ?? null,
+          email: resolvedEmail,
           passwordHash: randomPassword,
           name,
           role: 'ATHLETE' as any,

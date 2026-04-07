@@ -256,7 +256,7 @@ export class OnboardingService {
 
     // Send welcome email with credentials to new athletes
     if (isNewAthlete && tempPassword) {
-      this.emailService.sendAthleteCredentials(athlete.email, athlete.name, tempPassword).catch(err =>
+      this.emailService.sendAthleteCredentials(athlete.email ?? '', athlete.name, tempPassword).catch(err =>
         this.logger.error(`Failed to send athlete credentials email: ${err.message}`),
       );
     }

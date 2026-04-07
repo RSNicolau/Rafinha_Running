@@ -21,7 +21,10 @@ export const PROVIDER_DEFAULTS: Record<AIProvider, { model: string; label: strin
 
 // ─── Encryption helpers (for BYOK API keys) ───────────────────────────────────
 
-const ENCRYPTION_KEY = process.env.API_KEY_ENCRYPTION_SECRET || process.env.JWT_SECRET || 'fallback-32-char-key-for-dev-only';
+const ENCRYPTION_KEY = process.env.API_KEY_ENCRYPTION_SECRET || 'fallback-32-char-key-for-dev-only';
+if (!process.env.API_KEY_ENCRYPTION_SECRET) {
+  console.error('[CoachBrainService] WARNING: API_KEY_ENCRYPTION_SECRET not set. BYOK API keys are NOT securely encrypted. Set this env var in production.');
+}
 
 function encryptKey(plaintext: string): string {
   const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);

@@ -37,7 +37,7 @@ export class SchedulerService {
       });
 
       for (const sub of expiringSubscriptions) {
-        await this.email.sendSubscriptionReminder(sub.user.email, sub.user.name, sub.currentPeriodEnd);
+        await this.email.sendSubscriptionReminder(sub.user.email ?? '', sub.user.name, sub.currentPeriodEnd);
       }
 
       this.logger.log(`Sent ${expiringSubscriptions.length} subscription reminders`);
@@ -84,7 +84,7 @@ export class SchedulerService {
         });
 
         await this.email.sendWeeklyDigest(
-          coach.email,
+          coach.email ?? '',
           coach.name,
           athletes.length,
           completedCount,
