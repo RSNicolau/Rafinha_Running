@@ -65,7 +65,12 @@ async function bootstrap() {
   }));
 
   const allowedOrigins = process.env.NODE_ENV === 'production'
-    ? (process.env.ALLOWED_ORIGINS || process.env.APP_URL || '').split(',').filter(Boolean)
+    ? [
+        ...(process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean),
+        ...(process.env.APP_URL ? [process.env.APP_URL] : []),
+        // Vercel preview/production URLs
+        'https://rr-rafinha-running.vercel.app',
+      ].filter(Boolean)
     : ['http://localhost:8081', 'http://localhost:3001', 'http://localhost:3000'];
 
   app.enableCors({
