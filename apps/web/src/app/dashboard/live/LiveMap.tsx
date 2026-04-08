@@ -251,7 +251,7 @@ export default function LiveTrackingPage() {
   useEffect(() => {
     const apiBase = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1')
       .replace('/api/v1', '');
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+    const token = localStorage.getItem('rr_access_token') || '';
 
     const socket = io(`${apiBase}/live`, {
       transports: ['websocket'],

@@ -55,9 +55,9 @@ function CoachBrainPanel() {
     setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
     try {
-      const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1');
-      const res = await fetch(`${apiUrl}/coach-brain/chat`, {
+      const token = localStorage.getItem('rr_access_token') || '';
+      // Use the Next.js proxy path to avoid needing NEXT_PUBLIC_API_URL for SSE
+      const res = await fetch(`/api/v1/coach-brain/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
