@@ -5,7 +5,7 @@ import { CacheService } from '../cache/cache.service';
 import { EmailService } from '../email/email.service';
 import { RankingsService } from '../rankings/rankings.service';
 import { CoachBrainService } from '../coach-brain/coach-brain.service';
-import { SubscriptionStatus } from '@prisma/client';
+import { SubscriptionStatus, WorkoutStatus, InviteStatus } from '@prisma/client';
 
 @Injectable()
 export class SchedulerService {
@@ -71,7 +71,7 @@ export class SchedulerService {
         const completedCount = await this.prisma.workout.count({
           where: {
             athleteId: { in: athleteUserIds },
-            status: 'COMPLETED',
+            status: WorkoutStatus.COMPLETED,
             completedAt: { gte: oneWeekAgo },
           },
         });
@@ -119,10 +119,10 @@ export class SchedulerService {
       // Clean expired invites
       const expiredInvites = await this.prisma.coachInvite.updateMany({
         where: {
-          status: 'PENDING',
+          status: InviteStatus.PENDING,
           expiresAt: { lt: new Date() },
         },
-        data: { status: 'EXPIRED' },
+        data: { status: InviteStatus.EXPIRED },
       });
 
       this.logger.log(`Cleaned ${cleaned} expired tokens, ${expiredInvites.count} expired invites`);
