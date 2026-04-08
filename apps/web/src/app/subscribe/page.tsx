@@ -36,6 +36,37 @@ function apiPlanToUi(plan: ApiPlan, idx: number): Plan {
   };
 }
 
+// Fallback plans shown when admin config endpoint is inaccessible (coaches don't have SUPER_ADMIN role)
+const DEFAULT_PLANS: Plan[] = [
+  {
+    type: 'basic',
+    name: 'Básico',
+    price: 'R$ 49',
+    amount: 4900,
+    desc: 'Flexibilidade total, sem fidelidade',
+    popular: false,
+    features: ['Treinos personalizados ilimitados', 'Live tracking dos atletas', 'Sync Garmin + Strava', 'Chat em tempo real', 'Relatórios avançados'],
+  },
+  {
+    type: 'pro',
+    name: 'Pro',
+    price: 'R$ 99',
+    amount: 9900,
+    desc: 'Para atletas dedicados',
+    popular: true,
+    features: ['Tudo do Básico', 'Análise de VO2max', 'Planejamento de provas', 'IA de treinos avançada', 'Suporte prioritário'],
+  },
+  {
+    type: 'elite',
+    name: 'Elite',
+    price: 'R$ 199',
+    amount: 19900,
+    desc: 'Performance máxima',
+    popular: false,
+    features: ['Tudo do Pro', 'Coach dedicado', 'Acesso antecipado a novidades', 'Desconto em eventos parceiros', 'Suporte VIP WhatsApp'],
+  },
+];
+
 interface PixData {
   paymentId: string;
   pixQrCode: string;
@@ -68,7 +99,7 @@ export default function SubscribePage() {
       if (plansRes?.data?.coach?.length) {
         setPlans(plansRes.data.coach.map(apiPlanToUi));
       } else {
-        setPlansError(true);
+        setPlans(DEFAULT_PLANS);
       }
       if (subRes?.data?.status === 'ACTIVE' || subRes?.data?.status === 'TRIALING') {
         router.replace('/dashboard');
@@ -166,7 +197,7 @@ export default function SubscribePage() {
           <div className="glass-card p-8 text-center mb-8">
             <p className="text-gray-500 text-sm mb-3">Não foi possível carregar os planos. Verifique sua conexão e tente novamente.</p>
             <button
-              onClick={() => { setPlansError(false); setLoading(true); api.get('/admin/config/plans').then(r => { if (r.data?.coach?.length) setPlans(r.data.coach.map(apiPlanToUi)); else setPlansError(true); }).catch(() => setPlansError(true)).finally(() => setLoading(false)); }}
+              onClick={() => { setPlansError(false); setLoading(true); api.get('/admin/config/plans').then(r => { if (r.data?.coach?.length) setPlans(r.data.coach.map(apiPlanToUi)); else setPlans(DEFAULT_PLANS); }).catch(() => setPlans(DEFAULT_PLANS)).finally(() => setLoading(false)); }}
               className="text-sm font-semibold text-[#DC2626] hover:underline"
             >
               Tentar novamente
