@@ -1,6 +1,10 @@
 -- Add Apple Sign In support
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "apple_id" TEXT;
-ALTER TABLE "users" ADD CONSTRAINT "users_apple_id_key" UNIQUE ("apple_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_apple_id_key') THEN
+    ALTER TABLE "users" ADD CONSTRAINT "users_apple_id_key" UNIQUE ("apple_id");
+  END IF;
+END $$;
 
 -- Make email optional (Apple can return null email with private relay)
 ALTER TABLE "users" ALTER COLUMN "email" DROP NOT NULL;
@@ -19,9 +23,13 @@ CREATE TABLE IF NOT EXISTS "coach_brain_sessions" (
 
 CREATE INDEX IF NOT EXISTS "coach_brain_sessions_coach_id_idx" ON "coach_brain_sessions"("coach_id");
 
-ALTER TABLE "coach_brain_sessions"
-    ADD CONSTRAINT "coach_brain_sessions_coach_id_fkey"
-    FOREIGN KEY ("coach_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'coach_brain_sessions_coach_id_fkey') THEN
+    ALTER TABLE "coach_brain_sessions"
+      ADD CONSTRAINT "coach_brain_sessions_coach_id_fkey"
+      FOREIGN KEY ("coach_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- Add AIJob model
 CREATE TABLE IF NOT EXISTS "ai_jobs" (
