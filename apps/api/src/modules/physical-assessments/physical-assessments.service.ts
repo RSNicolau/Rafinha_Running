@@ -215,7 +215,8 @@ Seja técnico, preciso e motivador. Mencione valores específicos.`;
       messages: [{ role: 'user', content: prompt }],
     });
 
-    const analysis = response.content[0].type === 'text' ? response.content[0].text : '';
+    const firstBlock = response.content?.[0];
+    const analysis = firstBlock?.type === 'text' ? firstBlock.text : '';
 
     // Save analysis on latest assessment
     await this.prisma.physicalAssessment.update({
@@ -263,7 +264,8 @@ Gere uma análise objetiva em 2-3 frases com os pontos-chave do perfil atual.`;
       messages: [{ role: 'user', content: prompt }],
     });
 
-    const analysis = response.content[0].type === 'text' ? response.content[0].text : '';
+    const firstBlock2 = response.content?.[0];
+    const analysis = firstBlock2?.type === 'text' ? firstBlock2.text : '';
 
     await this.prisma.physicalAssessment.update({
       where: { id: assessmentId },

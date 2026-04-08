@@ -224,6 +224,24 @@ export class OnboardingService {
   // Public: submit form answers
   // ──────────────────────────────────────
 
+  /** Resolve coachId from slug first, then delegate to submitForm */
+  async submitFormBySlug(slug: string, data: {
+    athleteName: string;
+    athleteEmail: string;
+    athletePhone?: string;
+    answers: Record<string, any>;
+  }) {
+    const coach = await this.prisma.user.findFirst({
+      where: {
+        role: 'COACH',
+        OR: [{ coachProfile: { slug } }, { id: slug }],
+      },
+      select: { id: true },
+    });
+    if (!coach) throw new NotFoundException('Coach não encontrado');
+    return this.submitForm(coach.id, data);
+  }
+
   async submitForm(coachId: string, data: {
     athleteName: string;
     athleteEmail: string;

@@ -77,7 +77,7 @@ export class PhysicalAssessmentsController {
     @CurrentUser('role') role: UserRole,
     @Param('id') assessmentId: string,
   ) {
-    const isCoach = role !== UserRole.ATHLETE;
+    const isCoach = role === UserRole.COACH || role === UserRole.ADMIN || role === UserRole.SUPER_ADMIN;
     return this.service.getById(userId, assessmentId, isCoach);
   }
 

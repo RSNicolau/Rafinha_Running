@@ -27,14 +27,14 @@ export class OnboardingController {
   async submitForm(
     @Param('slug') slug: string,
     @Body() body: {
-      coachId: string;
       athleteName: string;
       athleteEmail: string;
       athletePhone?: string;
       answers: Record<string, any>;
     },
   ) {
-    return this.onboardingService.submitForm(body.coachId, {
+    // coachId resolved from slug on server side — never trusted from body
+    return this.onboardingService.submitFormBySlug(slug, {
       athleteName: body.athleteName,
       athleteEmail: body.athleteEmail,
       athletePhone: body.athletePhone,
