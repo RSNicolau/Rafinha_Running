@@ -12,10 +12,10 @@ const nextConfig = {
         source: '/api/v1/:path*',
         destination: `${API_URL}/api/v1/:path*`,
       },
-      // Keep health check accessible without version prefix
+      // Fallback: proxy /api/:path* without v1 prefix (for backward compat)
       {
-        source: '/api/health',
-        destination: `${API_URL}/api/health`,
+        source: '/api/:path*',
+        destination: `${API_URL}/api/:path*`,
       },
     ];
   },
