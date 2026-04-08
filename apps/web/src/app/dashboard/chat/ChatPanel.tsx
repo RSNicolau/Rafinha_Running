@@ -57,7 +57,7 @@ function CoachBrainPanel() {
     try {
       const token = localStorage.getItem('rr_access_token') || '';
       // Use the Next.js proxy path to avoid needing NEXT_PUBLIC_API_URL for SSE
-      const res = await fetch(`/api/v1/coach-brain/chat`, {
+      const res = await fetch(`/api/coach-brain/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
