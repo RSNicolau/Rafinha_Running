@@ -31,7 +31,6 @@
     "@prisma/client": "^6.0.0",
     "@rr/shared": "workspace:*",
     "@sentry/nestjs": "^8.0.0",
-    "@sentry/profiling-node": "^8.0.0",
     "@supabase/supabase-js": "^2.47.0",
     "@types/helmet": "^4.0.0",
     "apple-signin-auth": "^2.0.0",
