@@ -43,8 +43,8 @@ export class WorkoutsService {
     return workout;
   }
 
-  async getWeeklyWorkouts(athleteId: string, weekStart: string) {
-    const start = new Date(weekStart);
+  async getWeeklyWorkouts(athleteId: string, weekStart?: string) {
+    const start = weekStart ? new Date(weekStart) : (() => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); d.setHours(0,0,0,0); return d; })();
     const end = new Date(start);
     end.setDate(end.getDate() + 7);
 

@@ -25,7 +25,7 @@ export class WorkoutsController {
   @Get('weekly')
   @ApiOperation({ summary: 'Treinos da semana' })
   @ApiQuery({ name: 'weekStart', example: '2026-03-02' })
-  async getWeekly(@CurrentUser('id') athleteId: string, @Query('weekStart') weekStart: string) {
+  async getWeekly(@CurrentUser('id') athleteId: string, @Query('weekStart') weekStart?: string) {
     return this.workoutsService.getWeeklyWorkouts(athleteId, weekStart);
   }
 
