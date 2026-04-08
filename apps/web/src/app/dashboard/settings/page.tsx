@@ -9,6 +9,8 @@ interface UserProfile {
   name: string;
   email: string;
   phone?: string;
+  avatarUrl?: string | null;
+  profileBannerUrl?: string | null;
   preferences?: {
     notifications?: {
       new_workout?: boolean;
@@ -84,6 +86,43 @@ function fileToBase64(file: File): Promise<string> {
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = reject;
     reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Resize an image to the exact target dimensions using center-crop (cover fit).
+ * Returns a base64 JPEG string. No distortion, no stretching.
+ */
+function resizeImageCanvas(file: File, width: number, height: number, quality = 0.92): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { reject(new Error('Canvas not supported')); return; }
+
+      const imgAspect = img.width / img.height;
+      const targetAspect = width / height;
+
+      let sx = 0, sy = 0, sw = img.width, sh = img.height;
+      if (imgAspect > targetAspect) {
+        // Wider than target → crop sides
+        sw = img.height * targetAspect;
+        sx = (img.width - sw) / 2;
+      } else {
+        // Taller than target → crop top/bottom
+        sh = img.width / targetAspect;
+        sy = (img.height - sh) / 2;
+      }
+
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, width, height);
+      URL.revokeObjectURL(img.src);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
   });
 }
 
@@ -175,6 +214,14 @@ export default function SettingsPage() {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
 
+  // Profile photo & banner
+  const [avatarUrl, setAvatarUrl] = useState<string>('');
+  const [profileBannerUrl, setProfileBannerUrl] = useState<string>('');
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [uploadingBanner, setUploadingBanner] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const profileBannerInputRef = useRef<HTMLInputElement>(null);
+
   // Load user on mount
   useEffect(() => {
     api
@@ -182,6 +229,8 @@ export default function SettingsPage() {
       .then(({ data }) => {
         setProfile(data);
         setProfileForm({ name: data.name || '', phone: data.phone || '' });
+        if (data.avatarUrl) setAvatarUrl(data.avatarUrl);
+        if (data.profileBannerUrl) setProfileBannerUrl(data.profileBannerUrl);
         if (data.preferences?.notifications) {
           setNotifPrefs({
             new_workout: data.preferences.notifications.new_workout ?? true,
@@ -197,10 +246,6 @@ export default function SettingsPage() {
         }
       })
       .finally(() => setLoadingProfile(false));
-
-    // Load dark mode preference from localStorage
-    const stored = localStorage.getItem('rr_dark_mode');
-    if (stored === 'true') setDarkMode(true);
 
     // Load AI config and branding for coaches
     if (storeUser?.role === 'COACH' || storeUser?.role === 'ADMIN' || storeUser?.role === 'SUPER_ADMIN') {
@@ -302,6 +347,52 @@ export default function SettingsPage() {
   const handleDarkModeToggle = (val: boolean) => {
     setDarkMode(val);
     localStorage.setItem('rr_dark_mode', String(val));
+    document.documentElement.classList.toggle('dark', val);
+  };
+
+  // Apply dark mode on mount
+  useEffect(() => {
+    const stored = localStorage.getItem('rr_dark_mode');
+    if (stored === 'true') {
+      setDarkMode(true);
+      document.documentElement.classList.add('dark');
+    }
+  }, []);
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingAvatar(true);
+    try {
+      // Resize to 400x400 center-crop, 92% quality
+      const resized = await resizeImageCanvas(file, 400, 400, 0.92);
+      setAvatarUrl(resized);
+      await api.put('/users/me', { avatarUrl: resized });
+      setProfileFeedback({ type: 'success', message: 'Foto de perfil atualizada.' });
+    } catch {
+      setProfileFeedback({ type: 'error', message: 'Erro ao fazer upload da foto.' });
+    } finally {
+      setUploadingAvatar(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleProfileBannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingBanner(true);
+    try {
+      // Resize to 1200x400 center-crop, 90% quality
+      const resized = await resizeImageCanvas(file, 1200, 400, 0.90);
+      setProfileBannerUrl(resized);
+      await api.put('/users/me', { profileBannerUrl: resized });
+      setProfileFeedback({ type: 'success', message: 'Banner de perfil atualizado.' });
+    } catch {
+      setProfileFeedback({ type: 'error', message: 'Erro ao fazer upload do banner.' });
+    } finally {
+      setUploadingBanner(false);
+      e.target.value = '';
+    }
   };
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -441,14 +532,13 @@ export default function SettingsPage() {
 
       <div className="max-w-2xl space-y-6">
         {/* Perfil */}
-        <div className="glass-card p-6">
-          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">Perfil</h2>
-
+        <div className="glass-card overflow-hidden">
           {loadingProfile ? (
-            <div className="space-y-3 animate-pulse">
-              <div className="flex items-center gap-4 mb-5">
-                <div className="w-14 h-14 rounded-2xl bg-gray-100" />
-                <div className="space-y-2">
+            <div className="p-6 animate-pulse space-y-4">
+              <div className="h-28 bg-gray-100 rounded-xl" />
+              <div className="flex gap-4 pt-2">
+                <div className="w-16 h-16 rounded-full bg-gray-100 shrink-0" />
+                <div className="space-y-2 pt-2 flex-1">
                   <div className="h-4 w-32 bg-gray-100 rounded" />
                   <div className="h-3 w-48 bg-gray-100 rounded" />
                 </div>
@@ -456,65 +546,123 @@ export default function SettingsPage() {
             </div>
           ) : (
             <>
-              <div className="flex items-center gap-4 mb-6">
-                <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-                  <span className="text-xl font-bold text-primary">{displayInitial}</span>
-                </div>
-                <div>
-                  <p className="text-base font-semibold text-gray-900">{displayName}</p>
-                  <p className="text-sm text-gray-500">{displayEmail}</p>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1.5">Nome</label>
-                  <input
-                    type="text"
-                    value={profileForm.name}
-                    onChange={(e) => setProfileForm((f) => ({ ...f, name: e.target.value }))}
-                    className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
-                    placeholder="Seu nome"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1.5">E-mail</label>
-                  <input
-                    type="email"
-                    value={displayEmail}
-                    readOnly
-                    className="w-full px-3.5 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl text-gray-400 cursor-not-allowed"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">O e-mail não pode ser alterado.</p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1.5">Telefone / WhatsApp</label>
-                  <input
-                    type="tel"
-                    value={profileForm.phone}
-                    onChange={(e) => setProfileForm((f) => ({ ...f, phone: e.target.value }))}
-                    className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
-                    placeholder="+55 11 99999-9999"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-5 flex items-center gap-3">
-                <button
-                  onClick={handleSaveProfile}
-                  disabled={savingProfile}
-                  className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-60 text-white text-sm font-medium rounded-xl transition cursor-pointer flex items-center gap-2"
-                >
-                  {savingProfile && (
-                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              {/* Banner */}
+              <div
+                className="relative h-32 bg-gradient-to-br from-primary/20 via-red-50 to-orange-50 cursor-pointer group overflow-hidden"
+                onClick={() => profileBannerInputRef.current?.click()}
+                title="Clique para alterar o banner"
+              >
+                {profileBannerUrl ? (
+                  <img src={profileBannerUrl} alt="Banner" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="w-12 h-[1px] bg-primary/20" />
+                    <div className="mx-3 text-[10px] font-medium text-primary/40 uppercase tracking-widest">Banner</div>
+                    <div className="w-12 h-[1px] bg-primary/20" />
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                  {uploadingBanner ? (
+                    <div className="w-8 h-8 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <div className="bg-black/50 backdrop-blur-sm rounded-full px-3 py-1.5 flex items-center gap-1.5">
+                      <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                      </svg>
+                      <span className="text-white text-xs font-medium">Alterar banner</span>
+                    </div>
                   )}
-                  Salvar Perfil
-                </button>
+                </div>
+                <input ref={profileBannerInputRef} type="file" accept="image/*" className="hidden" onChange={handleProfileBannerUpload} />
               </div>
 
-              <Feedback state={profileFeedback} />
+              {/* Avatar + info */}
+              <div className="px-6 pb-6">
+                <div className="flex items-end gap-4 -mt-8 mb-5">
+                  {/* Avatar */}
+                  <div className="relative shrink-0">
+                    <div
+                      className="w-16 h-16 rounded-full border-4 border-white bg-primary/10 flex items-center justify-center cursor-pointer group overflow-hidden shadow-md"
+                      onClick={() => avatarInputRef.current?.click()}
+                      title="Clique para alterar a foto"
+                    >
+                      {avatarUrl ? (
+                        <img src={avatarUrl} alt={displayName} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-2xl font-bold text-primary">{displayInitial}</span>
+                      )}
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100">
+                        {uploadingAvatar ? (
+                          <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                        ) : (
+                          <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
+                          </svg>
+                        )}
+                      </div>
+                    </div>
+                    <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
+                  </div>
+
+                  <div className="mb-1">
+                    <p className="text-base font-semibold text-gray-900 leading-tight">{displayName}</p>
+                    <p className="text-sm text-gray-400 leading-tight">{displayEmail}</p>
+                  </div>
+                </div>
+
+                <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Informações</h2>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">Nome</label>
+                    <input
+                      type="text"
+                      value={profileForm.name}
+                      onChange={(e) => setProfileForm((f) => ({ ...f, name: e.target.value }))}
+                      className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
+                      placeholder="Seu nome"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">E-mail</label>
+                    <input
+                      type="email"
+                      value={displayEmail}
+                      readOnly
+                      className="w-full px-3.5 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl text-gray-400 cursor-not-allowed"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">O e-mail não pode ser alterado.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">Telefone / WhatsApp</label>
+                    <input
+                      type="tel"
+                      value={profileForm.phone}
+                      onChange={(e) => setProfileForm((f) => ({ ...f, phone: e.target.value }))}
+                      className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
+                      placeholder="+55 11 99999-9999"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-5 flex items-center gap-3">
+                  <button
+                    onClick={handleSaveProfile}
+                    disabled={savingProfile}
+                    className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-60 text-white text-sm font-medium rounded-xl transition cursor-pointer flex items-center gap-2"
+                  >
+                    {savingProfile && (
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    )}
+                    Salvar Perfil
+                  </button>
+                </div>
+
+                <Feedback state={profileFeedback} />
+              </div>
             </>
           )}
         </div>

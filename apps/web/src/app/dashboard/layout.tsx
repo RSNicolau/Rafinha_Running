@@ -130,6 +130,12 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
     document.documentElement.style.setProperty('--color-secondary', secondary);
   }, [user?.branding?.primaryColor, user?.branding?.secondaryColor]);
 
+  // Apply dark mode from localStorage on mount
+  useEffect(() => {
+    const isDark = localStorage.getItem('rr_dark_mode') === 'true';
+    document.documentElement.classList.toggle('dark', isDark);
+  }, []);
+
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.replace('/login');
@@ -154,9 +160,19 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
       {/* Logo */}
       <div className="h-16 flex items-center px-5 border-b border-gray-100 shrink-0">
         {user?.branding?.logoUrl ? (
-          <img src={user.branding.logoUrl} alt="Logo" className="h-10 w-auto object-contain max-w-[140px]" />
+          <div className="h-10 w-auto max-w-[140px] rounded-2xl overflow-hidden shadow-sm border border-gray-100/60">
+            <img src={user.branding.logoUrl} alt="Logo" className="h-full w-auto object-contain" />
+          </div>
         ) : (
-          <img src="/logo.png" alt="Rafinha Running" className="h-10 w-auto" />
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-2xl bg-[#DC2626] flex items-center justify-center shadow-[0_2px_12px_rgba(220,38,38,0.35)] shrink-0">
+              <span className="text-white font-black text-sm tracking-tighter leading-none">RR</span>
+            </div>
+            <div className="leading-tight">
+              <p className="text-[13px] font-bold text-gray-900 tracking-tight leading-tight">Rafinha</p>
+              <p className="text-[10px] font-semibold text-[#DC2626] tracking-widest uppercase leading-tight">Running</p>
+            </div>
+          </div>
         )}
       </div>
 
@@ -184,10 +200,14 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
       {/* User */}
       <div className="p-3 border-t border-gray-100 shrink-0">
         <div className="flex items-center gap-3 px-3 py-2">
-          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-            <span className="text-xs font-semibold text-primary">
-              {user?.name?.charAt(0)}
-            </span>
+          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden border border-primary/10">
+            {(user as any)?.avatarUrl ? (
+              <img src={(user as any).avatarUrl} alt={user?.name} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-xs font-semibold text-primary">
+                {user?.name?.charAt(0)}
+              </span>
+            )}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-gray-900 truncate">{user?.name}</p>
@@ -243,10 +263,18 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
-          {user?.branding?.logoUrl
-            ? <img src={user.branding.logoUrl} alt="Logo" className="h-7 w-auto object-contain max-w-[100px]" />
-            : <img src="/logo.png" alt="RR" className="h-7 w-auto" />
-          }
+          {user?.branding?.logoUrl ? (
+            <div className="h-7 rounded-xl overflow-hidden shadow-sm">
+              <img src={user.branding.logoUrl} alt="Logo" className="h-full w-auto object-contain" />
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-xl bg-[#DC2626] flex items-center justify-center shadow-[0_2px_8px_rgba(220,38,38,0.3)]">
+                <span className="text-white font-black text-xs tracking-tighter leading-none">RR</span>
+              </div>
+              <span className="text-sm font-bold text-gray-900 tracking-tight">Rafinha Running</span>
+            </div>
+          )}
           <div className="flex-1" />
           {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && <DemoToggle />}
         </div>

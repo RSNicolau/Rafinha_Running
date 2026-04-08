@@ -71,6 +71,76 @@ button, a, input, select, textarea {
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.2); }
 
+/* ─── Dark Mode ──────────────────────────────────────────────────────────── */
+html.dark {
+  --color-background: #0D0D0F;
+  --color-surface: #141418;
+  --color-surface-elevated: #1C1C22;
+}
+
+html.dark body {
+  color-scheme: dark;
+}
+
+html.dark .glass {
+  background: rgba(20, 20, 24, 0.8);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+html.dark .glass-strong {
+  background: rgba(22, 22, 28, 0.92);
+  border-color: rgba(255, 255, 255, 0.09);
+}
+
+html.dark .glass-card {
+  background: rgba(20, 20, 26, 0.85);
+  border: 0.5px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.3);
+}
+
+html.dark .glass-card:hover {
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* Dark sidebar */
+html.dark aside {
+  background: rgba(14, 14, 18, 0.95) !important;
+  border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Dark inputs */
+html.dark input:not([type="color"]):not([type="range"]),
+html.dark textarea,
+html.dark select {
+  background: rgba(255,255,255,0.05) !important;
+  border-color: rgba(255,255,255,0.1) !important;
+  color: #e8e8ed !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: rgba(255,255,255,0.3) !important;
+}
+
+/* Dark text */
+html.dark .text-gray-900 { color: #e8e8ed !important; }
+html.dark .text-gray-800 { color: #d1d1d6 !important; }
+html.dark .text-gray-700 { color: #aeaeb2 !important; }
+html.dark .text-gray-600 { color: #98989d !important; }
+html.dark .text-gray-500 { color: #8e8e93 !important; }
+
+/* Dark borders */
+html.dark .border-gray-100 { border-color: rgba(255,255,255,0.06) !important; }
+html.dark .border-gray-200 { border-color: rgba(255,255,255,0.09) !important; }
+
+/* Dark backgrounds */
+html.dark .bg-white { background: #141418 !important; }
+html.dark .bg-gray-50 { background: rgba(255,255,255,0.03) !important; }
+html.dark .bg-gray-100 { background: rgba(255,255,255,0.06) !important; }
+
+/* Dark main content area */
+html.dark main { background: var(--color-background); }
+
 /* Landing page marquee animation */
 @keyframes marquee {
   from { transform: translateX(0); }
