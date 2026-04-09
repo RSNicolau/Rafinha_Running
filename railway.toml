@@ -4,7 +4,7 @@ buildCommand = "pnpm install --no-frozen-lockfile && cd apps/api && npx prisma g
 
 [deploy]
 startCommand = "node /app/apps/api/dist/main"
-healthcheckPath = "/health"
+healthcheckPath = "/api/health"
 healthcheckTimeout = 60
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
