@@ -12,7 +12,6 @@ interface WorkoutResult {
   sensationScore?: number | null;
   athleteFeedback?: string | null;
   distanceMeters?: number | null;
-  durationSeconds?: number | null;
 }
 
 interface Workout {
@@ -48,23 +47,10 @@ interface Plan {
   startDate: string;
   endDate: string;
   weeklyFrequency: number;
-  status: string;
 }
 
-interface NutritionTotals {
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-}
-
-interface MealForm {
-  mealName: string;
-  calories: number | '';
-  protein: number | '';
-  carbs: number | '';
-  fat: number | '';
-}
+interface NutritionTotals { calories: number; protein: number; carbs: number; fat: number; }
+interface MealForm { mealName: string; calories: number | ''; protein: number | ''; carbs: number | ''; fat: number | ''; }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -80,67 +66,76 @@ const WATER_STEPS = [250, 350, 500];
 const EMPTY_MEAL: MealForm = { mealName: '', calories: '', protein: '', carbs: '', fat: '' };
 
 const STATUS_LABEL: Record<string, string> = {
-  SCHEDULED: 'Agendado',
-  COMPLETED: 'Concluído',
-  SKIPPED: 'Pulado',
-  IN_PROGRESS: 'Em andamento',
+  SCHEDULED: 'Agendado', COMPLETED: 'Concluído', SKIPPED: 'Pulado', IN_PROGRESS: 'Em andamento',
 };
 
-const STATUS_COLOR: Record<string, string> = {
-  SCHEDULED: 'bg-red-50 text-[#DC2626]',
-  COMPLETED: 'bg-emerald-50 text-emerald-700',
-  SKIPPED: 'bg-gray-100 text-gray-500',
-  IN_PROGRESS: 'bg-amber-50 text-amber-700',
-};
-
-const WORKOUT_TYPE_ICON: Record<string, string> = {
-  EASY: '🟢',
-  TEMPO: '🟡',
-  INTERVAL: '🔴',
-  LONG: '🔵',
-  RACE: '🏆',
-  RECOVERY: '💜',
-  STRENGTH: '💪',
+const WORKOUT_TYPE_LABEL: Record<string, string> = {
+  EASY: 'Leve', TEMPO: 'Tempo', INTERVAL: 'Intervalado', LONG: 'Longo', RACE: 'Corrida', RECOVERY: 'Recuperação', STRENGTH: 'Força',
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const fmt = {
   dist: (m: number | null | undefined) => m && m > 0 ? `${(m / 1000).toFixed(1)} km` : null,
-  pace: (s: number | null | undefined) => {
-    if (!s) return null;
-    const m = Math.floor(s / 60);
-    const sec = String(s % 60).padStart(2, '0');
-    return `${m}:${sec}/km`;
-  },
   dateShort: (iso: string) => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }),
-  weekday: (iso: string) => new Date(iso).toLocaleDateString('pt-BR', { weekday: 'long' }),
+  weekday: (iso: string) => new Date(iso).toLocaleDateString('pt-BR', { weekday: 'short' }),
   isToday: (iso: string) => {
-    const d = new Date(iso);
-    const t = new Date();
+    const d = new Date(iso), t = new Date();
     return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate();
   },
   isTomorrow: (iso: string) => {
-    const d = new Date(iso);
-    const t = new Date();
-    t.setDate(t.getDate() + 1);
+    const d = new Date(iso), t = new Date(); t.setDate(t.getDate() + 1);
     return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate();
   },
-  greet: (name?: string) => {
+  greet: () => {
     const h = new Date().getHours();
-    const first = name?.split(' ')[0] ?? '';
-    if (h < 12) return `Bom dia, ${first}`;
-    if (h < 18) return `Boa tarde, ${first}`;
-    return `Boa noite, ${first}`;
+    if (h < 12) return 'Bom dia';
+    if (h < 18) return 'Boa tarde';
+    return 'Boa noite';
+  },
+  firstName: (name?: string) => name?.split(' ')[0] ?? '',
+  initials: (name?: string) => {
+    const parts = (name ?? '').split(' ').filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    return (parts[0]?.[0] ?? '?').toUpperCase();
   },
 };
+
+// ─── Logo Mark ────────────────────────────────────────────────────────────────
+
+function LogoMark({ size = 'sm' }: { size?: 'sm' | 'lg' }) {
+  return (
+    <div className={`flex items-center gap-${size === 'lg' ? '3' : '2'}`}>
+      <div className={`${size === 'lg' ? 'w-9 h-9' : 'w-7 h-7'} rounded-lg bg-[#DC2626] flex items-center justify-center shrink-0`}>
+        <svg viewBox="0 0 28 20" fill="none" className={size === 'lg' ? 'w-5 h-4' : 'w-4 h-3'}>
+          <path d="M2 18 L8 2 L14 12 L20 2 L26 18" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+        </svg>
+      </div>
+      <div className="flex flex-col leading-none">
+        <span className={`font-bold tracking-tight text-gray-900 ${size === 'lg' ? 'text-base' : 'text-sm'}`}>
+          RAFINHA<span className="text-[#DC2626]"> RUNNING</span>
+        </span>
+        {size === 'lg' && <span className="text-[10px] text-gray-400 tracking-widest uppercase mt-0.5">Assessoria de Corrida</span>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Avatar ───────────────────────────────────────────────────────────────────
+
+function Avatar({ name, size = 'md' }: { name?: string; size?: 'sm' | 'md' | 'lg' }) {
+  const sizes = { sm: 'w-8 h-8 text-xs', md: 'w-10 h-10 text-sm', lg: 'w-16 h-16 text-xl' };
+  return (
+    <div className={`${sizes[size]} rounded-2xl bg-gray-900 flex items-center justify-center shrink-0 font-bold text-white`}>
+      {fmt.initials(name)}
+    </div>
+  );
+}
 
 // ─── FeedbackModal ────────────────────────────────────────────────────────────
 
 function FeedbackModal({ workout, onClose, onSaved }: {
-  workout: Workout;
-  onClose: () => void;
-  onSaved: (id: string, fb: WorkoutResult) => void;
+  workout: Workout; onClose: () => void; onSaved: (id: string, fb: WorkoutResult) => void;
 }) {
   const [rpe, setRpe] = useState<number>(workout.result?.rpe ?? 5);
   const [sensation, setSensation] = useState<number | null>(workout.result?.sensationScore ?? null);
@@ -150,71 +145,70 @@ function FeedbackModal({ workout, onClose, onSaved }: {
   const handleSubmit = async () => {
     setSaving(true);
     try {
-      await api.patch(`/workouts/${workout.id}/feedback`, {
-        rpe,
-        sensationScore: sensation ?? undefined,
-        athleteFeedback: text.trim() || undefined,
-      });
+      await api.patch(`/workouts/${workout.id}/feedback`, { rpe, sensationScore: sensation ?? undefined, athleteFeedback: text.trim() || undefined });
       onSaved(workout.id, { rpe, sensationScore: sensation, athleteFeedback: text.trim() || null });
       onClose();
-    } catch {
-      alert('Erro ao salvar feedback. Tente novamente.');
-    } finally {
-      setSaving(false);
-    }
+    } catch { alert('Erro ao salvar. Tente novamente.'); } finally { setSaving(false); }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="w-full max-w-sm bg-white rounded-3xl shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <h3 className="text-base font-bold text-gray-900">Como foi o treino?</h3>
-            <p className="text-xs text-gray-400 mt-0.5">{workout.title}</p>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-5 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-gray-400 uppercase tracking-widest mb-0.5">Feedback do treino</p>
+              <h3 className="text-base font-bold text-gray-900">{workout.title}</h3>
+            </div>
+            <button onClick={onClose} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 hover:bg-gray-200 transition cursor-pointer">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition cursor-pointer">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        </div>
+
+        <div className="px-6 py-5 space-y-6">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold text-gray-700">Esforço percebido (RPE)</p>
+              <span className={`text-2xl font-black ${rpe <= 4 ? 'text-emerald-500' : rpe <= 7 ? 'text-amber-500' : 'text-red-500'}`}>{rpe}</span>
+            </div>
+            <input type="range" min={1} max={10} value={rpe} onChange={e => setRpe(Number(e.target.value))}
+              className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+              style={{ accentColor: rpe <= 4 ? '#16A34A' : rpe <= 7 ? '#D97706' : '#DC2626' }} />
+            <div className="flex justify-between mt-1.5">
+              <span className="text-xs text-gray-400">Muito fácil</span>
+              <span className="text-xs text-gray-400">Máximo</span>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-sm font-semibold text-gray-700 mb-3">Como você se sentiu?</p>
+            <div className="flex gap-2">
+              {SENSATIONS.map(s => (
+                <button key={s.score} onClick={() => setSensation(s.score)}
+                  className={`flex-1 flex flex-col items-center gap-1.5 py-3 rounded-2xl border-2 transition cursor-pointer
+                    ${sensation === s.score ? 'border-[#DC2626] bg-red-50' : 'border-gray-100 bg-gray-50 hover:border-gray-200'}`}>
+                  <span className="text-xl">{s.emoji}</span>
+                  <span className="text-[10px] text-gray-500 font-medium">{s.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-sm font-semibold text-gray-700 mb-2">Observações</p>
+            <textarea value={text} onChange={e => setText(e.target.value)} maxLength={500} rows={2}
+              placeholder="Dores, sensações, condições do treino..."
+              className="w-full px-4 py-3 rounded-2xl border border-gray-200 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-100 focus:border-[#DC2626]/30 resize-none bg-gray-50" />
+          </div>
+        </div>
+
+        <div className="px-6 pb-6">
+          <button onClick={handleSubmit} disabled={saving || sensation === null}
+            className="w-full py-4 rounded-2xl bg-gray-900 hover:bg-gray-800 text-white text-sm font-bold tracking-wide transition disabled:opacity-40 cursor-pointer">
+            {saving ? 'Salvando...' : 'Registrar feedback'}
           </button>
         </div>
-
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-semibold text-gray-700">Esforço percebido (RPE)</p>
-            <span className={`text-xl font-bold ${rpe <= 4 ? 'text-emerald-500' : rpe <= 7 ? 'text-amber-500' : 'text-red-500'}`}>{rpe}</span>
-          </div>
-          <input type="range" min={1} max={10} value={rpe} onChange={(e) => setRpe(Number(e.target.value))}
-            className="w-full h-2 rounded-full appearance-none cursor-pointer"
-            style={{ accentColor: rpe <= 4 ? '#16A34A' : rpe <= 7 ? '#D97706' : '#DC2626' }} />
-          <div className="flex justify-between mt-1">
-            <span className="text-xs text-gray-400">Fácil</span>
-            <span className="text-xs text-gray-400">Máximo</span>
-          </div>
-        </div>
-
-        <div className="mb-6">
-          <p className="text-sm font-semibold text-gray-700 mb-3">Como você se sentiu?</p>
-          <div className="flex gap-2">
-            {SENSATIONS.map((s) => (
-              <button key={s.score} onClick={() => setSensation(s.score)}
-                className={`flex-1 flex flex-col items-center gap-1 py-2.5 rounded-xl border-2 transition cursor-pointer ${sensation === s.score ? 'border-[#DC2626] bg-red-50' : 'border-gray-100 hover:border-gray-200'}`}>
-                <span className="text-xl">{s.emoji}</span>
-                <span className="text-[10px] text-gray-500">{s.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="mb-6">
-          <p className="text-sm font-semibold text-gray-700 mb-2">Observações (opcional)</p>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} maxLength={500} rows={2}
-            placeholder="Dores, sensações, condições do treino..."
-            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-100 focus:border-[#DC2626]/40 resize-none" />
-        </div>
-
-        <button onClick={handleSubmit} disabled={saving || sensation === null}
-          className="w-full py-3 rounded-xl bg-[#DC2626] hover:bg-red-700 text-white text-sm font-semibold transition disabled:opacity-50 cursor-pointer">
-          {saving ? 'Salvando...' : 'Enviar feedback'}
-        </button>
       </div>
     </div>
   );
@@ -222,16 +216,8 @@ function FeedbackModal({ workout, onClose, onSaved }: {
 
 // ─── Tab: Home ────────────────────────────────────────────────────────────────
 
-function HomeTab({
-  user, weekly, stats, plan, loading,
-  onFeedback,
-}: {
-  user: any;
-  weekly: WeeklyData | null;
-  stats: Stats | null;
-  plan: Plan | null;
-  loading: boolean;
-  onFeedback: (w: Workout) => void;
+function HomeTab({ user, weekly, stats, plan, loading, onFeedback }: {
+  user: any; weekly: WeeklyData | null; stats: Stats | null; plan: Plan | null; loading: boolean; onFeedback: (w: Workout) => void;
 }) {
   const todayWorkout = weekly?.workouts.find(w => fmt.isToday(w.scheduledDate ?? w.date));
   const tomorrowWorkout = weekly?.workouts.find(w => fmt.isTomorrow(w.scheduledDate ?? w.date));
@@ -239,139 +225,150 @@ function HomeTab({
   const weeklyKm = stats?.weeklyKm ?? 0;
 
   return (
-    <div className="space-y-4">
-      {/* Hero greeting */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">{fmt.greet(user?.name)} 👋</h1>
-          <p className="text-sm text-gray-500 mt-0.5 capitalize">
+    <div className="space-y-5 pb-2">
+
+      {/* Hero */}
+      <div className="rounded-3xl bg-gray-900 p-6 relative overflow-hidden">
+        {/* subtle texture */}
+        <div className="absolute inset-0 opacity-5" style={{
+          backgroundImage: 'radial-gradient(circle at 80% 20%, #DC2626 0%, transparent 60%), radial-gradient(circle at 20% 80%, #DC2626 0%, transparent 50%)'
+        }} />
+        <div className="relative">
+          <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">{fmt.greet()}</p>
+          <h1 className="text-3xl font-black text-white mb-0.5 leading-tight">
+            {fmt.firstName(user?.name)}
+          </h1>
+          <p className="text-sm text-gray-400 capitalize mb-5">
             {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
           </p>
-        </div>
-        <div className="w-12 h-12 rounded-2xl bg-[#DC2626] flex items-center justify-center shadow-md">
-          <span className="text-white text-lg font-bold">{user?.name?.[0]?.toUpperCase() ?? '?'}</span>
+
+          <div className="grid grid-cols-3 gap-3">
+            {loading ? (
+              <>
+                {[1,2,3].map(i => <div key={i} className="bg-white/10 rounded-2xl h-16 animate-pulse" />)}
+              </>
+            ) : (
+              <>
+                <div className="bg-white/10 rounded-2xl p-3 text-center">
+                  <p className="text-xl font-black text-white">{weeklyKm.toFixed(1)}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">km<br/>esta semana</p>
+                </div>
+                <div className="bg-white/10 rounded-2xl p-3 text-center">
+                  <p className="text-xl font-black text-white">{weekly?.completedCount ?? 0}<span className="text-sm text-gray-400">/{weekly?.totalCount ?? 0}</span></p>
+                  <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">treinos<br/>feitos</p>
+                </div>
+                <div className="bg-white/10 rounded-2xl p-3 text-center">
+                  <p className="text-xl font-black text-white">{stats?.totalKm?.toFixed(0) ?? '0'}</p>
+                  <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">km<br/>total</p>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Stats row */}
-      {loading ? (
-        <div className="grid grid-cols-3 gap-3">
-          {[1,2,3].map(i => <div key={i} className="glass-card p-4 h-20 animate-pulse" />)}
-        </div>
-      ) : (
-        <div className="grid grid-cols-3 gap-3">
-          <div className="glass-card p-4 text-center">
-            <p className="text-xl font-bold text-[#DC2626]">{weeklyKm.toFixed(1)}</p>
-            <p className="text-xs text-gray-400 mt-0.5">km esta semana</p>
-          </div>
-          <div className="glass-card p-4 text-center">
-            <p className="text-xl font-bold text-gray-900">{weekly?.completedCount ?? 0}/{weekly?.totalCount ?? 0}</p>
-            <p className="text-xs text-gray-400 mt-0.5">treinos feitos</p>
-          </div>
-          <div className="glass-card p-4 text-center">
-            <p className="text-xl font-bold text-gray-900">{stats?.totalKm?.toFixed(0) ?? '0'}</p>
-            <p className="text-xs text-gray-400 mt-0.5">km no total</p>
-          </div>
-        </div>
-      )}
-
-      {/* Weekly progress bar */}
+      {/* Weekly progress dots */}
       {!loading && weekly && weekly.totalCount > 0 && (
-        <div className="glass-card p-4">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-semibold text-gray-700">Semana atual</p>
-            <span className="text-xs font-bold text-[#DC2626]">{Math.round(weekProgress)}%</span>
+        <div className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Semana atual</p>
+            <span className="text-xs font-black text-[#DC2626]">{Math.round(weekProgress)}%</span>
           </div>
-          <div className="h-2.5 rounded-full bg-gray-100 overflow-hidden">
-            <div className="h-full rounded-full transition-all duration-700"
-              style={{ width: `${weekProgress}%`, backgroundColor: weekProgress >= 100 ? '#16A34A' : '#DC2626' }} />
-          </div>
-          <div className="flex gap-1.5 mt-3">
+          <div className="flex gap-2 mb-3">
             {weekly.workouts.map((w, i) => {
               const isCompleted = w.status === 'COMPLETED';
               const isToday = fmt.isToday(w.scheduledDate ?? w.date);
               const isSkipped = w.status === 'SKIPPED';
               return (
-                <div key={w.id} className={`flex-1 h-8 rounded-lg flex items-center justify-center text-xs font-medium transition
-                  ${isCompleted ? 'bg-emerald-100 text-emerald-700' : isSkipped ? 'bg-gray-100 text-gray-400' : isToday ? 'bg-red-100 text-[#DC2626] ring-2 ring-[#DC2626]/30' : 'bg-gray-50 text-gray-400'}`}>
-                  {isCompleted ? '✓' : isSkipped ? '✕' : isToday ? '●' : `D${i + 1}`}
+                <div key={w.id} className="flex-1 flex flex-col items-center gap-1.5">
+                  <div className={`w-full h-1.5 rounded-full transition-all
+                    ${isCompleted ? 'bg-emerald-500' : isSkipped ? 'bg-gray-200' : isToday ? 'bg-[#DC2626]' : 'bg-gray-100'}`} />
+                  <span className="text-[10px] text-gray-400 capitalize">{fmt.weekday(w.scheduledDate ?? w.date)}</span>
                 </div>
               );
             })}
           </div>
           {weekProgress >= 100 && (
-            <p className="text-xs text-emerald-600 font-semibold text-center mt-2">🏆 Semana completa! Incrível!</p>
+            <p className="text-xs font-bold text-emerald-600 text-center">Semana 100% concluída — excelente!</p>
           )}
         </div>
       )}
 
       {/* Today's workout */}
       {loading ? (
-        <div className="glass-card p-5 h-32 animate-pulse" />
+        <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 h-36 animate-pulse" />
       ) : todayWorkout ? (
-        <div className={`rounded-2xl overflow-hidden shadow-sm border ${todayWorkout.status === 'COMPLETED' ? 'border-emerald-200' : 'border-[#DC2626]/20'}`}>
-          <div className={`px-5 py-3 flex items-center gap-2 ${todayWorkout.status === 'COMPLETED' ? 'bg-emerald-500' : 'bg-[#DC2626]'}`}>
-            <span className="text-white text-xs font-bold uppercase tracking-wider">
-              {todayWorkout.status === 'COMPLETED' ? '✓ Treino concluído!' : '⚡ Treino de hoje'}
-            </span>
-          </div>
-          <div className="bg-white p-5">
+        <div className="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100">
+          <div className={`px-5 pt-5 pb-4`}>
             <div className="flex items-start justify-between mb-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-lg">{WORKOUT_TYPE_ICON[todayWorkout.type] ?? '🏃'}</span>
-                  <h2 className="text-base font-bold text-gray-900">{todayWorkout.title}</h2>
-                </div>
-                {todayWorkout.description && (
-                  <p className="text-xs text-gray-500 leading-relaxed">{todayWorkout.description}</p>
+              <div>
+                <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${todayWorkout.status === 'COMPLETED' ? 'text-emerald-600' : 'text-[#DC2626]'}`}>
+                  {todayWorkout.status === 'COMPLETED' ? '✓ Treino concluído' : 'Treino de hoje'}
+                </p>
+                <h2 className="text-lg font-black text-gray-900 leading-tight">{todayWorkout.title}</h2>
+                {todayWorkout.type && (
+                  <span className="inline-block mt-1.5 px-2.5 py-0.5 rounded-full bg-gray-100 text-xs text-gray-500 font-medium">
+                    {WORKOUT_TYPE_LABEL[todayWorkout.type] ?? todayWorkout.type}
+                  </span>
                 )}
               </div>
               {todayWorkout.distanceMeters && (
-                <div className="text-right ml-3 shrink-0">
-                  <p className="text-lg font-bold text-[#DC2626]">{fmt.dist(todayWorkout.distanceMeters)}</p>
+                <div className="text-right ml-4">
+                  <p className="text-2xl font-black text-gray-900">{fmt.dist(todayWorkout.distanceMeters)}</p>
                 </div>
               )}
             </div>
-            {(todayWorkout.status === 'COMPLETED' || todayWorkout.status === 'SKIPPED') && (
-              <button onClick={() => onFeedback(todayWorkout)}
-                className={`w-full py-2.5 rounded-xl text-sm font-semibold transition cursor-pointer
-                  ${todayWorkout.result?.rpe ? 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100' : 'bg-[#DC2626] text-white hover:bg-red-700'}`}>
-                {todayWorkout.result?.rpe ? `Feedback enviado · RPE ${todayWorkout.result.rpe} · Editar` : '+ Registrar como foi'}
-              </button>
+
+            {todayWorkout.description && (
+              <p className="text-sm text-gray-500 leading-relaxed border-t border-gray-50 pt-3 mt-1">
+                {todayWorkout.description}
+              </p>
             )}
           </div>
+
+          {(todayWorkout.status === 'COMPLETED' || todayWorkout.status === 'SKIPPED') && (
+            <div className="px-5 pb-5">
+              <button onClick={() => onFeedback(todayWorkout)}
+                className={`w-full py-3 rounded-2xl text-sm font-bold transition cursor-pointer
+                  ${todayWorkout.result?.rpe
+                    ? 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
+                    : 'bg-gray-900 text-white hover:bg-gray-800'}`}>
+                {todayWorkout.result?.rpe
+                  ? `Feedback registrado · RPE ${todayWorkout.result.rpe} · Editar`
+                  : 'Como foi o treino?'}
+              </button>
+            </div>
+          )}
         </div>
       ) : (
-        <div className="glass-card p-5 text-center">
-          <div className="text-3xl mb-2">🌴</div>
-          <p className="text-sm font-semibold text-gray-700">Hoje é dia de descanso</p>
+        <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 text-center">
+          <p className="text-2xl mb-2">🌿</p>
+          <p className="text-sm font-bold text-gray-700">Dia de descanso</p>
+          <p className="text-xs text-gray-400 mt-1">Recuperação é parte do treino</p>
           {tomorrowWorkout && (
-            <p className="text-xs text-gray-400 mt-1">Amanhã: {tomorrowWorkout.title}</p>
+            <p className="text-xs text-gray-400 mt-2">Amanhã: <span className="font-semibold text-gray-600">{tomorrowWorkout.title}</span></p>
           )}
         </div>
       )}
 
       {/* Active plan */}
-      {!loading && plan && (
-        <div className="glass-card p-4 flex items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
-            <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-            </svg>
+      {!loading && (
+        plan ? (
+          <div className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Planilha ativa</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-bold text-gray-900">{plan.name}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{fmt.dateShort(plan.startDate)} → {fmt.dateShort(plan.endDate)} · {plan.weeklyFrequency}×/sem</p>
+              </div>
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+            </div>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-[#DC2626] uppercase tracking-wider">Planilha ativa</p>
-            <p className="text-sm font-semibold text-gray-900 truncate">{plan.name}</p>
-            <p className="text-xs text-gray-400">{fmt.dateShort(plan.startDate)} → {fmt.dateShort(plan.endDate)} · {plan.weeklyFrequency}x/sem</p>
+        ) : (
+          <div className="rounded-3xl border-2 border-dashed border-gray-200 p-5 text-center">
+            <p className="text-sm text-gray-400">Aguardando planilha do seu coach</p>
           </div>
-          <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full shrink-0">Ativa</span>
-        </div>
-      )}
-
-      {!loading && !plan && (
-        <div className="glass-card p-5 text-center border border-dashed border-gray-200">
-          <p className="text-sm text-gray-400">Aguardando planilha do seu coach</p>
-        </div>
+        )
       )}
     </div>
   );
@@ -380,70 +377,78 @@ function HomeTab({
 // ─── Tab: Treinos ─────────────────────────────────────────────────────────────
 
 function TreinosTab({ weekly, loading, onFeedback }: {
-  weekly: WeeklyData | null;
-  loading: boolean;
-  onFeedback: (w: Workout) => void;
+  weekly: WeeklyData | null; loading: boolean; onFeedback: (w: Workout) => void;
 }) {
   if (loading) return (
     <div className="space-y-3">
-      {[1,2,3,4].map(i => <div key={i} className="glass-card p-4 h-20 animate-pulse" />)}
+      {[1,2,3,4].map(i => <div key={i} className="bg-white rounded-3xl h-20 animate-pulse border border-gray-100" />)}
     </div>
   );
 
   if (!weekly || weekly.workouts.length === 0) return (
-    <div className="glass-card p-10 text-center">
-      <div className="text-4xl mb-3">🏃</div>
-      <p className="text-sm font-semibold text-gray-700">Nenhum treino esta semana</p>
-      <p className="text-xs text-gray-400 mt-1">Seu coach ainda não atribuiu treinos para esta semana</p>
+    <div className="bg-white rounded-3xl p-12 text-center border border-gray-100 shadow-sm">
+      <p className="text-3xl mb-3">🏃</p>
+      <p className="text-sm font-bold text-gray-700">Nenhum treino esta semana</p>
+      <p className="text-xs text-gray-400 mt-1">Seu coach atribuirá a planilha em breve</p>
     </div>
   );
 
   return (
     <div className="space-y-3">
-      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Esta semana</p>
-      {weekly.workouts.map((w) => {
+      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Esta semana</p>
+      {weekly.workouts.map(w => {
         const isToday = fmt.isToday(w.scheduledDate ?? w.date);
         const hasFeedback = w.result?.rpe != null;
         const sensationEmoji = w.result?.sensationScore ? SENSATIONS.find(s => s.score === w.result?.sensationScore)?.emoji : null;
         const canFeedback = w.status === 'COMPLETED' || w.status === 'SKIPPED';
+        const isCompleted = w.status === 'COMPLETED';
+        const isSkipped = w.status === 'SKIPPED';
 
         return (
-          <div key={w.id} className={`glass-card p-4 ${isToday ? 'ring-2 ring-[#DC2626]/20' : ''}`}>
+          <div key={w.id} className={`bg-white rounded-3xl p-4 border shadow-sm transition
+            ${isToday && !isCompleted ? 'border-[#DC2626]/20 ring-1 ring-[#DC2626]/10' : 'border-gray-100'}`}>
             <div className="flex items-start gap-3">
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-lg
-                ${w.status === 'COMPLETED' ? 'bg-emerald-50' : w.status === 'SKIPPED' ? 'bg-gray-100' : isToday ? 'bg-red-50' : 'bg-gray-50'}`}>
-                {w.status === 'COMPLETED' ? '✅' : w.status === 'SKIPPED' ? '⏭️' : WORKOUT_TYPE_ICON[w.type] ?? '🏃'}
+              {/* Status dot */}
+              <div className={`mt-0.5 w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 text-base
+                ${isCompleted ? 'bg-emerald-50 text-emerald-600' : isSkipped ? 'bg-gray-100 text-gray-400' : isToday ? 'bg-red-50' : 'bg-gray-50'}`}>
+                {isCompleted ? (
+                  <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                ) : isSkipped ? (
+                  <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
+                ) : (
+                  <svg className={`w-4 h-4 ${isToday ? 'text-[#DC2626]' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                )}
               </div>
+
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-gray-900 truncate">{w.title}</p>
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ${STATUS_COLOR[w.status] ?? 'bg-gray-100 text-gray-500'}`}>
-                    {isToday && w.status === 'SCHEDULED' ? 'Hoje' : STATUS_LABEL[w.status] ?? w.status}
+                  <p className="text-sm font-bold text-gray-900 truncate">{w.title}</p>
+                  <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full shrink-0 uppercase tracking-wide
+                    ${isCompleted ? 'bg-emerald-50 text-emerald-600' : isSkipped ? 'bg-gray-100 text-gray-400' : isToday ? 'bg-red-50 text-[#DC2626]' : 'bg-gray-50 text-gray-400'}`}>
+                    {isToday && !isCompleted && !isSkipped ? 'Hoje' : STATUS_LABEL[w.status]}
                   </span>
                 </div>
                 <p className="text-xs text-gray-400 mt-0.5 capitalize">
                   {fmt.weekday(w.scheduledDate ?? w.date)}
+                  {WORKOUT_TYPE_LABEL[w.type] ? ` · ${WORKOUT_TYPE_LABEL[w.type]}` : ''}
                   {w.distanceMeters ? ` · ${fmt.dist(w.distanceMeters)}` : ''}
-                  {w.durationMinutes ? ` · ${w.durationMinutes} min` : ''}
                 </p>
 
-                {/* Feedback row */}
                 {canFeedback && (
-                  <div className="mt-2 flex items-center justify-between">
+                  <div className="mt-2 flex items-center justify-between pt-2 border-t border-gray-50">
                     {hasFeedback ? (
                       <div className="flex items-center gap-1.5">
                         {sensationEmoji && <span className="text-sm">{sensationEmoji}</span>}
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full
                           ${(w.result?.rpe ?? 0) >= 8 ? 'bg-red-50 text-red-600' : (w.result?.rpe ?? 0) >= 5 ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}`}>
                           RPE {w.result?.rpe}
                         </span>
                       </div>
                     ) : (
-                      <span className="text-xs text-gray-400">Sem feedback ainda</span>
+                      <span className="text-xs text-gray-400">Sem feedback</span>
                     )}
-                    <button onClick={() => onFeedback(w)}
-                      className="text-xs font-semibold text-[#DC2626] hover:underline cursor-pointer ml-2">
-                      {hasFeedback ? 'Editar' : '+ Feedback'}
+                    <button onClick={() => onFeedback(w)} className="text-xs font-bold text-gray-500 hover:text-gray-900 transition cursor-pointer">
+                      {hasFeedback ? 'Editar' : 'Registrar →'}
                     </button>
                   </div>
                 )}
@@ -483,26 +488,19 @@ function NutricaoTab() {
     try {
       await api.post('/nutrition/water', { amount: newAmount, date: today });
       setWater(newAmount);
-    } catch { /* silent */ } finally { setSavingWater(false); }
+    } catch { } finally { setSavingWater(false); }
   };
 
   const handleSaveMeal = async () => {
     if (!meal.mealName.trim()) return;
     setSavingMeal(true);
     try {
-      await api.post('/nutrition/meal', {
-        date: today,
-        mealName: meal.mealName.trim(),
-        calories: Number(meal.calories) || 0,
-        protein: Number(meal.protein) || 0,
-        carbs: Number(meal.carbs) || 0,
-        fat: Number(meal.fat) || 0,
-      });
+      await api.post('/nutrition/meal', { date: today, mealName: meal.mealName.trim(), calories: Number(meal.calories) || 0, protein: Number(meal.protein) || 0, carbs: Number(meal.carbs) || 0, fat: Number(meal.fat) || 0 });
       const r = await api.get(`/nutrition/day?date=${today}`);
       if (r.data?.totals) setTotals(r.data.totals);
       setMeal(EMPTY_MEAL);
       setShowMealForm(false);
-    } catch { alert('Erro ao salvar. Tente novamente.'); } finally { setSavingMeal(false); }
+    } catch { alert('Erro ao salvar.'); } finally { setSavingMeal(false); }
   };
 
   const waterPercent = Math.min(100, Math.round((water / waterGoal) * 100));
@@ -510,19 +508,18 @@ function NutricaoTab() {
   return (
     <div className="space-y-4">
       {/* Water */}
-      <div className="glass-card p-5">
+      <div className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-sm font-bold text-gray-800">💧 Hidratação</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Meta: {(waterGoal / 1000).toFixed(1)}L por dia</p>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Hidratação</p>
+            <p className="text-sm font-bold text-gray-900">Meta: {(waterGoal / 1000).toFixed(1)}L por dia</p>
           </div>
-          <div className="text-right">
-            <p className="text-2xl font-bold text-[#DC2626]">{water >= 1000 ? `${(water / 1000).toFixed(1)}L` : `${water}ml`}</p>
-            <p className="text-xs text-gray-400">{waterPercent}%</p>
-          </div>
+          <p className="text-3xl font-black text-gray-900">
+            {water >= 1000 ? `${(water / 1000).toFixed(1)}L` : `${water}ml`}
+          </p>
         </div>
 
-        <div className="h-3 rounded-full bg-gray-100 overflow-hidden mb-4">
+        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden mb-4">
           <div className="h-full rounded-full transition-all duration-500"
             style={{ width: `${waterPercent}%`, backgroundColor: waterPercent >= 100 ? '#16A34A' : '#3B82F6' }} />
         </div>
@@ -530,22 +527,19 @@ function NutricaoTab() {
         <div className="flex gap-2">
           {WATER_STEPS.map(ml => (
             <button key={ml} onClick={() => handleAddWater(ml)} disabled={savingWater}
-              className="flex-1 py-2.5 rounded-xl border border-blue-100 bg-blue-50 text-xs font-bold text-blue-700 hover:bg-blue-100 transition cursor-pointer disabled:opacity-50">
-              +{ml}ml
+              className="flex-1 py-3 rounded-2xl border border-gray-200 text-xs font-bold text-gray-600 hover:bg-gray-50 transition cursor-pointer disabled:opacity-50">
+              + {ml}ml
             </button>
           ))}
         </div>
-        {waterPercent >= 100 && (
-          <p className="text-xs text-emerald-600 font-semibold text-center mt-3">🎉 Meta atingida! Ótimo trabalho!</p>
-        )}
+        {waterPercent >= 100 && <p className="text-xs font-bold text-emerald-600 text-center mt-3">Meta atingida!</p>}
       </div>
 
       {/* Nutrition */}
-      <div className="glass-card p-5">
+      <div className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-bold text-gray-800">🥗 Nutrição de hoje</h2>
-          <button onClick={() => setShowMealForm(v => !v)}
-            className="text-xs font-semibold text-[#DC2626] hover:underline cursor-pointer">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Nutrição de hoje</p>
+          <button onClick={() => setShowMealForm(v => !v)} className="text-xs font-bold text-[#DC2626] cursor-pointer">
             {showMealForm ? 'Cancelar' : '+ Refeição'}
           </button>
         </div>
@@ -553,54 +547,44 @@ function NutricaoTab() {
         {totals && totals.calories > 0 ? (
           <div className="grid grid-cols-2 gap-3 mb-3">
             {[
-              { label: 'Calorias', value: `${totals.calories} kcal`, color: 'text-amber-600', bg: 'bg-amber-50' },
-              { label: 'Proteína', value: `${totals.protein.toFixed(0)}g`, color: 'text-blue-600', bg: 'bg-blue-50' },
-              { label: 'Carboidratos', value: `${totals.carbs.toFixed(0)}g`, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-              { label: 'Gordura', value: `${totals.fat.toFixed(0)}g`, color: 'text-purple-600', bg: 'bg-purple-50' },
+              { label: 'Calorias', value: `${totals.calories}`, unit: 'kcal', color: 'text-amber-600' },
+              { label: 'Proteína', value: `${totals.protein.toFixed(0)}`, unit: 'g', color: 'text-blue-600' },
+              { label: 'Carboidratos', value: `${totals.carbs.toFixed(0)}`, unit: 'g', color: 'text-emerald-600' },
+              { label: 'Gordura', value: `${totals.fat.toFixed(0)}`, unit: 'g', color: 'text-purple-600' },
             ].map(item => (
-              <div key={item.label} className={`${item.bg} rounded-xl p-3 text-center`}>
-                <p className={`text-lg font-bold ${item.color}`}>{item.value}</p>
-                <p className="text-xs text-gray-500 mt-0.5">{item.label}</p>
+              <div key={item.label} className="bg-gray-50 rounded-2xl p-4">
+                <p className={`text-xl font-black ${item.color}`}>{item.value}<span className="text-xs font-medium text-gray-400 ml-0.5">{item.unit}</span></p>
+                <p className="text-xs text-gray-400 mt-0.5">{item.label}</p>
               </div>
             ))}
           </div>
         ) : !showMealForm ? (
           <div className="text-center py-6">
-            <p className="text-2xl mb-2">🍽️</p>
-            <p className="text-sm text-gray-400">Nenhuma refeição registrada hoje</p>
-            <button onClick={() => setShowMealForm(true)}
-              className="mt-3 text-xs font-semibold text-[#DC2626] hover:underline cursor-pointer">
-              Registrar refeição
-            </button>
+            <p className="text-sm text-gray-400 mb-3">Nenhuma refeição registrada hoje</p>
+            <button onClick={() => setShowMealForm(true)} className="text-xs font-bold text-[#DC2626] cursor-pointer">Registrar agora →</button>
           </div>
         ) : null}
 
         {showMealForm && (
           <div className="space-y-3 border-t border-gray-100 pt-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Nome da refeição *</label>
-              <input type="text" placeholder="Ex: Café da manhã, Almoço..."
-                value={meal.mealName} onChange={e => setMeal(p => ({ ...p, mealName: e.target.value }))}
-                className="w-full px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-red-100 focus:border-[#DC2626]/40" />
-            </div>
+            <input type="text" placeholder="Nome da refeição"
+              value={meal.mealName} onChange={e => setMeal(p => ({ ...p, mealName: e.target.value }))}
+              className="w-full px-4 py-3 rounded-2xl bg-gray-50 border border-gray-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-gray-200" />
             <div className="grid grid-cols-2 gap-3">
               {[
-                { key: 'calories', label: 'Calorias (kcal)', placeholder: '600' },
-                { key: 'protein', label: 'Proteína (g)', placeholder: '40' },
-                { key: 'carbs', label: 'Carboidratos (g)', placeholder: '80' },
-                { key: 'fat', label: 'Gordura (g)', placeholder: '20' },
+                { key: 'calories', label: 'Calorias (kcal)' }, { key: 'protein', label: 'Proteína (g)' },
+                { key: 'carbs', label: 'Carboidratos (g)' }, { key: 'fat', label: 'Gordura (g)' },
               ].map(field => (
                 <div key={field.key}>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">{field.label}</label>
-                  <input type="number" min={0} placeholder={field.placeholder}
-                    value={(meal as any)[field.key]}
+                  <label className="block text-xs text-gray-400 mb-1 font-medium">{field.label}</label>
+                  <input type="number" min={0} value={(meal as any)[field.key]}
                     onChange={e => setMeal(p => ({ ...p, [field.key]: e.target.value === '' ? '' : Number(e.target.value) }))}
-                    className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-red-100 focus:border-[#DC2626]/40" />
+                    className="w-full px-3 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200" />
                 </div>
               ))}
             </div>
             <button onClick={handleSaveMeal} disabled={savingMeal || !meal.mealName.trim()}
-              className="w-full py-3 rounded-xl bg-[#DC2626] hover:bg-red-700 text-white text-sm font-semibold transition disabled:opacity-50 cursor-pointer">
+              className="w-full py-3.5 rounded-2xl bg-gray-900 hover:bg-gray-800 text-white text-sm font-bold transition disabled:opacity-40 cursor-pointer">
               {savingMeal ? 'Salvando...' : 'Salvar refeição'}
             </button>
           </div>
@@ -613,60 +597,51 @@ function NutricaoTab() {
 // ─── Tab: Perfil ──────────────────────────────────────────────────────────────
 
 function PerfilTab({ user, stats, plan, onLogout }: {
-  user: any;
-  stats: Stats | null;
-  plan: Plan | null;
-  onLogout: () => void;
+  user: any; stats: Stats | null; plan: Plan | null; onLogout: () => void;
 }) {
   return (
     <div className="space-y-4">
-      {/* Avatar + name */}
-      <div className="glass-card p-6 text-center">
-        <div className="w-20 h-20 rounded-2xl bg-[#DC2626] flex items-center justify-center mx-auto mb-4 shadow-lg">
-          <span className="text-white text-3xl font-bold">{user?.name?.[0]?.toUpperCase() ?? '?'}</span>
+      <div className="bg-gray-900 rounded-3xl p-6 relative overflow-hidden">
+        <div className="absolute inset-0 opacity-5" style={{ backgroundImage: 'radial-gradient(circle at 80% 20%, #DC2626, transparent 60%)' }} />
+        <div className="relative flex items-center gap-4">
+          <div className="w-16 h-16 rounded-2xl bg-white/10 flex items-center justify-center shrink-0">
+            <span className="text-white text-2xl font-black">{fmt.initials(user?.name)}</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-lg font-black text-white truncate">{user?.name}</h2>
+            <p className="text-sm text-gray-400 truncate">{user?.email}</p>
+            <span className="inline-block mt-1.5 px-2.5 py-0.5 rounded-full bg-white/10 text-[10px] font-bold text-gray-300 uppercase tracking-widest">Atleta</span>
+          </div>
         </div>
-        <h2 className="text-lg font-bold text-gray-900">{user?.name}</h2>
-        <p className="text-sm text-gray-400 mt-0.5">{user?.email}</p>
-        <span className="inline-block mt-2 px-3 py-1 rounded-full bg-red-50 text-[#DC2626] text-xs font-semibold">Atleta</span>
       </div>
 
-      {/* Stats */}
-      <div className="glass-card p-5">
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Meu desempenho</h3>
-        <div className="space-y-3">
+      <div className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100">
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">Desempenho</p>
+        <div className="space-y-3.5">
           {[
-            { label: 'Total de km percorridos', value: `${stats?.totalKm?.toFixed(1) ?? '0'} km` },
+            { label: 'Quilômetros percorridos', value: `${stats?.totalKm?.toFixed(1) ?? '0'} km` },
             { label: 'Treinos concluídos', value: `${stats?.totalWorkouts ?? 0}` },
             { label: 'Pace médio', value: stats?.avgPace ?? '—' },
           ].map(item => (
-            <div key={item.label} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-              <span className="text-sm text-gray-600">{item.label}</span>
-              <span className="text-sm font-bold text-gray-900">{item.value}</span>
+            <div key={item.label} className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">{item.label}</span>
+              <span className="text-sm font-black text-gray-900">{item.value}</span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Plan */}
       {plan && (
-        <div className="glass-card p-5">
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Planilha atual</h3>
-          <p className="text-sm font-semibold text-gray-900">{plan.name}</p>
+        <div className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Planilha atual</p>
+          <p className="text-sm font-bold text-gray-900">{plan.name}</p>
           <p className="text-xs text-gray-400 mt-1">{fmt.dateShort(plan.startDate)} até {fmt.dateShort(plan.endDate)}</p>
-          <p className="text-xs text-gray-400">{plan.weeklyFrequency} treinos por semana</p>
+          <p className="text-xs text-gray-400">{plan.weeklyFrequency} sessões por semana</p>
         </div>
       )}
 
-      {/* App info */}
-      <div className="glass-card p-4 text-center">
-        <p className="text-xs text-gray-400 leading-relaxed">
-          Para live tracking, mapa de corrida e notificações push, baixe o app mobile da Rafinha Running.
-        </p>
-      </div>
-
-      {/* Logout */}
       <button onClick={onLogout}
-        className="w-full py-3 rounded-2xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition cursor-pointer">
+        className="w-full py-4 rounded-2xl border-2 border-gray-200 text-sm font-bold text-gray-500 hover:border-gray-300 hover:text-gray-700 transition cursor-pointer">
         Sair da conta
       </button>
     </div>
@@ -678,35 +653,34 @@ function PerfilTab({ user, stats, plan, onLogout }: {
 type Tab = 'home' | 'treinos' | 'nutricao' | 'perfil';
 
 function BottomNav({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
-  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  const tabs: { id: Tab; label: string; icon: (active: boolean) => React.ReactNode }[] = [
     {
       id: 'home', label: 'Início',
-      icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+      icon: (a) => <svg className="w-5 h-5" fill={a ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={a ? 0 : 1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" /></svg>
     },
     {
       id: 'treinos', label: 'Treinos',
-      icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+      icon: (a) => <svg className="w-5 h-5" fill={a ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={a ? 0 : 1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
     },
     {
       id: 'nutricao', label: 'Nutrição',
-      icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
+      icon: (a) => <svg className="w-5 h-5" fill={a ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={a ? 0 : 1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" /></svg>
     },
     {
       id: 'perfil', label: 'Perfil',
-      icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+      icon: (a) => <svg className="w-5 h-5" fill={a ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={a ? 0 : 1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" /></svg>
     },
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-gray-100 shadow-lg z-40">
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-40 safe-area-bottom">
       <div className="max-w-2xl mx-auto flex">
         {tabs.map(tab => (
           <button key={tab.id} onClick={() => onChange(tab.id)}
-            className={`flex-1 flex flex-col items-center gap-1 py-3 transition cursor-pointer
-              ${active === tab.id ? 'text-[#DC2626]' : 'text-gray-400 hover:text-gray-600'}`}>
-            {tab.icon}
-            <span className="text-[10px] font-semibold">{tab.label}</span>
-            {active === tab.id && <span className="absolute bottom-0 w-10 h-0.5 bg-[#DC2626] rounded-t-full" />}
+            className={`flex-1 flex flex-col items-center gap-1 py-3 px-2 transition cursor-pointer
+              ${active === tab.id ? 'text-[#DC2626]' : 'text-gray-400'}`}>
+            {tab.icon(active === tab.id)}
+            <span className="text-[10px] font-bold tracking-wide">{tab.label}</span>
           </button>
         ))}
       </div>
@@ -714,7 +688,7 @@ function BottomNav({ active, onChange }: { active: Tab; onChange: (t: Tab) => vo
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function AthletePortalPage() {
   const router = useRouter();
@@ -745,61 +719,33 @@ export default function AthletePortalPage() {
 
   const handleFeedbackSaved = useCallback((workoutId: string, fb: WorkoutResult) => {
     setWeekly(prev => prev ? {
-      ...prev,
-      workouts: prev.workouts.map(w => w.id === workoutId ? { ...w, result: { ...(w.result ?? {}), ...fb } } : w),
+      ...prev, workouts: prev.workouts.map(w => w.id === workoutId ? { ...w, result: { ...(w.result ?? {}), ...fb } } : w),
     } : prev);
     setFeedbackWorkout(null);
   }, []);
 
-  const handleLogout = () => {
-    logout();
-    router.replace('/athlete-login');
-  };
-
-  const tabTitles: Record<Tab, string> = {
-    home: 'Portal do Atleta',
-    treinos: 'Meus Treinos',
-    nutricao: 'Nutrição',
-    perfil: 'Perfil',
-  };
+  const handleLogout = () => { logout(); router.replace('/athlete-login'); };
 
   return (
-    <div className="min-h-screen pb-24" style={{ background: 'linear-gradient(160deg, #FEE2E2 0%, #F9FAFB 35%)' }}>
+    <div className="min-h-screen bg-[#F7F7F8] pb-24">
       {/* Header */}
-      <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-100 px-4 py-3 flex items-center justify-between max-w-2xl mx-auto w-full">
-        <img src="/logo.png" alt="RR" className="h-7" />
-        <span className="text-sm font-semibold text-gray-700">{tabTitles[activeTab]}</span>
-        <div className="w-16" />
+      <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-gray-100 px-5 py-4">
+        <div className="max-w-2xl mx-auto">
+          <LogoMark size="sm" />
+        </div>
       </header>
 
       <main className="max-w-2xl mx-auto px-4 pt-5">
-        {activeTab === 'home' && (
-          <HomeTab
-            user={user}
-            weekly={weekly}
-            stats={stats}
-            plan={plan}
-            loading={loading}
-            onFeedback={setFeedbackWorkout}
-          />
-        )}
-        {activeTab === 'treinos' && (
-          <TreinosTab weekly={weekly} loading={loading} onFeedback={setFeedbackWorkout} />
-        )}
+        {activeTab === 'home' && <HomeTab user={user} weekly={weekly} stats={stats} plan={plan} loading={loading} onFeedback={setFeedbackWorkout} />}
+        {activeTab === 'treinos' && <TreinosTab weekly={weekly} loading={loading} onFeedback={setFeedbackWorkout} />}
         {activeTab === 'nutricao' && <NutricaoTab />}
-        {activeTab === 'perfil' && (
-          <PerfilTab user={user} stats={stats} plan={plan} onLogout={handleLogout} />
-        )}
+        {activeTab === 'perfil' && <PerfilTab user={user} stats={stats} plan={plan} onLogout={handleLogout} />}
       </main>
 
       <BottomNav active={activeTab} onChange={setActiveTab} />
 
       {feedbackWorkout && (
-        <FeedbackModal
-          workout={feedbackWorkout}
-          onClose={() => setFeedbackWorkout(null)}
-          onSaved={handleFeedbackSaved}
-        />
+        <FeedbackModal workout={feedbackWorkout} onClose={() => setFeedbackWorkout(null)} onSaved={handleFeedbackSaved} />
       )}
     </div>
   );
