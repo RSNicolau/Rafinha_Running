@@ -210,8 +210,8 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
             )}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900 truncate">{user?.name}</p>
-            <p className="text-xs text-gray-400 truncate">{user?.role === 'COACH' ? 'Treinador' : user?.role}</p>
+            <p className="text-sm font-medium text-gray-900 break-words leading-tight">{user?.name}</p>
+            <p className="text-xs text-gray-400 leading-tight mt-0.5">{user?.role === 'COACH' ? 'Treinador' : user?.role}</p>
           </div>
           <button
             onClick={logout}
