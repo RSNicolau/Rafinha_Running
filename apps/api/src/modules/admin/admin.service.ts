@@ -151,4 +151,33 @@ export class AdminService {
       update: { value: plans },
     });
   }
+
+  async activateManualSubscription(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+
+    const now = new Date();
+    const end = new Date(now);
+    end.setFullYear(end.getFullYear() + 1);
+
+    // Cancel any existing subscriptions first
+    await this.prisma.subscription.updateMany({
+      where: { userId, status: { in: ['ACTIVE', 'TRIALING', 'INCOMPLETE'] as any } },
+      data: { status: 'CANCELED' as any },
+    });
+
+    const sub = await this.prisma.subscription.create({
+      data: {
+        userId,
+        planType: 'MONTHLY',
+        status: 'ACTIVE',
+        provider: 'PAGARME',
+        externalSubscriptionId: `manual_${userId}_${Date.now()}`,
+        currentPeriodStart: now,
+        currentPeriodEnd: end,
+      },
+    });
+
+    return { success: true, subscriptionId: sub.id, status: sub.status, validUntil: end };
+  }
 }

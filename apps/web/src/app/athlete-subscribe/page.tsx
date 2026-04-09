@@ -111,19 +111,16 @@ export default function AthleteSubscribePage() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-5 py-10" style={{ background: 'linear-gradient(to bottom, #FEE2E2 0%, #F2F2F7 55%)' }}>
-      <svg width="0" height="0" style={{ position: 'absolute' }}>
-        <defs>
-          <filter id="logo-red-fix" colorInterpolationFilters="sRGB">
-            <feColorMatrix type="matrix" values="1.062 0 0 0 -0.062  0 1.107 0 0 -0.107  0 0 1.038 0 -0.038  0 0 0 1 0" />
-          </filter>
-        </defs>
-      </svg>
-
       <div className="w-full max-w-md">
         {/* Logo + header */}
         <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-3xl overflow-hidden shadow-md mx-auto mb-5">
-            <img src="/logo.png" alt="RR" className="w-full block" style={{ filter: 'url(#logo-red-fix)' }} />
+          <div className="flex items-center justify-center gap-2.5 mb-5">
+            <div className="w-8 h-8 rounded-xl bg-[#DC2626] flex items-center justify-center">
+              <svg viewBox="0 0 28 20" fill="none" className="w-4 h-3.5">
+                <path d="M2 18 L8 2 L14 12 L20 2 L26 18" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <span className="text-lg font-black tracking-tight text-gray-900">RAFINHA<span className="text-[#DC2626]"> RUNNING</span></span>
           </div>
           <h1 className="text-2xl font-black text-gray-900 mb-1 tracking-tight">Ative sua conta</h1>
           <p className="text-sm text-gray-500">

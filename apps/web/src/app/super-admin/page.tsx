@@ -29,6 +29,7 @@ export default function SuperAdminPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [activating, setActivating] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ id: string; name: string; hard: boolean } | null>(null);
   const [analytics, setAnalytics] = useState<Record<string, number>>({});
 
@@ -36,7 +37,7 @@ export default function SuperAdminPage() {
 
   useEffect(() => {
     if (!isAuthenticated) { router.replace('/login'); return; }
-    if (user && user.role !== 'SUPER_ADMIN') { router.replace('/dashboard'); return; }
+    if (user && user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') { router.replace('/dashboard'); return; }
     load();
   }, [isAuthenticated, user]);
 
@@ -152,6 +153,26 @@ export default function SuperAdminPage() {
                   </span>
                   <span className="text-xs text-gray-600">{formatDate(u.createdAt)}</span>
                   <div className="flex items-center gap-1 flex-shrink-0">
+                    {u.role === 'ATHLETE' && !u.subscriptions?.length && (
+                      <button
+                        onClick={async () => {
+                          setActivating(u.id);
+                          try {
+                            await api.post(`/admin/users/${u.id}/activate-subscription`);
+                            setUsers(prev => prev.map(x => x.id === u.id ? { ...x, subscriptions: [{ status: 'ACTIVE' }] } : x));
+                            alert(`✅ Assinatura ativada para ${u.name}`);
+                          } catch (e: any) {
+                            alert(e?.response?.data?.message ?? 'Erro ao ativar.');
+                          }
+                          setActivating(null);
+                        }}
+                        disabled={activating === u.id}
+                        title="Ativar assinatura (teste)"
+                        className="px-2.5 py-1 rounded-lg bg-emerald-900/50 hover:bg-emerald-800 text-emerald-400 text-xs font-bold transition disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        {activating === u.id ? '...' : 'Ativar'}
+                      </button>
+                    )}
                     <button
                       onClick={() => setConfirm({ id: u.id, name: u.name, hard: false })}
                       disabled={deleting === u.id || u.role === 'SUPER_ADMIN'}

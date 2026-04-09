@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Delete, Patch, Body, Query, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Put, Post, Delete, Patch, Body, Query, Param, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
@@ -66,5 +66,11 @@ export class AdminController {
   @ApiOperation({ summary: 'Atualizar planos e preços' })
   async updatePlans(@Body() plans: Record<string, any>) {
     return this.adminService.updatePlansConfig(plans);
+  }
+
+  @Post('users/:id/activate-subscription')
+  @ApiOperation({ summary: 'Ativar assinatura manual para teste (sem pagamento)' })
+  async activateSubscription(@Param('id') userId: string) {
+    return this.adminService.activateManualSubscription(userId);
   }
 }
