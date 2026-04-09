@@ -73,4 +73,18 @@ export class AdminController {
   async activateSubscription(@Param('id') userId: string) {
     return this.adminService.activateManualSubscription(userId);
   }
+
+  @Patch('users/:id/password')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Definir senha de qualquer usuário (SUPER_ADMIN)' })
+  async setUserPassword(@Param('id') id: string, @Body('password') password: string) {
+    return this.adminService.setUserPassword(id, password);
+  }
+
+  @Patch('users/by-email/password')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Definir senha por email (SUPER_ADMIN)' })
+  async setUserPasswordByEmail(@Body('email') email: string, @Body('password') password: string) {
+    return this.adminService.setUserPasswordByEmail(email, password);
+  }
 }

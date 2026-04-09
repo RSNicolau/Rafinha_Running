@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserRole, SubscriptionStatus, WorkoutStatus } from '@prisma/client';
 
@@ -150,6 +151,22 @@ export class AdminService {
       create: { key: 'plans', value: plans },
       update: { value: plans },
     });
+  }
+
+  async setUserPassword(id: string, password: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+    const passwordHash = await bcrypt.hash(password, 12);
+    await this.prisma.user.update({ where: { id }, data: { passwordHash } });
+    return { success: true, email: user.email };
+  }
+
+  async setUserPasswordByEmail(email: string, password: string) {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+    const passwordHash = await bcrypt.hash(password, 12);
+    await this.prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+    return { success: true, email: user.email, role: user.role };
   }
 
   async activateManualSubscription(userId: string) {
