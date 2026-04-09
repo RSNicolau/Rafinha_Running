@@ -158,8 +158,9 @@ export default function SettingsPage() {
   // Aparência
   const [darkMode, setDarkMode] = useState(false);
 
-  // AI Assistant config (COACH only)
+  // AI Assistant config — only ADMIN/SUPER_ADMIN can customize
   const isCoach = storeUser?.role === 'COACH' || storeUser?.role === 'ADMIN' || storeUser?.role === 'SUPER_ADMIN';
+  const isAdmin = storeUser?.role === 'ADMIN' || storeUser?.role === 'SUPER_ADMIN';
   const [aiConfig, setAiConfig] = useState({ assistantName: 'Rafinha', tone: 'FRIENDLY', personaPrompt: '', voiceEnabled: false });
   const [savingAi, setSavingAi] = useState(false);
   const [aiFeedback, setAiFeedback] = useState<FeedbackState>(null);
@@ -958,8 +959,8 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* IA Assistente — COACH only */}
-        {isCoach && (
+        {/* IA Assistente — ADMIN only */}
+        {isAdmin && (
           <div className="glass-card p-6">
             <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">IA Assistente</h2>
             <div className="space-y-4">
@@ -1017,8 +1018,8 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* CoachBrain — Provedor de IA */}
-        {isCoach && (
+        {/* CoachBrain — Provedor de IA — ADMIN only */}
+        {isAdmin && (
           <div className="glass-card p-6">
             <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">CoachBrain — Provedor de IA</h2>
             <p className="text-xs text-gray-400 mb-5">Escolha qual modelo de IA alimenta seu assistente</p>
