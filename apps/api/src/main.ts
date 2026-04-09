@@ -129,7 +129,7 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  console.log(`🏃 RR API rodando na porta ${port}`);
+  console.log(`🏃 RR API rodando na porta ${port} | health: /api/health`);
   console.log(`📚 Docs: http://localhost:${port}/api/docs`);
 }
 
