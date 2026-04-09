@@ -605,9 +605,9 @@ export default function SettingsPage() {
                     <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
                   </div>
 
-                  <div className="mb-1">
-                    <p className="text-base font-semibold text-gray-900 leading-tight">{displayName}</p>
-                    <p className="text-sm text-gray-400 leading-tight">{displayEmail}</p>
+                  <div className="flex-1 min-w-0 mb-1">
+                    <p className="text-base font-semibold text-gray-900 break-words leading-tight">{displayName}</p>
+                    <p className="text-sm text-gray-400 leading-tight truncate">{displayEmail}</p>
                   </div>
                 </div>
 
