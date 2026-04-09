@@ -24,7 +24,7 @@ const ROLE_COLORS: Record<string, string> = {
 
 export default function SuperAdminPage() {
   const router = useRouter();
-  const { user, logout, loadUser, isAuthenticated } = useAuthStore();
+  const { user, logout, loadUser, isAuthenticated, isLoading: authLoading } = useAuthStore();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -36,10 +36,11 @@ export default function SuperAdminPage() {
   useEffect(() => { loadUser(); }, []);
 
   useEffect(() => {
+    if (authLoading) return;
     if (!isAuthenticated) { router.replace('/login'); return; }
     if (user && user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') { router.replace('/dashboard'); return; }
     load();
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user, authLoading]);
 
   const load = async () => {
     setLoading(true);

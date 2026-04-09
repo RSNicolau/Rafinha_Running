@@ -22,7 +22,7 @@ interface PixData {
 
 export default function AthleteSubscribePage() {
   const router = useRouter();
-  const { user, logout, loadUser, isAuthenticated } = useAuthStore();
+  const { user, logout, loadUser, isAuthenticated, isLoading: authLoading } = useAuthStore();
   const [loading, setLoading] = useState(true);
   const [plan, setPlan] = useState(FALLBACK_PLAN);
   const [pixLoading, setPixLoading] = useState(false);
@@ -34,6 +34,7 @@ export default function AthleteSubscribePage() {
   useEffect(() => { loadUser(); }, []);
 
   useEffect(() => {
+    if (authLoading) return;
     if (!isAuthenticated) { router.replace('/athlete-login'); return; }
     Promise.all([
       api.get('/admin/config/plans').catch(() => null),
@@ -54,7 +55,7 @@ export default function AthleteSubscribePage() {
         router.replace('/athlete');
       }
     }).finally(() => setLoading(false));
-  }, [isAuthenticated]);
+  }, [isAuthenticated, authLoading]);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 

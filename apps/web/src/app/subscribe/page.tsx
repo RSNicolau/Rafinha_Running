@@ -77,7 +77,7 @@ interface PixData {
 
 export default function SubscribePage() {
   const router = useRouter();
-  const { user, logout, loadUser, isAuthenticated } = useAuthStore();
+  const { user, logout, loadUser, isAuthenticated, isLoading: authLoading } = useAuthStore();
   const [loading, setLoading] = useState(true);
   const [plansError, setPlansError] = useState(false);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -91,6 +91,7 @@ export default function SubscribePage() {
   useEffect(() => { loadUser(); }, []);
 
   useEffect(() => {
+    if (authLoading) return;
     if (!isAuthenticated) { router.replace('/login'); return; }
     Promise.all([
       api.get('/admin/config/plans').catch(() => null),
@@ -105,7 +106,7 @@ export default function SubscribePage() {
         router.replace('/dashboard');
       }
     }).finally(() => setLoading(false));
-  }, [isAuthenticated]);
+  }, [isAuthenticated, authLoading]);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 

@@ -692,7 +692,7 @@ function BottomNav({ active, onChange }: { active: Tab; onChange: (t: Tab) => vo
 
 export default function AthletePortalPage() {
   const router = useRouter();
-  const { user, logout, loadUser, isAuthenticated } = useAuthStore();
+  const { user, logout, loadUser, isAuthenticated, isLoading: authLoading } = useAuthStore();
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [weekly, setWeekly] = useState<WeeklyData | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -701,7 +701,7 @@ export default function AthletePortalPage() {
   const [feedbackWorkout, setFeedbackWorkout] = useState<Workout | null>(null);
 
   useEffect(() => { loadUser(); }, []);
-  useEffect(() => { if (!isAuthenticated) router.replace('/athlete-login'); }, [isAuthenticated]);
+  useEffect(() => { if (!authLoading && !isAuthenticated) router.replace('/athlete-login'); }, [isAuthenticated, authLoading]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
