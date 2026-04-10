@@ -248,8 +248,8 @@ ${pendingOnboardings.map(o => `- ${o.athlete.name}`).join('\n')}
     });
     if (!coach) throw new NotFoundException('Coach não encontrado');
 
-    const provider = (coach.aiProvider ?? 'anthropic') as AIProvider;
-    const providerInfo = PROVIDER_DEFAULTS[provider] ?? PROVIDER_DEFAULTS.anthropic;
+    const provider = (coach.aiProvider ?? 'openai') as AIProvider;
+    const providerInfo = PROVIDER_DEFAULTS[provider] ?? PROVIDER_DEFAULTS.openai;
     const model = coach.aiModel ?? providerInfo.model;
 
     let apiKey: string;
