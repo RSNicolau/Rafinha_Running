@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { PrismaService } from '../../prisma/prisma.service';
 
 type HRZones = Record<string, { min: number; max: number; label: string }>;
@@ -8,7 +8,7 @@ type PaceZones = Record<string, string>;
 @Injectable()
 export class PhysicalAssessmentsService {
   private readonly logger = new Logger(PhysicalAssessmentsService.name);
-  private readonly anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  private readonly openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   constructor(private prisma: PrismaService) {}
 
@@ -209,14 +209,13 @@ Gere um parágrafo detalhado sobre:
 
 Seja técnico, preciso e motivador. Mencione valores específicos.`;
 
-    const response = await this.anthropic.messages.create({
-      model: 'claude-opus-4-6',
+    const response = await this.openai.chat.completions.create({
+      model: 'gpt-4o',
       max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }],
     });
 
-    const firstBlock = response.content?.[0];
-    const analysis = firstBlock?.type === 'text' ? firstBlock.text : '';
+    const analysis = response.choices[0]?.message?.content ?? '';
 
     // Save analysis on latest assessment
     await this.prisma.physicalAssessment.update({
@@ -258,14 +257,13 @@ ${this.formatAssessment(assessment)}
 Gere uma análise objetiva em 2-3 frases com os pontos-chave do perfil atual.`;
     }
 
-    const response = await this.anthropic.messages.create({
-      model: 'claude-opus-4-6',
+    const response = await this.openai.chat.completions.create({
+      model: 'gpt-4o',
       max_tokens: 500,
       messages: [{ role: 'user', content: prompt }],
     });
 
-    const firstBlock2 = response.content?.[0];
-    const analysis = firstBlock2?.type === 'text' ? firstBlock2.text : '';
+    const analysis = response.choices[0]?.message?.content ?? '';
 
     await this.prisma.physicalAssessment.update({
       where: { id: assessmentId },

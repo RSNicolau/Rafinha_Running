@@ -1,7 +1,7 @@
 import {
   Injectable, NotFoundException, Logger,
 } from '@nestjs/common';
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -40,7 +40,7 @@ const DEFAULT_QUESTIONS = [
 @Injectable()
 export class OnboardingService {
   private readonly logger = new Logger(OnboardingService.name);
-  private readonly anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  private readonly openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
   constructor(
     private prisma: PrismaService,
@@ -344,9 +344,10 @@ export class OnboardingService {
     }).join('\n\n') ?? JSON.stringify(answers, null, 2);
 
     try {
-      const response = await this.anthropic.messages.create({
-        model: 'claude-opus-4-6',
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o',
         max_tokens: 2000,
+        response_format: { type: 'json_object' },
         messages: [{
           role: 'user',
           content: `Você é um especialista em treinamento de corrida. Analise o questionário de anamnese abaixo e gere:
@@ -364,15 +365,15 @@ Responda em JSON com a estrutura: { "summary": "...", "level": "...", "alerts": 
         }],
       });
 
-      const content = response.content[0];
-      if (content.type !== 'text') return;
+      const content = response.choices[0]?.message?.content;
+      if (!content) return;
 
       let parsed: any = {};
       try {
-        const match = content.text.match(/\{[\s\S]*\}/);
+        const match = content.match(/\{[\s\S]*\}/);
         if (match) parsed = JSON.parse(match[0]);
       } catch {
-        parsed = { summary: content.text };
+        parsed = { summary: content };
       }
 
       await this.prisma.onboardingProfile.update({

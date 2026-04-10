@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { Response } from 'express';
 import { ChatMessageDto } from './dto/chat-message.dto';
 import { GeneratePlanAiDto } from './dto/generate-plan-ai.dto';
@@ -15,32 +15,36 @@ const TONE_MAP = {
 @Injectable()
 export class AiAssistantService {
   private readonly logger = new Logger(AiAssistantService.name);
-  private client: Anthropic;
+  private client: OpenAI;
 
   constructor(
     private prisma: PrismaService,
   ) {
-    this.client = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
+    this.client = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
     });
   }
 
-  private tools: Anthropic.Tool[] = [
+  private tools: OpenAI.Chat.ChatCompletionTool[] = [
     {
+      type: 'function',
+      function: {
       name: 'get_athlete_profile',
       description: 'Busca perfil completo de um atleta pelo ID',
-      input_schema: {
+      parameters: {
         type: 'object' as const,
         properties: {
           athleteId: { type: 'string', description: 'ID do atleta' },
         },
         required: ['athleteId'],
       },
-    },
+    }},
     {
+      type: 'function',
+      function: {
       name: 'get_workout_history',
       description: 'Busca histórico de treinos de um atleta',
-      input_schema: {
+      parameters: {
         type: 'object' as const,
         properties: {
           athleteId: { type: 'string', description: 'ID do atleta' },
@@ -48,11 +52,13 @@ export class AiAssistantService {
         },
         required: ['athleteId'],
       },
-    },
+    }},
     {
+      type: 'function',
+      function: {
       name: 'generate_training_plan',
       description: 'Gera um plano de treino estruturado para um atleta',
-      input_schema: {
+      parameters: {
         type: 'object' as const,
         properties: {
           athleteId: { type: 'string', description: 'ID do atleta' },
@@ -62,11 +68,13 @@ export class AiAssistantService {
         },
         required: ['athleteId', 'durationWeeks', 'goal'],
       },
-    },
+    }},
     {
+      type: 'function',
+      function: {
       name: 'analyze_performance',
       description: 'Analisa a performance e evolução de um atleta',
-      input_schema: {
+      parameters: {
         type: 'object' as const,
         properties: {
           athleteId: { type: 'string', description: 'ID do atleta' },
@@ -74,7 +82,7 @@ export class AiAssistantService {
         },
         required: ['athleteId'],
       },
-    },
+    }},
   ];
 
   private async executeTool(toolName: string, toolInput: Record<string, unknown>, coachId: string): Promise<string> {
@@ -170,7 +178,8 @@ Seja conciso e direto. Quando relevante, sugira ações práticas.`;
 
   async streamToResponse(coachId: string, dto: ChatMessageDto, res: Response): Promise<void> {
     const systemPrompt = await this.getSystemPrompt(coachId);
-    const messages: Anthropic.MessageParam[] = [
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      { role: 'system', content: systemPrompt },
       ...(dto.history ?? []).map(h => ({ role: h.role as 'user' | 'assistant', content: h.content })),
       { role: 'user', content: dto.message },
     ];
@@ -180,36 +189,28 @@ Seja conciso e direto. Quando relevante, sugira ações práticas.`;
 
     while (iterations < MAX_ITERATIONS) {
       iterations++;
-      const response = await this.client.messages.create({
-        model: 'claude-sonnet-4-6',
+      const response = await this.client.chat.completions.create({
+        model: 'gpt-4o',
         max_tokens: 2048,
-        system: systemPrompt,
         tools: this.tools,
         messages,
       });
 
-      if (response.stop_reason === 'tool_use') {
-        const toolUseBlocks = response.content.filter(b => b.type === 'tool_use') as Anthropic.ToolUseBlock[];
-        const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      const choice = response.choices[0];
 
-        for (const block of toolUseBlocks) {
-          res.write(`data: ${JSON.stringify({ type: 'tool_call', tool: block.name })}\n\n`);
-          const result = await this.executeTool(block.name, block.input as Record<string, unknown>, coachId);
-          toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result });
+      if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls?.length) {
+        messages.push(choice.message);
+        for (const tc of choice.message.tool_calls) {
+          res.write(`data: ${JSON.stringify({ type: 'tool_call', tool: tc.function.name })}\n\n`);
+          const args = JSON.parse(tc.function.arguments || '{}');
+          const result = await this.executeTool(tc.function.name, args, coachId);
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: result });
         }
-
-        messages.push({ role: 'assistant', content: response.content });
-        messages.push({ role: 'user', content: toolResults });
       } else {
-        // end_turn — stream text to client
-        for (const block of response.content) {
-          if (block.type === 'text') {
-            // Stream token by token
-            const words = block.text.split(' ');
-            for (const word of words) {
-              res.write(`data: ${JSON.stringify({ type: 'text', content: word + ' ' })}\n\n`);
-            }
-          }
+        const text = choice.message.content ?? '';
+        const words = text.split(' ');
+        for (const word of words) {
+          res.write(`data: ${JSON.stringify({ type: 'text', content: word + ' ' })}\n\n`);
         }
         break;
       }
@@ -221,19 +222,15 @@ Seja conciso e direto. Quando relevante, sugira ações práticas.`;
 
   async generatePlan(coachId: string, dto: GeneratePlanAiDto): Promise<{ plan: string }> {
     const systemPrompt = await this.getSystemPrompt(coachId);
-    const response = await this.client.messages.create({
-      model: 'claude-sonnet-4-6',
+    const response = await this.client.chat.completions.create({
+      model: 'gpt-4o',
       max_tokens: 4096,
-      system: systemPrompt,
-      tools: this.tools,
-      messages: [{
-        role: 'user',
-        content: `Crie um plano de treino detalhado para o atleta ${dto.athleteId}, com duração de ${dto.durationWeeks} semanas, objetivo: ${dto.goal}. Data de início: ${dto.startDate ?? 'hoje'}. Use as ferramentas para buscar o perfil e histórico do atleta antes de criar o plano.`,
-      }],
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Crie um plano de treino detalhado para o atleta ${dto.athleteId}, com duração de ${dto.durationWeeks} semanas, objetivo: ${dto.goal}. Data de início: ${dto.startDate ?? 'hoje'}.` },
+      ],
     });
-
-    const textContent = response.content.find(b => b.type === 'text');
-    return { plan: textContent?.type === 'text' ? textContent.text : 'Plano gerado' };
+    return { plan: response.choices[0]?.message?.content ?? 'Plano gerado' };
   }
 
   async getInsight(coachId: string): Promise<{ insight: string }> {
@@ -244,18 +241,15 @@ Seja conciso e direto. Quando relevante, sugira ações práticas.`;
       take: 5,
     });
 
-    const response = await this.client.messages.create({
-      model: 'claude-sonnet-4-6',
+    const response = await this.client.chat.completions.create({
+      model: 'gpt-4o',
       max_tokens: 512,
-      system: systemPrompt,
-      messages: [{
-        role: 'user',
-        content: `Gere um insight rápido e motivador sobre a semana da assessoria. Você tem ${athletes.length} atletas ativos. Seja breve (máximo 3 frases).`,
-      }],
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Gere um insight rápido e motivador sobre a semana da assessoria. Você tem ${athletes.length} atletas ativos. Seja breve (máximo 3 frases).` },
+      ],
     });
-
-    const textContent = response.content.find(b => b.type === 'text');
-    return { insight: textContent?.type === 'text' ? textContent.text : 'Semana em progresso!' };
+    return { insight: response.choices[0]?.message?.content ?? 'Semana em progresso!' };
   }
 
   async getConfig(coachId: string) {
