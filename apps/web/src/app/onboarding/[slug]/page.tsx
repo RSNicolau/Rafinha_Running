@@ -43,6 +43,7 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
   const [submitError, setSubmitError] = useState('');
   const [athlete, setAthlete] = useState({ name: '', email: '', phone: '' });
   const [athleteId, setAthleteId] = useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<'mensal' | 'trimestral' | 'semestral'>('mensal');
 
   useEffect(() => {
     if (searchParams.get('payment') === 'success') {
@@ -147,9 +148,50 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
   };
 
   if (step === 'plan') {
+    const plans = [
+      {
+        id: 'mensal' as const,
+        label: 'Mensal',
+        price: '174',
+        cents: '00',
+        period: 'por mês',
+        badge: null,
+        saving: null,
+      },
+      {
+        id: 'trimestral' as const,
+        label: 'Trimestral',
+        price: '495',
+        cents: '00',
+        period: 'parcela única',
+        badge: 'MAIS POPULAR',
+        saving: 'Economia de R$27',
+      },
+      {
+        id: 'semestral' as const,
+        label: 'Semestral',
+        price: '960',
+        cents: '00',
+        period: 'parcela única',
+        badge: 'MELHOR VALOR',
+        saving: 'Economia de R$84',
+      },
+    ];
+
+    const features = [
+      'Planilhas de treino personalizadas',
+      'Treino no Parque Poliesportivo da Concha Acústica (terças de manhã)',
+      'Treinos alternados aos sábados',
+      'Assessoria em provas',
+      'Acesso ao App da equipe para prescrição dos treinos',
+      'Chat direto com o coach',
+      'Análise de performance com IA',
+      'Dados Garmin / Strava integrados',
+    ];
+
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-red-50 to-gray-50 px-4 py-8">
-        <div className="w-full max-w-md">
+      <div className="min-h-screen bg-gradient-to-b from-red-50 to-gray-50 px-4 py-8">
+        <div className="w-full max-w-lg mx-auto">
           <div className="text-center mb-6">
             <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-2xl font-bold text-white shadow-lg"
               style={{ background: primaryColor }}>
@@ -160,10 +202,10 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
           </div>
 
           {/* Steps indicator */}
-          <div className="flex items-center justify-center gap-2 mb-6">
+          <div className="flex items-center justify-center gap-2 mb-8">
             {['Dados', 'Questionário', 'Plano'].map((s, i) => (
               <div key={s} className="flex items-center gap-2">
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${i < 2 ? 'text-white' : 'text-white'}`}
+                <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white"
                   style={{ background: i <= 2 ? primaryColor : '#E5E7EB' }}>
                   {i < 2 ? '✓' : i + 1}
                 </div>
@@ -173,51 +215,61 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
             ))}
           </div>
 
-          {/* Plan card */}
-          <div className="bg-white rounded-2xl border-2 shadow-sm p-6 mb-4" style={{ borderColor: primaryColor }}>
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <span className="text-xs font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full text-white" style={{ background: primaryColor }}>
-                  Mais popular
-                </span>
-                <h2 className="text-xl font-bold text-gray-900 mt-2">Plano Atleta</h2>
-              </div>
-              <div className="text-right">
-                <p className="text-3xl font-bold text-gray-900">R$49<span className="text-lg font-normal text-gray-500">,90</span></p>
-                <p className="text-xs text-gray-400">por mês</p>
-              </div>
-            </div>
+          {/* Plan selector */}
+          <div className="grid grid-cols-3 gap-2 mb-6">
+            {plans.map(plan => (
+              <button
+                key={plan.id}
+                onClick={() => setSelectedPlan(plan.id)}
+                className={`relative rounded-xl border-2 p-3 text-center transition-all cursor-pointer ${
+                  selectedPlan === plan.id ? 'shadow-md' : 'bg-white border-gray-200 hover:border-gray-300'
+                }`}
+                style={selectedPlan === plan.id ? { borderColor: primaryColor, background: `${primaryColor}08` } : {}}
+              >
+                {plan.badge && (
+                  <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full text-white whitespace-nowrap"
+                    style={{ background: primaryColor }}>
+                    {plan.badge}
+                  </span>
+                )}
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-1">{plan.label}</p>
+                <p className="text-2xl font-black text-gray-900 mt-1">
+                  R${plan.price}<span className="text-sm font-normal text-gray-500">,{plan.cents}</span>
+                </p>
+                <p className="text-[11px] text-gray-400">{plan.period}</p>
+                {plan.saving && (
+                  <p className="text-[10px] font-semibold mt-1" style={{ color: primaryColor }}>{plan.saving}</p>
+                )}
+              </button>
+            ))}
+          </div>
 
-            <ul className="space-y-2.5 mb-6">
-              {[
-                'Planilha de treino personalizada',
-                'App dedicado com seus treinos',
-                'Análise de performance com IA',
-                'Dados Garmin / Strava integrados',
-                'Chat direto com o coach',
-                'Avaliações físicas e evolução',
-              ].map(item => (
-                <li key={item} className="flex items-center gap-2.5 text-sm text-gray-700">
-                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke={primaryColor} strokeWidth={2.5}>
+          {/* Features */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 mb-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">O que está incluído:</p>
+            <ul className="space-y-2.5">
+              {features.map(item => (
+                <li key={item} className="flex items-start gap-2.5 text-sm text-gray-700">
+                  <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke={primaryColor} strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                   {item}
                 </li>
               ))}
             </ul>
-
-            <button
-              onClick={handleCheckout}
-              disabled={checkingOut}
-              className="w-full py-4 rounded-xl text-white text-sm font-semibold transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-md"
-              style={{ background: primaryColor }}
-            >
-              {checkingOut ? 'Redirecionando...' : 'Assinar e Começar →'}
-            </button>
-            <p className="text-center text-xs text-gray-400 mt-3">
-              Pagamento seguro via Mercado Pago. Cancele quando quiser.
-            </p>
           </div>
+
+          <button
+            onClick={handleCheckout}
+            disabled={checkingOut}
+            className="w-full py-4 rounded-xl text-white text-sm font-semibold transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-md mb-3"
+            style={{ background: primaryColor }}
+          >
+            {checkingOut ? 'Redirecionando...' : `Assinar Plano ${plans.find(p => p.id === selectedPlan)?.label} →`}
+          </button>
+          <p className="text-center text-xs text-gray-400 mb-4">
+            Pagamento seguro via Mercado Pago. Cancele quando quiser.
+          </p>
 
           <p className="text-center text-xs text-gray-400">
             Já recebeu suas credenciais por email? <a href="/login" className="underline">Fazer login</a>
