@@ -174,7 +174,8 @@ export class OnboardingService {
     // slug can be: coachProfile.slug, or coach userId directly
     const coach = await this.prisma.user.findFirst({
       where: {
-        role: 'COACH',
+        role: { in: ['COACH', 'ADMIN', 'SUPER_ADMIN'] as any },
+        coachProfile: { isNot: null },
         OR: [
           { coachProfile: { slug } },
           { id: slug },
@@ -233,7 +234,8 @@ export class OnboardingService {
   }) {
     const coach = await this.prisma.user.findFirst({
       where: {
-        role: 'COACH',
+        role: { in: ['COACH', 'ADMIN', 'SUPER_ADMIN'] as any },
+        coachProfile: { isNot: null },
         OR: [{ coachProfile: { slug } }, { id: slug }],
       },
       select: { id: true },

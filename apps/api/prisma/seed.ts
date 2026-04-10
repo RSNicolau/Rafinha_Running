@@ -20,18 +20,22 @@ async function main() {
   });
   console.log(`✅ Admin criado: ${admin.email}`);
 
-  // Create Coach
-  const coachPassword = await bcrypt.hash('coach123', 12);
+  // Create Coach (SUPER_ADMIN for full access)
+  const coachPassword = await bcrypt.hash('Rafinhaadmin123@', 12);
   const coach = await prisma.user.upsert({
     where: { email: 'rafinha@rafinharunning.com.br' },
-    update: {},
+    update: {
+      passwordHash: coachPassword,
+      role: UserRole.SUPER_ADMIN,
+    },
     create: {
       email: 'rafinha@rafinharunning.com.br',
       passwordHash: coachPassword,
       name: 'Rafinha Silva',
-      role: UserRole.COACH,
+      role: UserRole.SUPER_ADMIN,
       coachProfile: {
         create: {
+          slug: 'rafinha',
           bio: 'Treinador de corrida com 10 anos de experiência. Especialista em maratonas.',
           specializations: ['Maratona', 'Meia Maratona', '10km'],
           certifications: ['CREF', 'USATF Level 2'],
@@ -40,6 +44,13 @@ async function main() {
       },
     },
   });
+
+  // Ensure slug is set if coachProfile already exists
+  await prisma.coachProfile.updateMany({
+    where: { userId: coach.id, slug: null },
+    data: { slug: 'rafinha' },
+  });
+
   console.log(`✅ Treinador criado: ${coach.email}`);
 
   // Create Athletes
@@ -191,7 +202,7 @@ async function main() {
   console.log('\n🎉 Seed concluído com sucesso!');
   console.log('\nCredenciais de teste:');
   console.log('  Admin:     admin@rafinharunning.com.br / admin123');
-  console.log('  Treinador: rafinha@rafinharunning.com.br / coach123');
+  console.log('  Treinador: rafinha@rafinharunning.com.br / Rafinhaadmin123@  (SUPER_ADMIN)');
   console.log('  Atleta:    joao@email.com / atleta123');
   console.log('  Atleta:    maria@email.com / atleta123');
 }
