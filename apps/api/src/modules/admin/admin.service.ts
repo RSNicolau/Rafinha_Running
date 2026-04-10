@@ -140,7 +140,27 @@ export class AdminService {
         { id: 'ELITE', name: 'Elite', price: 19900, description: 'Para grandes assessorias', features: ['Atletas ilimitados', 'Múltiplos coaches', 'Suporte VIP'] },
       ],
       athlete: [
-        { id: 'MONTHLY', name: 'Plano Atleta', price: 2900, description: 'Acesso completo à plataforma', features: ['Planilha do coach', 'Sync Garmin & Strava', 'Live Tracking', 'Ranking'] },
+        {
+          id: 'MONTHLY',
+          name: 'Mensal',
+          price: 17400,
+          description: 'Pagamento mensal recorrente',
+          features: ['Planilhas personalizadas', 'Treino na Concha Acústica (terças)', 'Treinos alternados aos sábados', 'Assessoria em provas', 'Acesso ao App da equipe'],
+        },
+        {
+          id: 'QUARTERLY',
+          name: 'Trimestral',
+          price: 49500,
+          description: 'Parcela única — 3 meses',
+          features: ['Planilhas personalizadas', 'Treino na Concha Acústica (terças)', 'Treinos alternados aos sábados', 'Assessoria em provas', 'Acesso ao App da equipe'],
+        },
+        {
+          id: 'SEMIANNUAL',
+          name: 'Semestral',
+          price: 96000,
+          description: 'Parcela única — 6 meses',
+          features: ['Planilhas personalizadas', 'Treino na Concha Acústica (terças)', 'Treinos alternados aos sábados', 'Assessoria em provas', 'Acesso ao App da equipe'],
+        },
       ],
     };
   }

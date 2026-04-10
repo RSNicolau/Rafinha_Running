@@ -5,13 +5,44 @@ import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/lib/api';
 
-const FALLBACK_PLAN = {
-  type: 'MONTHLY',
-  name: 'Plano Atleta',
-  price: 'R$ 29',
-  amount: 2900,
-  features: ['Planilha de treinos do seu coach', 'Histórico completo de corridas', 'Sync Garmin & Strava & Apple Health', 'Live tracking durante corridas', 'Ranking & evolução pessoal', 'Chat com seu coach'],
-};
+interface Plan {
+  type: string;
+  name: string;
+  price: string;
+  period: string;
+  amount: number;
+  features: string[];
+  badge?: string;
+}
+
+const FALLBACK_PLANS: Plan[] = [
+  {
+    type: 'MONTHLY',
+    name: 'Mensal',
+    price: 'R$ 174',
+    period: '/mês',
+    amount: 17400,
+    features: ['Planilhas personalizadas', 'Treino na Concha Acústica (terças)', 'Treinos alternados aos sábados', 'Assessoria em provas', 'Acesso ao App da equipe'],
+  },
+  {
+    type: 'QUARTERLY',
+    name: 'Trimestral',
+    price: 'R$ 495',
+    period: 'parcela única',
+    amount: 49500,
+    badge: 'Economize 5%',
+    features: ['Planilhas personalizadas', 'Treino na Concha Acústica (terças)', 'Treinos alternados aos sábados', 'Assessoria em provas', 'Acesso ao App da equipe'],
+  },
+  {
+    type: 'SEMIANNUAL',
+    name: 'Semestral',
+    price: 'R$ 960',
+    period: 'parcela única',
+    amount: 96000,
+    badge: 'Mais popular',
+    features: ['Planilhas personalizadas', 'Treino na Concha Acústica (terças)', 'Treinos alternados aos sábados', 'Assessoria em provas', 'Acesso ao App da equipe'],
+  },
+];
 
 interface PixData {
   paymentId: string;
@@ -24,7 +55,8 @@ export default function AthleteSubscribePage() {
   const router = useRouter();
   const { user, logout, loadUser, isAuthenticated, isLoading: authLoading } = useAuthStore();
   const [loading, setLoading] = useState(true);
-  const [plan, setPlan] = useState(FALLBACK_PLAN);
+  const [plans, setPlans] = useState<Plan[]>(FALLBACK_PLANS);
+  const [selectedPlan, setSelectedPlan] = useState<Plan>(FALLBACK_PLANS[2]); // Semestral default
   const [pixLoading, setPixLoading] = useState(false);
   const [pixData, setPixData] = useState<PixData | null>(null);
   const [pixStatus, setPixStatus] = useState<'pending' | 'paid' | null>(null);
@@ -42,14 +74,17 @@ export default function AthleteSubscribePage() {
     ]).then(([plansRes, subRes]) => {
       const athletePlans = plansRes?.data?.athlete;
       if (athletePlans?.length) {
-        const p = athletePlans[0];
-        setPlan({
+        const mapped: Plan[] = athletePlans.map((p: any, i: number) => ({
           type: p.id,
           name: p.name,
-          price: `R$ ${(p.price / 100).toFixed(0)}`,
+          price: `R$ ${Math.round(p.price / 100).toLocaleString('pt-BR')}`,
+          period: p.id === 'MONTHLY' ? '/mês' : 'parcela única',
           amount: p.price,
+          badge: i === athletePlans.length - 1 ? 'Mais popular' : i === 1 ? 'Economize 5%' : undefined,
           features: p.features,
-        });
+        }));
+        setPlans(mapped);
+        setSelectedPlan(mapped[mapped.length - 1]);
       }
       if (subRes?.data?.status === 'ACTIVE' || subRes?.data?.status === 'TRIALING') {
         router.replace('/athlete');
@@ -80,9 +115,9 @@ export default function AthleteSubscribePage() {
     if (pollRef.current) clearInterval(pollRef.current);
     try {
       const { data } = await api.post('/payments/pix', {
-        amount: plan.amount,
-        description: `${plan.name} - Rafinha Running`,
-        planId: plan.type,
+        amount: selectedPlan.amount,
+        description: `${selectedPlan.name} - Rafinha Running`,
+        planId: selectedPlan.type,
       });
       setPixData(data);
       setPixStatus('pending');
@@ -112,7 +147,7 @@ export default function AthleteSubscribePage() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-5 py-10" style={{ background: 'linear-gradient(to bottom, #FEE2E2 0%, #F2F2F7 55%)' }}>
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-lg">
         {/* Logo + header */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2.5 mb-5">
@@ -125,53 +160,86 @@ export default function AthleteSubscribePage() {
           </div>
           <h1 className="text-2xl font-black text-gray-900 mb-1 tracking-tight">Ative sua conta</h1>
           <p className="text-sm text-gray-500">
-            Olá, <strong className="text-gray-700">{user?.name}</strong>. Assine para acessar seus treinos.
+            Olá, <strong className="text-gray-700">{user?.name}</strong>. Escolha seu plano para acessar os treinos.
           </p>
         </div>
 
-        {/* Plan card */}
         {!pixData ? (
-          <div className="glass-card p-7">
-            {/* Plan header */}
-            <div className="flex items-start justify-between mb-5 pb-5 border-b border-gray-100">
-              <div>
-                <p className="text-xs text-[#DC2626] font-semibold uppercase tracking-wider mb-1">Plano completo</p>
-                <h2 className="font-bold text-gray-900 text-xl">{plan.name}</h2>
-              </div>
-              <div className="text-right">
-                <span className="text-3xl font-black text-gray-900">{plan.price}</span>
-                <span className="text-sm text-gray-400 ml-1">/mês</span>
-              </div>
+          <div className="space-y-4">
+            {/* Plan selector */}
+            <div className="grid grid-cols-3 gap-3">
+              {plans.map((p) => {
+                const isSelected = selectedPlan.type === p.type;
+                return (
+                  <button
+                    key={p.type}
+                    onClick={() => setSelectedPlan(p)}
+                    className={`relative rounded-2xl border-2 p-4 text-left transition cursor-pointer ${
+                      isSelected
+                        ? 'border-[#DC2626] bg-white shadow-[0_4px_20px_rgba(220,38,38,0.15)]'
+                        : 'border-gray-200 bg-white/70 hover:border-gray-300'
+                    }`}
+                  >
+                    {p.badge && (
+                      <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-[#DC2626] text-white text-[10px] font-bold whitespace-nowrap">
+                        {p.badge}
+                      </span>
+                    )}
+                    <p className={`text-xs font-semibold mb-1 ${isSelected ? 'text-[#DC2626]' : 'text-gray-400'}`}>{p.name}</p>
+                    <p className={`text-xl font-black leading-tight ${isSelected ? 'text-gray-900' : 'text-gray-700'}`}>{p.price}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">{p.period}</p>
+                    {isSelected && (
+                      <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-[#DC2626] flex items-center justify-center">
+                        <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
-            {/* Features */}
-            <ul className="space-y-2.5 mb-7">
-              {plan.features.map((f) => (
-                <li key={f} className="flex items-center gap-3 text-sm text-gray-600">
-                  <span className="w-5 h-5 rounded-full bg-[#DC2626]/10 flex items-center justify-center flex-shrink-0">
-                    <svg className="w-2.5 h-2.5 text-[#DC2626]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                    </svg>
-                  </span>
-                  {f}
-                </li>
-              ))}
-            </ul>
+            {/* Selected plan details */}
+            <div className="glass-card p-6">
+              <div className="flex items-start justify-between mb-5 pb-4 border-b border-gray-100">
+                <div>
+                  <p className="text-xs text-[#DC2626] font-semibold uppercase tracking-wider mb-1">Plano selecionado</p>
+                  <h2 className="font-bold text-gray-900 text-xl">{selectedPlan.name}</h2>
+                </div>
+                <div className="text-right">
+                  <span className="text-3xl font-black text-gray-900">{selectedPlan.price}</span>
+                  <span className="text-sm text-gray-400 ml-1">{selectedPlan.period}</span>
+                </div>
+              </div>
 
-            {/* CTA */}
-            <button
-              onClick={handlePix}
-              disabled={pixLoading}
-              className="w-full py-3.5 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-sm transition disabled:opacity-50 cursor-pointer shadow-[0_4px_16px_rgba(220,38,38,0.3)]"
-            >
-              {pixLoading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                  Gerando PIX...
-                </span>
-              ) : 'Pagar com PIX →'}
-            </button>
-            <p className="text-xs text-gray-400 text-center mt-3">Pagamento instantâneo · Confirmação automática</p>
+              <ul className="space-y-2.5 mb-6">
+                {selectedPlan.features.map((f) => (
+                  <li key={f} className="flex items-center gap-3 text-sm text-gray-600">
+                    <span className="w-5 h-5 rounded-full bg-[#DC2626]/10 flex items-center justify-center flex-shrink-0">
+                      <svg className="w-2.5 h-2.5 text-[#DC2626]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    </span>
+                    {f}
+                  </li>
+                ))}
+              </ul>
+
+              <button
+                onClick={handlePix}
+                disabled={pixLoading}
+                className="w-full py-3.5 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-sm transition disabled:opacity-50 cursor-pointer shadow-[0_4px_16px_rgba(220,38,38,0.3)]"
+              >
+                {pixLoading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    Gerando PIX...
+                  </span>
+                ) : `Pagar ${selectedPlan.price} com PIX →`}
+              </button>
+              <p className="text-xs text-gray-400 text-center mt-3">Pagamento instantâneo · Confirmação automática</p>
+            </div>
           </div>
         ) : pixStatus === 'pending' ? (
           <div className="glass-card p-7 text-center">
@@ -181,7 +249,8 @@ export default function AthleteSubscribePage() {
               </svg>
             </div>
             <h3 className="font-bold text-gray-900 mb-1">QR Code PIX gerado</h3>
-            <p className="text-xs text-gray-500 mb-5">Escaneie com seu banco ou copie o código abaixo</p>
+            <p className="text-xs text-gray-500 mb-1">Escaneie com seu banco ou copie o código abaixo</p>
+            <p className="text-xs text-gray-400 font-medium mb-5">{selectedPlan.name} · {selectedPlan.price}</p>
             {pixData.pixQrCodeUrl && (
               <div className="inline-block p-3 rounded-2xl bg-white shadow-sm border border-gray-100 mb-5">
                 <img src={pixData.pixQrCodeUrl} alt="QR Code PIX" className="w-36 sm:w-44 h-36 sm:h-44 block" />
@@ -200,7 +269,13 @@ export default function AthleteSubscribePage() {
                 </span>
               ) : 'Copiar código PIX'}
             </button>
-            <div className="flex items-center gap-2 justify-center text-xs text-gray-400">
+            <button
+              onClick={() => { setPixData(null); setPixStatus(null); }}
+              className="text-xs text-gray-400 hover:text-gray-600 transition underline cursor-pointer"
+            >
+              Trocar plano
+            </button>
+            <div className="flex items-center gap-2 justify-center text-xs text-gray-400 mt-4">
               <div className="w-3 h-3 border border-gray-300 border-t-gray-500 rounded-full animate-spin" />
               Aguardando pagamento...
             </div>
