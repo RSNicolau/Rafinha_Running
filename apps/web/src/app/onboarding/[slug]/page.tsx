@@ -51,7 +51,7 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
   }, [searchParams]);
 
   useEffect(() => {
-    api.get(`/onboarding/public/${slug}`)
+    api.get(`/v1/onboarding/public/${slug}`)
       .then(r => setFormData(r.data))
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
@@ -111,7 +111,7 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
     setSubmitError('');
     setSubmitting(true);
     try {
-      const res = await api.post(`/onboarding/public/${slug}/submit`, {
+      const res = await api.post(`/v1/onboarding/public/${slug}/submit`, {
         coachId: formData!.coachId,
         athleteName: athlete.name,
         athleteEmail: athlete.email,
@@ -131,7 +131,7 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
     if (!athleteId) return;
     setCheckingOut(true);
     try {
-      const res = await api.post(`/onboarding/public/${slug}/checkout`, { athleteId });
+      const res = await api.post(`/v1/onboarding/public/${slug}/checkout`, { athleteId });
       const checkoutUrl = res.data?.init_point || res.data?.checkoutUrl || res.data?.url;
       if (checkoutUrl) {
         window.location.href = checkoutUrl;
