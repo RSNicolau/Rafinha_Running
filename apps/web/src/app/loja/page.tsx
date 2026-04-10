@@ -203,9 +203,9 @@ export default function LojaPage() {
                   </div>
 
                   {p.sizes.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-2">
+                    <div className="flex flex-wrap gap-1.5 mt-2 mb-1">
                       {p.sizes.map(s => (
-                        <span key={s} className="text-[10px] px-2 py-0.5 rounded border font-medium"
+                        <span key={s} className="text-[10px] px-2 py-1 rounded border font-medium shrink-0"
                           style={{ borderColor: LIGHT, color: DARK }}>{s}</span>
                       ))}
                     </div>
@@ -214,7 +214,7 @@ export default function LojaPage() {
                   <button
                     onClick={() => openModal(p)}
                     disabled={qty === 0}
-                    className="mt-auto pt-4 w-full py-2.5 rounded-xl text-sm font-black uppercase tracking-widest transition"
+                    className="mt-auto pt-3 w-full py-2.5 rounded-xl text-sm font-black uppercase tracking-widest transition"
                     style={{
                       background: qty > 0 ? `linear-gradient(135deg, ${RED}, #8B0000)` : LIGHT,
                       color: qty > 0 ? WHITE : GRAY,
