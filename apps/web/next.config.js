@@ -12,10 +12,10 @@ const nextConfig = {
         source: '/api/v1/:path*',
         destination: `${API_URL}/api/v1/:path*`,
       },
-      // Fallback: proxy /api/:path* without v1 prefix (for backward compat)
+      // Fallback: proxy /api/:path* sem prefixo v1 → adiciona /v1/ automaticamente
       {
         source: '/api/:path*',
-        destination: `${API_URL}/api/:path*`,
+        destination: `${API_URL}/api/v1/:path*`,
       },
     ];
   },
