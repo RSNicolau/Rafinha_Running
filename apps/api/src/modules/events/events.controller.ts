@@ -102,9 +102,9 @@ export class EventsController {
   async register(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    @Body() body: { shirtSize?: string; emergencyContact?: string; medicalInfo?: string },
+    @Body() body: { shirtSize?: string; kitType?: 'COMPLETO' | 'PREMIUM'; emergencyContact?: string; medicalInfo?: string },
   ) {
-    return this.eventsService.register(id, userId, body);
+    return this.eventsService.register(id, userId, { ...body, kitType: body.kitType as any });
   }
 
   @Delete(':id/register')

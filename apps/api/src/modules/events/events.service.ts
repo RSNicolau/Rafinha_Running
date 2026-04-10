@@ -8,7 +8,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
-import { EventStatus, EventRegistrationStatus, Prisma } from '@prisma/client';
+import { EventStatus, EventRegistrationStatus, KitType, Prisma } from '@prisma/client';
 
 @Injectable()
 export class EventsService {
@@ -152,7 +152,7 @@ export class EventsService {
     return this.prisma.event.update({ where: { id: eventId }, data });
   }
 
-  async register(eventId: string, userId: string, extra?: { shirtSize?: string; emergencyContact?: string; medicalInfo?: string }) {
+  async register(eventId: string, userId: string, extra?: { shirtSize?: string; kitType?: KitType; emergencyContact?: string; medicalInfo?: string }) {
     return this.prisma.$transaction(async (tx) => {
       const event = await tx.event.findUnique({
         where: { id: eventId },
@@ -188,6 +188,13 @@ export class EventsService {
         status = EventRegistrationStatus.WAITLIST;
       }
 
+      // Auto-generate bib number
+      const bibCount = await tx.eventRegistration.count({ where: { eventId, status: { not: EventRegistrationStatus.CANCELED } } });
+      const bibNumber = String(bibCount + 1).padStart(4, '0');
+
+      // Schedule kit pickup = event's kitPickupDate (or null)
+      const kitPickupScheduledAt = event.kitPickupDate ?? null;
+
       let registration;
       if (existing && existing.status === EventRegistrationStatus.CANCELED) {
         registration = await tx.eventRegistration.update({
@@ -197,6 +204,9 @@ export class EventsService {
             registeredAt: new Date(),
             confirmedAt: status === EventRegistrationStatus.CONFIRMED ? new Date() : null,
             shirtSize: extra?.shirtSize,
+            kitType: extra?.kitType,
+            kitPickupScheduledAt,
+            bibNumber,
             emergencyContact: extra?.emergencyContact,
             medicalInfo: extra?.medicalInfo,
           },
@@ -209,6 +219,9 @@ export class EventsService {
             status,
             confirmedAt: status === EventRegistrationStatus.CONFIRMED ? new Date() : undefined,
             shirtSize: extra?.shirtSize,
+            kitType: extra?.kitType,
+            kitPickupScheduledAt,
+            bibNumber,
             emergencyContact: extra?.emergencyContact,
             medicalInfo: extra?.medicalInfo,
           },

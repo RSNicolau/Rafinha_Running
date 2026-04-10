@@ -134,6 +134,11 @@ enum EventRegistrationStatus {
   WAITLIST
 }
 
+enum KitType {
+  COMPLETO
+  PREMIUM
+}
+
 enum AIAssistantTone {
   FRIENDLY
   PROFESSIONAL
@@ -499,8 +504,12 @@ model Event {
   status         EventStatus @default(DRAFT)
   tags           String[]    @default([])
   rules          String?
-  kitDescription String?     @map("kit_description")
-  routeMapUrl    String?     @map("route_map_url")
+  kitDescription     String?   @map("kit_description")
+  kitCompletePrice   Int?      @map("kit_complete_price")   // cents — Kit Completo
+  kitPremiumPrice    Int?      @map("kit_premium_price")    // cents — Kit Premium
+  kitPickupLocation  String?   @map("kit_pickup_location")  // endereço de retirada
+  kitPickupDate      DateTime? @map("kit_pickup_date")      // data/hora de retirada
+  routeMapUrl        String?   @map("route_map_url")
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
 
@@ -521,13 +530,16 @@ model EventRegistration {
   status           EventRegistrationStatus @default(PENDING)
   paymentStatus    PaymentStatus           @default(PENDING)
   externalPaymentId String?                @map("external_payment_id")
-  bibNumber        String?                 @map("bib_number")
-  shirtSize        String?                 @map("shirt_size")
-  emergencyContact String?                 @map("emergency_contact")
-  medicalInfo      String?                 @map("medical_info")
-  registeredAt     DateTime                @default(now()) @map("registered_at")
-  confirmedAt      DateTime?               @map("confirmed_at")
-  updatedAt        DateTime                @updatedAt @map("updated_at")
+  bibNumber              String?   @map("bib_number")
+  shirtSize              String?   @map("shirt_size")
+  kitType                KitType?  @map("kit_type")                          // COMPLETO | PREMIUM
+  kitPickupScheduledAt   DateTime? @map("kit_pickup_scheduled_at")           // agendamento retirada
+  kitPickupConfirmed     Boolean   @default(false) @map("kit_pickup_confirmed")
+  emergencyContact       String?   @map("emergency_contact")
+  medicalInfo            String?   @map("medical_info")
+  registeredAt           DateTime  @default(now()) @map("registered_at")
+  confirmedAt            DateTime? @map("confirmed_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
 
   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
   user  User  @relation("EventRegistrations", fields: [userId], references: [id])
