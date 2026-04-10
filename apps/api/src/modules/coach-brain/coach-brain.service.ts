@@ -360,12 +360,12 @@ Quando gerar planilhas de treino, use formato estruturado (dia, tipo, distância
     if (!coach) throw new NotFoundException('Coach não encontrado');
 
     return {
-      provider: (coach.aiProvider ?? 'anthropic') as AIProvider,
+      provider: (coach.aiProvider ?? 'openai') as AIProvider,
       model: coach.aiModel ?? null,
       byok: coach.aiByok,
       hasApiKey: !!coach.aiApiKey,
-      providerLabel: PROVIDER_DEFAULTS[(coach.aiProvider ?? 'anthropic') as AIProvider]?.label,
-      defaultModel: PROVIDER_DEFAULTS[(coach.aiProvider ?? 'anthropic') as AIProvider]?.model,
+      providerLabel: PROVIDER_DEFAULTS[(coach.aiProvider ?? 'openai') as AIProvider]?.label,
+      defaultModel: PROVIDER_DEFAULTS[(coach.aiProvider ?? 'openai') as AIProvider]?.model,
       availableProviders: Object.entries(PROVIDER_DEFAULTS).map(([key, val]) => ({
         id: key,
         label: val.label,
@@ -402,7 +402,7 @@ Quando gerar planilhas de treino, use formato estruturado (dia, tipo, distância
     });
     if (!coach) throw new NotFoundException('Coach não encontrado');
 
-    const provider = (coach.aiProvider ?? 'anthropic') as AIProvider;
+    const provider = (coach.aiProvider ?? 'openai') as AIProvider;
     const model = coach.aiModel ?? PROVIDER_DEFAULTS[provider].model;
     const apiKey = this.resolveApiKey(provider, coach);
 
