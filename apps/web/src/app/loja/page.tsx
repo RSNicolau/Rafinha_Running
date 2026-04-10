@@ -161,13 +161,17 @@ export default function LojaPage() {
             return (
               <div
                 key={p.id}
-                className="rounded-2xl border overflow-hidden shadow-sm"
+                className="rounded-2xl border overflow-hidden shadow-sm flex flex-col"
                 style={{ background: WHITE, borderColor: LIGHT }}
               >
                 {/* Imagem */}
-                <div className="w-full h-48 flex items-center justify-center" style={{ background: '#F4F4F5' }}>
+                <div className="w-full h-48 flex items-center justify-center shrink-0" style={{ background: '#F4F4F5' }}>
                   {p.images[0] ? (
-                    <img src={p.images[0]} alt={p.name} className="w-full h-full object-cover" />
+                    <img
+                      src={p.images[0].startsWith('/') ? p.images[0] : p.images[0]}
+                      alt={p.name}
+                      className="w-full h-full object-cover"
+                    />
                   ) : (
                     <div className="text-center" style={{ color: GRAY }}>
                       <div className="text-4xl mb-1">👕</div>
@@ -176,7 +180,7 @@ export default function LojaPage() {
                   )}
                 </div>
 
-                <div className="p-4">
+                <div className="p-4 flex flex-col flex-1">
                   {p.featured && (
                     <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full mb-2 inline-block"
                       style={{ background: RED, color: WHITE }}>
@@ -210,7 +214,7 @@ export default function LojaPage() {
                   <button
                     onClick={() => openModal(p)}
                     disabled={qty === 0}
-                    className="mt-4 w-full py-2.5 rounded-xl text-sm font-black uppercase tracking-widest transition"
+                    className="mt-auto pt-4 w-full py-2.5 rounded-xl text-sm font-black uppercase tracking-widest transition"
                     style={{
                       background: qty > 0 ? `linear-gradient(135deg, ${RED}, #8B0000)` : LIGHT,
                       color: qty > 0 ? WHITE : GRAY,
