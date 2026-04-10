@@ -826,6 +826,180 @@ model CoachBrainSession {
   @@map("coach_brain_sessions")
 }
 
+// ============================================
+// LOJA VIRTUAL
+// ============================================
+
+enum ProductCategory {
+  CAMISA
+  VISEIRA
+  BONE
+  CASACO
+  CORTA_VENTO
+  MEIA
+  CALCA
+  SHORTS
+  ACESSORIO
+  OUTRO
+}
+
+enum StoreOrderStatus {
+  PENDING_PAYMENT
+  PAID
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+model Product {
+  id            String          @id @default(uuid())
+  coachId       String          @map("coach_id")
+  name          String
+  description   String?
+  category      ProductCategory @default(OUTRO)
+  priceInCents  Int             @default(0) @map("price_in_cents")
+  images        String[]        @default([])
+  sizes         String[]        @default([])
+  colors        String[]        @default([])
+  totalStock    Int             @default(0) @map("total_stock")
+  reserved      Int             @default(0)
+  active        Boolean         @default(true)
+  featured      Boolean         @default(false)
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  orders StoreOrder[]
+
+  @@index([coachId, active])
+  @@index([category])
+  @@map("products")
+}
+
+model StoreOrder {
+  id              String           @id @default(uuid())
+  productId       String           @map("product_id")
+  athleteId       String?          @map("athlete_id")
+  customerName    String           @map("customer_name")
+  customerEmail   String           @map("customer_email")
+  customerPhone   String?          @map("customer_phone")
+  size            String?
+  color           String?
+  quantity        Int              @default(1)
+  totalInCents    Int              @map("total_in_cents")
+  status          StoreOrderStatus @default(PENDING_PAYMENT)
+  paymentId       String?          @map("payment_id")
+  paymentUrl      String?          @map("payment_url")
+  shippingAddress String?          @map("shipping_address")
+  notes           String?
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@index([status])
+  @@index([customerEmail])
+  @@map("store_orders")
+}
+
+// ============================================
+// AGENDAMENTOS 1:1
+// ============================================
+
+enum AppointmentType {
+  ONLINE_CONSULT
+  PRESENTIAL_TRAINING
+  ASSESSMENT
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+model Appointment {
+  id              String            @id @default(uuid())
+  coachId         String            @map("coach_id")
+  athleteId       String?           @map("athlete_id")
+  customerName    String            @map("customer_name")
+  customerEmail   String            @map("customer_email")
+  customerPhone   String?           @map("customer_phone")
+  type            AppointmentType   @default(ONLINE_CONSULT)
+  status          AppointmentStatus @default(PENDING)
+  scheduledAt     DateTime          @map("scheduled_at")
+  durationMinutes Int               @default(60) @map("duration_minutes")
+  priceInCents    Int               @default(30000) @map("price_in_cents")
+  calendlyEventId String?           @map("calendly_event_id")
+  calendlyUri     String?           @map("calendly_uri")
+  notes           String?
+  cancelledAt     DateTime?         @map("cancelled_at")
+  cancelReason    String?           @map("cancel_reason")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  @@index([coachId, scheduledAt])
+  @@index([status])
+  @@map("appointments")
+}
+
+// ============================================
+// WHATSAPP AI
+// ============================================
+
+enum WhatsappMsgType {
+  TEXT
+  AUDIO
+  IMAGE
+  VIDEO
+  DOCUMENT
+  STICKER
+}
+
+enum WhatsappMsgRole {
+  USER
+  ASSISTANT
+}
+
+model WhatsappConversation {
+  id        String   @id @default(uuid())
+  coachId   String   @map("coach_id")
+  phone     String
+  name      String?
+  isActive  Boolean  @default(true) @map("is_active")
+  context   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  messages WhatsappMessage[]
+
+  @@unique([coachId, phone])
+  @@index([coachId])
+  @@map("whatsapp_conversations")
+}
+
+model WhatsappMessage {
+  id             String          @id @default(uuid())
+  conversationId String          @map("conversation_id")
+  role           WhatsappMsgRole
+  type           WhatsappMsgType @default(TEXT)
+  content        String?
+  mediaUrl       String?         @map("media_url")
+  externalId     String?         @map("external_id")
+  processed      Boolean         @default(false)
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  conversation WhatsappConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("whatsapp_messages")
+}
+
 model AIJob {
   id         String    @id @default(uuid())
   type       String

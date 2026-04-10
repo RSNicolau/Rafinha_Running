@@ -28,6 +28,7 @@ import { AiAssistantModule } from './modules/ai-assistant/ai-assistant.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { PhysicalAssessmentsModule } from './modules/physical-assessments/physical-assessments.module';
 import { CoachBrainModule } from './modules/coach-brain/coach-brain.module';
+import { StoreModule } from './modules/store/store.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { CoachBrainModule } from './modules/coach-brain/coach-brain.module';
     OnboardingModule,
     PhysicalAssessmentsModule,
     CoachBrainModule,
+    StoreModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: CustomThrottlerGuard },
