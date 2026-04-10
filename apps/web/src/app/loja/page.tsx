@@ -115,15 +115,15 @@ export default function LojaPage() {
           <Image
             src="/logo.png"
             alt="RR Rafinha Running"
-            width={180}
-            height={129}
+            width={270}
+            height={194}
             style={{ display: 'block', filter: 'saturate(0) brightness(0.6) contrast(100)', mixBlendMode: 'screen' }}
           />
         </div>
-        <p className="text-xs font-black uppercase tracking-[0.3em] text-red-100 mt-4 mb-1">
+        <p className="text-xs font-black uppercase tracking-[0.3em] text-red-100 mt-2 mb-1">
           Loja Oficial
         </p>
-        <p className="text-sm text-red-100 mt-1">
+        <p className="text-sm text-red-100 mt-0.5">
           Edição limitada · Exclusivo para atletas
         </p>
       </div>
