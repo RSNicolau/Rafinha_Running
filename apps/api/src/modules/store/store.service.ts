@@ -8,7 +8,22 @@ export class StoreService {
 
   // ── PRODUTOS ──
 
-  async listPublicProducts(coachId: string) {
+  // Resolve slug or UUID to coachId
+  private async resolveCoachId(slugOrId: string): Promise<string> {
+    // Try as UUID first
+    const byId = await this.prisma.user.findUnique({ where: { id: slugOrId }, select: { id: true } });
+    if (byId) return byId.id;
+    // Try as slug via coachProfile
+    const bySlug = await this.prisma.coachProfile.findFirst({
+      where: { slug: slugOrId },
+      select: { userId: true },
+    });
+    if (bySlug) return bySlug.userId;
+    throw new NotFoundException('Coach não encontrado');
+  }
+
+  async listPublicProducts(slugOrId: string) {
+    const coachId = await this.resolveCoachId(slugOrId);
     return this.prisma.product.findMany({
       where: { coachId, active: true },
       orderBy: [{ featured: 'desc' }, { createdAt: 'desc' }],
