@@ -5,6 +5,14 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// Garantir prefixo /v1/ em todas as chamadas (fallback para compatibilidade)
+api.interceptors.request.use((config) => {
+  if (config.url && !config.url.startsWith('/v1/') && !config.url.startsWith('http')) {
+    config.url = '/v1' + (config.url.startsWith('/') ? config.url : '/' + config.url);
+  }
+  return config;
+});
+
 // Attach token to every request
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
