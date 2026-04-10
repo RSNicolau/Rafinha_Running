@@ -201,6 +201,7 @@ Seja conciso e direto. Quando relevante, sugira ações práticas.`;
       if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls?.length) {
         messages.push(choice.message);
         for (const tc of choice.message.tool_calls) {
+          if (tc.type !== 'function') continue;
           res.write(`data: ${JSON.stringify({ type: 'tool_call', tool: tc.function.name })}\n\n`);
           const args = JSON.parse(tc.function.arguments || '{}');
           const result = await this.executeTool(tc.function.name, args, coachId);
