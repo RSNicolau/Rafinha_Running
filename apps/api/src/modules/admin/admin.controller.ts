@@ -68,6 +68,12 @@ export class AdminController {
     return this.adminService.updatePlansConfig(plans);
   }
 
+  @Patch('users/:id/coach-slug')
+  @ApiOperation({ summary: 'Definir slug do perfil de coach (SUPER_ADMIN)' })
+  async setCoachSlug(@Param('id') id: string, @Body('slug') slug: string) {
+    return this.adminService.setCoachSlug(id, slug);
+  }
+
   @Post('users/:id/activate-subscription')
   @ApiOperation({ summary: 'Ativar assinatura manual para teste (sem pagamento)' })
   async activateSubscription(@Param('id') userId: string) {

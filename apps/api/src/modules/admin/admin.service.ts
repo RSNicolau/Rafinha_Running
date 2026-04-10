@@ -189,6 +189,19 @@ export class AdminService {
     return { success: true, email: user.email, role: user.role };
   }
 
+  async setCoachSlug(userId: string, slug: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+
+    const existing = await this.prisma.coachProfile.findUnique({ where: { userId } });
+    if (existing) {
+      await this.prisma.coachProfile.update({ where: { userId }, data: { slug } });
+    } else {
+      await this.prisma.coachProfile.create({ data: { userId, slug, maxAthletes: 999 } });
+    }
+    return { success: true, userId, slug };
+  }
+
   async activateManualSubscription(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('Usuário não encontrado');
