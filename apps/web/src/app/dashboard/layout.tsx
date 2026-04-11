@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/stores/auth.store';
 import { DemoModeProvider, useDemo } from '@/contexts/demo-mode';
+import { api } from '@/lib/api';
 
 const navItems = [
   { href: '/dashboard', label: 'Visão Geral', icon: 'grid', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
@@ -129,10 +130,26 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user, isAuthenticated, isLoading, loadUser, logout } = useAuthStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingOnboarding, setPendingOnboarding] = useState(0);
 
   useEffect(() => {
     loadUser();
   }, []);
+
+  const fetchPendingCount = useCallback(async () => {
+    try {
+      const res = await api.get('/onboarding/pending');
+      setPendingOnboarding(res.data?.length ?? 0);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (isAuthenticated && (user?.role === 'COACH' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN')) {
+      fetchPendingCount();
+      const interval = setInterval(fetchPendingCount, 60_000); // refresh every minute
+      return () => clearInterval(interval);
+    }
+  }, [isAuthenticated, user?.role, fetchPendingCount]);
 
   // Inject brand CSS variables for theming
   useEffect(() => {
@@ -203,7 +220,12 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
               }`}
             >
               <NavIcon name={item.icon} className="w-5 h-5 shrink-0" />
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {item.href === '/dashboard/onboarding' && pendingOnboarding > 0 && (
+                <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                  {pendingOnboarding > 99 ? '99+' : pendingOnboarding}
+                </span>
+              )}
             </Link>
           );
         })}

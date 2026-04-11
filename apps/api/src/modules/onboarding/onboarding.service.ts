@@ -1,7 +1,7 @@
 import {
   Injectable, NotFoundException, Logger,
 } from '@nestjs/common';
-import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -40,7 +40,7 @@ const DEFAULT_QUESTIONS = [
 @Injectable()
 export class OnboardingService {
   private readonly logger = new Logger(OnboardingService.name);
-  private readonly openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  private readonly anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   constructor(
     private prisma: PrismaService,
@@ -344,10 +344,9 @@ export class OnboardingService {
     }).join('\n\n') ?? JSON.stringify(answers, null, 2);
 
     try {
-      const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
+      const response = await this.anthropic.messages.create({
+        model: 'claude-opus-4-6',
         max_tokens: 2000,
-        response_format: { type: 'json_object' },
         messages: [{
           role: 'user',
           content: `Você é um especialista em treinamento de corrida. Analise o questionário de anamnese abaixo e gere:
@@ -361,11 +360,11 @@ Atleta: ${profile.athlete.name}
 Respostas do questionário:
 ${qaPairs}
 
-Responda em JSON com a estrutura: { "summary": "...", "level": "...", "alerts": ["..."], "suggestion": "..." }`,
+Responda APENAS em JSON válido com a estrutura: { "summary": "...", "level": "...", "alerts": ["..."], "suggestion": "..." }`,
         }],
       });
 
-      const content = response.choices[0]?.message?.content;
+      const content = response.content[0]?.type === 'text' ? response.content[0].text : null;
       if (!content) return;
 
       let parsed: any = {};
