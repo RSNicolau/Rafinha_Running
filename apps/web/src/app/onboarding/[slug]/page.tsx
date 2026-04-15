@@ -119,7 +119,7 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
     if (!athleteId) return;
     setCheckingOut(true);
     try {
-      const res = await api.post(`/v1/onboarding/public/${slug}/checkout`, { athleteId });
+      const res = await api.post(`/v1/onboarding/public/${slug}/checkout`, { athleteId, planType: selectedPlan });
       const url = res.data?.init_point || res.data?.checkoutUrl || res.data?.url;
       if (url) window.location.href = url; else setStep('success');
     } catch { setStep('success'); }

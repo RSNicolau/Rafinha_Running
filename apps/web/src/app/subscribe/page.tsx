@@ -36,34 +36,34 @@ function apiPlanToUi(plan: ApiPlan, idx: number): Plan {
   };
 }
 
-// Fallback plans shown when admin config endpoint is inaccessible (coaches don't have SUPER_ADMIN role)
+// Fallback platform plans shown when admin config endpoint is inaccessible
 const DEFAULT_PLANS: Plan[] = [
   {
-    type: 'basic',
-    name: 'Básico',
-    price: 'R$ 49',
-    amount: 4900,
-    desc: 'Flexibilidade total, sem fidelidade',
+    type: 'STARTER',
+    name: 'Starter',
+    price: 'R$ 197',
+    amount: 19700,
+    desc: 'Para coaches iniciando',
     popular: false,
-    features: ['Treinos personalizados ilimitados', 'Live tracking dos atletas', 'Sync Garmin + Strava', 'Chat em tempo real', 'Relatórios avançados'],
+    features: ['Até 30 atletas', 'Questionário de anamnese', 'Planos de treino', 'App para atletas', 'Loja virtual'],
   },
   {
-    type: 'pro',
+    type: 'PRO',
     name: 'Pro',
-    price: 'R$ 99',
-    amount: 9900,
-    desc: 'Para atletas dedicados',
+    price: 'R$ 397',
+    amount: 39700,
+    desc: 'Para assessorias em crescimento',
     popular: true,
-    features: ['Tudo do Básico', 'Análise de VO2max', 'Planejamento de provas', 'IA de treinos avançada', 'Suporte prioritário'],
+    features: ['Até 100 atletas', 'Tudo do Starter', 'Coach Brain IA', 'Eventos e provas', 'Relatórios avançados'],
   },
   {
-    type: 'elite',
-    name: 'Elite',
-    price: 'R$ 199',
-    amount: 19900,
-    desc: 'Performance máxima',
+    type: 'SCALE',
+    name: 'Scale',
+    price: 'R$ 697',
+    amount: 69700,
+    desc: 'Para assessorias escalando',
     popular: false,
-    features: ['Tudo do Pro', 'Coach dedicado', 'Acesso antecipado a novidades', 'Desconto em eventos parceiros', 'Suporte VIP WhatsApp'],
+    features: ['Até 300 atletas', 'Tudo do Pro', 'Multi-coach', 'Dashboard analítico', 'Acesso à API'],
   },
 ];
 

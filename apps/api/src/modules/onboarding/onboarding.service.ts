@@ -451,13 +451,24 @@ Responda APENAS em JSON válido com a estrutura: { "summary": "...", "level": ".
   // Public: create checkout for athlete
   // ──────────────────────────────────────
 
-  async createAthleteCheckout(athleteId: string) {
+  async createAthleteCheckout(athleteId: string, planType?: string) {
     const athlete = await this.prisma.user.findUnique({ where: { id: athleteId } });
     if (!athlete) throw new NotFoundException('Atleta não encontrado');
 
+    // Map frontend plan IDs to SubscriptionPlanType enum values
+    const planTypeMap: Record<string, SubscriptionPlanType> = {
+      mensal:     SubscriptionPlanType.MONTHLY,
+      trimestral: SubscriptionPlanType.QUARTERLY,
+      semestral:  SubscriptionPlanType.SEMIANNUAL,
+      MONTHLY:    SubscriptionPlanType.MONTHLY,
+      QUARTERLY:  SubscriptionPlanType.QUARTERLY,
+      SEMIANNUAL: SubscriptionPlanType.SEMIANNUAL,
+    };
+    const resolvedPlanType = planType ? (planTypeMap[planType] ?? SubscriptionPlanType.MONTHLY) : SubscriptionPlanType.MONTHLY;
+
     const result = await this.paymentsService.createSubscription(athleteId, {
       provider: PaymentProvider.MERCADO_PAGO,
-      planType: SubscriptionPlanType.MONTHLY,
+      planType: resolvedPlanType,
     });
 
     return result;

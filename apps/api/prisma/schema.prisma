@@ -80,6 +80,8 @@ enum IntegrationProvider {
 
 enum SubscriptionPlanType {
   MONTHLY
+  QUARTERLY
+  SEMIANNUAL
   ANNUAL
   TRIAL
 }

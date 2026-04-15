@@ -46,9 +46,9 @@ export class OnboardingController {
   @ApiOperation({ summary: 'Criar checkout de pagamento para atleta após onboarding' })
   async createCheckout(
     @Param('slug') slug: string,
-    @Body() body: { athleteId: string },
+    @Body() body: { athleteId: string; planType?: string },
   ) {
-    return this.onboardingService.createAthleteCheckout(body.athleteId);
+    return this.onboardingService.createAthleteCheckout(body.athleteId, body.planType);
   }
 
   // ── Coach endpoints ──

@@ -20,8 +20,24 @@ export class MercadoPagoService {
     name: string,
     planType: SubscriptionPlanType,
   ) {
-    const amount = planType === SubscriptionPlanType.ANNUAL ? 479.90 : 49.90;
-    const frequency = planType === SubscriptionPlanType.ANNUAL ? 12 : 1;
+    // Plan amounts in BRL
+    const PLAN_AMOUNTS: Record<string, number> = {
+      MONTHLY:    174.00,
+      QUARTERLY:  495.00,
+      SEMIANNUAL: 960.00,
+      ANNUAL:     960.00,
+      TRIAL:      0,
+    };
+    // Billing frequency in months
+    const PLAN_FREQUENCY: Record<string, number> = {
+      MONTHLY:    1,
+      QUARTERLY:  3,
+      SEMIANNUAL: 6,
+      ANNUAL:     12,
+      TRIAL:      1,
+    };
+    const amount    = PLAN_AMOUNTS[planType]   ?? 174.00;
+    const frequency = PLAN_FREQUENCY[planType] ?? 1;
 
     if (!this.accessToken) {
       this.logger.warn('MERCADO_PAGO_ACCESS_TOKEN não configurado');

@@ -135,9 +135,10 @@ export class AdminService {
     const config = await this.prisma.appConfig.findUnique({ where: { key: 'plans' } });
     return config?.value || {
       coach: [
-        { id: 'MONTHLY', name: 'Básico', price: 4900, description: 'Para coaches iniciando', features: ['Até 15 atletas', 'Planilhas ilimitadas', 'Sync Garmin & Strava'] },
-        { id: 'PRO', name: 'Pro', price: 9900, description: 'Para assessorias em crescimento', features: ['Até 50 atletas', 'IA para planilhas', 'Live Tracking'] },
-        { id: 'ELITE', name: 'Elite', price: 19900, description: 'Para grandes assessorias', features: ['Atletas ilimitados', 'Múltiplos coaches', 'Suporte VIP'] },
+        { id: 'STARTER', name: 'Starter', price: 19700, description: 'Para coaches iniciando', features: ['Até 30 atletas', 'Questionário de anamnese', 'Planos de treino', 'App para atletas', 'Loja virtual'] },
+        { id: 'PRO',     name: 'Pro',     price: 39700, description: 'Para assessorias em crescimento', features: ['Até 100 atletas', 'Tudo do Starter', 'Coach Brain IA', 'Eventos e provas', 'Relatórios avançados'] },
+        { id: 'SCALE',   name: 'Scale',   price: 69700, description: 'Para assessorias escalando', features: ['Até 300 atletas', 'Tudo do Pro', 'Multi-coach', 'Dashboard analítico', 'Acesso à API'] },
+        { id: 'ELITE',   name: 'Elite',   price: 99700, description: 'Para grandes assessorias', features: ['Atletas ilimitados', 'Tudo do Scale', 'SLA garantido', 'Integração Garmin/Strava', 'Onboarding dedicado'] },
       ],
       athlete: [
         {
