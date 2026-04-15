@@ -29,6 +29,7 @@ import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { PhysicalAssessmentsModule } from './modules/physical-assessments/physical-assessments.module';
 import { CoachBrainModule } from './modules/coach-brain/coach-brain.module';
 import { StoreModule } from './modules/store/store.module';
+import { PlatformModule } from './modules/platform/platform.module';
 
 @Module({
   imports: [
@@ -72,6 +73,7 @@ import { StoreModule } from './modules/store/store.module';
     PhysicalAssessmentsModule,
     CoachBrainModule,
     StoreModule,
+    PlatformModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: CustomThrottlerGuard },

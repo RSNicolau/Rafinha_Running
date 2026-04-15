@@ -213,6 +213,10 @@ model User {
   coachAssessments      PhysicalAssessment[]   @relation("CoachAssessments")
   coachBrainSessions    CoachBrainSession[]    @relation("CoachBrainSessions")
 
+  // Platform billing
+  coachSubscription     CoachSubscription?     @relation("CoachSubscription")
+  whiteLabelAccount     WhiteLabelAccount?     @relation("WhiteLabelOwner")
+
   @@map("users")
 }
 
@@ -1029,4 +1033,88 @@ model AIJob {
   @@index([status, retries])
   @@index([coachId])
   @@map("ai_jobs")
+}
+
+// ============================================
+// PLATFORM PLANS & WHITE-LABEL (3-tier SaaS)
+// ============================================
+
+enum PlatformPlanType {
+  STARTER     // R$197/mês — até 30 atletas
+  PRO         // R$397/mês — até 100 atletas
+  SCALE       // R$697/mês — até 300 atletas
+  ELITE       // R$997/mês — ilimitado
+  WHITE_LABEL // R$1.497/mês — ilimitado + pode criar coaches
+}
+
+enum CoachSubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  SUSPENDED
+}
+
+enum WhiteLabelStatus {
+  ACTIVE
+  SUSPENDED
+  CANCELED
+}
+
+model PlatformPlan {
+  id            String          @id @default(uuid())
+  type          PlatformPlanType @unique
+  name          String
+  description   String?
+  priceInCents  Int             @map("price_in_cents")
+  maxAthletes   Int?            @map("max_athletes")   // null = unlimited
+  maxCoaches    Int?            @map("max_coaches")    // only for WHITE_LABEL
+  features      Json            @default("[]")
+  isActive      Boolean         @default(true) @map("is_active")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  subscriptions CoachSubscription[]
+
+  @@map("platform_plans")
+}
+
+model CoachSubscription {
+  id                  String                  @id @default(uuid())
+  coachId             String                  @unique @map("coach_id")
+  planId              String                  @map("plan_id")
+  status              CoachSubscriptionStatus @default(TRIAL)
+  trialEndsAt         DateTime?               @map("trial_ends_at")
+  currentPeriodStart  DateTime                @default(now()) @map("current_period_start")
+  currentPeriodEnd    DateTime                @map("current_period_end")
+  externalId          String?                 @map("external_id")   // MercadoPago subscription ID
+  whiteLabelId        String?                 @map("white_label_id") // if managed by a WL account
+  createdAt           DateTime                @default(now()) @map("created_at")
+  updatedAt           DateTime                @updatedAt @map("updated_at")
+
+  coach       User              @relation("CoachSubscription", fields: [coachId], references: [id], onDelete: Cascade)
+  plan        PlatformPlan      @relation(fields: [planId], references: [id])
+  whiteLabel  WhiteLabelAccount? @relation(fields: [whiteLabelId], references: [id])
+
+  @@index([status])
+  @@index([whiteLabelId])
+  @@map("coach_subscriptions")
+}
+
+model WhiteLabelAccount {
+  id             String           @id @default(uuid())
+  ownerId        String           @unique @map("owner_id")
+  brandName      String           @map("brand_name")
+  customDomain   String?          @unique @map("custom_domain")
+  logoUrl        String?          @map("logo_url")
+  primaryColor   String?          @map("primary_color")
+  maxCoaches     Int              @default(5) @map("max_coaches")
+  status         WhiteLabelStatus @default(ACTIVE)
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  owner          User              @relation("WhiteLabelOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  coaches        CoachSubscription[]
+
+  @@map("white_label_accounts")
 }

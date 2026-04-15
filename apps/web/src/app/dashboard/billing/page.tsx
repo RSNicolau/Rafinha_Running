@@ -107,6 +107,97 @@ const PAYMENT_STATUS_MAP: Record<string, { label: string; color: string }> = {
   REFUNDED: { label: 'Estornado', color: '#6B7280' },
 };
 
+// ─── Platform plan section ───────────────────────────────────────────────────
+
+const PLAN_COLORS: Record<string, string> = {
+  STARTER: '#6366F1', PRO: '#0EA5E9', SCALE: '#8B5CF6', ELITE: '#DC2626', WHITE_LABEL: '#F59E0B',
+};
+
+function PlatformPlanCard() {
+  const [platformSub, setPlatformSub] = useState<any>(null);
+  const [loadingPlatform, setLoadingPlatform] = useState(true);
+
+  useEffect(() => {
+    api.get('/platform/my-subscription')
+      .then(r => setPlatformSub(r.data))
+      .catch(() => {})
+      .finally(() => setLoadingPlatform(false));
+  }, []);
+
+  if (loadingPlatform) return (
+    <div className="glass-card p-6 mb-6 animate-pulse">
+      <div className="h-4 w-40 bg-gray-200 rounded mb-2" />
+      <div className="h-6 w-24 bg-gray-100 rounded" />
+    </div>
+  );
+
+  const planName = platformSub?.plan?.name ?? 'Sem plano';
+  const planType = platformSub?.plan?.type;
+  const color = planType ? PLAN_COLORS[planType] ?? '#DC2626' : '#6B7280';
+  const maxAthletes = platformSub?.plan?.maxAthletes;
+  const athleteCount = platformSub?.athleteCount ?? 0;
+  const percent = platformSub?.percentUsed ?? 0;
+  const isOverLimit = platformSub?.isOverLimit;
+
+  return (
+    <div className="glass-card p-6 mb-6">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Plano da Plataforma</p>
+          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />
+            {planName}
+          </h2>
+          {platformSub?.plan && (
+            <p className="text-sm text-gray-500 mt-0.5">
+              R${((platformSub.plan.priceInCents ?? 0) / 100).toFixed(0)}/mês
+            </p>
+          )}
+        </div>
+        <a
+          href="/pricing"
+          className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:border-gray-300 transition"
+        >
+          Ver planos →
+        </a>
+      </div>
+
+      {maxAthletes !== null && (
+        <div>
+          <div className="flex justify-between text-xs text-gray-500 mb-1.5">
+            <span>Atletas cadastrados</span>
+            <span className={isOverLimit ? 'text-red-600 font-semibold' : ''}>{athleteCount} / {maxAthletes}</span>
+          </div>
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all"
+              style={{ width: `${Math.min(percent, 100)}%`, background: isOverLimit ? '#DC2626' : color }}
+            />
+          </div>
+          {isOverLimit && (
+            <p className="text-xs text-red-600 mt-1.5 font-medium">
+              ⚠ Limite atingido — <a href="/pricing" className="underline">faça upgrade</a> para adicionar mais atletas.
+            </p>
+          )}
+        </div>
+      )}
+
+      {!maxAthletes && (
+        <p className="text-xs text-gray-400">✓ Atletas ilimitados</p>
+      )}
+
+      {platformSub?.status === 'NONE' && (
+        <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-xl">
+          <p className="text-xs text-amber-700 font-medium">Você ainda não tem um plano ativo.</p>
+          <a href="/pricing" className="text-xs text-amber-700 underline">Escolher um plano →</a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main component ──────────────────────────────────────────────────────────
+
 export default function BillingPage() {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
@@ -312,6 +403,9 @@ export default function BillingPage() {
         <h1 className="text-2xl font-bold tracking-tight text-gray-900">Assinatura & Cobrança</h1>
         <p className="text-sm text-gray-500 mt-1">Gerencie seu plano e métodos de pagamento via Pagar.me</p>
       </div>
+
+      {/* Platform Plan */}
+      <PlatformPlanCard />
 
       {/* Current subscription */}
       {subscription && statusInfo && (
