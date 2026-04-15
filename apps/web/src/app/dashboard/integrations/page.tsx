@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 
 interface Integration {
@@ -115,8 +116,22 @@ export default function IntegrationsPage() {
   const [webhookMsg, setWebhookMsg] = useState<string | null>(null);
   const [settingUpPolarWebhook, setSettingUpPolarWebhook] = useState(false);
   const [polarWebhookMsg, setPolarWebhookMsg] = useState<string | null>(null);
+  const [oauthMsg, setOauthMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const searchParams = useSearchParams();
 
   useEffect(() => {
+    // Handle OAuth callback result
+    const oauth = searchParams.get('oauth');
+    const provider = searchParams.get('provider');
+    if (oauth === 'success' && provider) {
+      setOauthMsg({ type: 'success', text: `${provider} conectado com sucesso! ✓` });
+      window.history.replaceState({}, '', '/dashboard/integrations');
+    } else if (oauth === 'error' && provider) {
+      const msg = searchParams.get('msg');
+      setOauthMsg({ type: 'error', text: msg || `Erro ao conectar ${provider}. Tente novamente.` });
+      window.history.replaceState({}, '', '/dashboard/integrations');
+    }
+
     api.get('/integrations')
       .then((r) => setIntegrations(r.data || []))
       .catch(() => {})
@@ -214,6 +229,14 @@ export default function IntegrationsPage() {
 
   return (
     <div>
+      {oauthMsg && (
+        <div className={`mb-4 px-4 py-3 rounded-xl text-sm font-semibold flex items-center gap-2 ${
+          oauthMsg.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'
+        }`}>
+          {oauthMsg.type === 'success' ? '✓' : '⚠'} {oauthMsg.text}
+          <button onClick={() => setOauthMsg(null)} className="ml-auto text-xs opacity-60 hover:opacity-100">✕</button>
+        </div>
+      )}
       <div className="mb-8 flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Integrações</h1>

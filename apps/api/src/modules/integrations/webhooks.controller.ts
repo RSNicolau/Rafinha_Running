@@ -1,5 +1,5 @@
 import {
-  Controller, Post, Get, Body, Query, Headers, Req, Res, Logger,
+  Controller, Post, Get, Body, Query, Headers, Param, Req, Res, Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
@@ -37,6 +37,35 @@ export class WebhooksController {
 
     this.logger.warn('Strava webhook verification failed');
     return res.status(403).json({ error: 'Verification failed' });
+  }
+
+  // ── OAuth Callback (public — no JWT required) ──
+  @Get('oauth/:provider/callback')
+  @ApiOperation({ summary: 'OAuth callback redirect (público)' })
+  async oauthCallback(
+    @Param('provider') provider: string,
+    @Query('code') code: string,
+    @Query('state') state: string,
+    @Query('error') error: string,
+    @Res() res: Response,
+  ) {
+    const frontendUrl = process.env.FRONTEND_URL || 'https://rr-rafinha-running.vercel.app';
+    const integrationsUrl = `${frontendUrl}/dashboard/integrations`;
+
+    if (error || !code) {
+      this.logger.warn(`OAuth error for ${provider}: ${error}`);
+      return res.redirect(`${integrationsUrl}?oauth=error&provider=${provider}`);
+    }
+
+    try {
+      const { IntegrationProvider } = await import('@prisma/client');
+      const providerEnum = provider.toUpperCase() as any;
+      await this.integrationsService.handleCallback(providerEnum, code, state);
+      return res.redirect(`${integrationsUrl}?oauth=success&provider=${provider}`);
+    } catch (err: any) {
+      this.logger.error(`OAuth callback error for ${provider}: ${err.message}`);
+      return res.redirect(`${integrationsUrl}?oauth=error&provider=${provider}&msg=${encodeURIComponent(err.message)}`);
+    }
   }
 
   @Post('strava')

@@ -14,7 +14,7 @@ export class StravaService {
   private readonly clientId = process.env.STRAVA_CLIENT_ID || '';
   private readonly clientSecret = process.env.STRAVA_CLIENT_SECRET || '';
   private readonly redirectUri =
-    process.env.STRAVA_REDIRECT_URI || 'http://localhost:3000/api/integrations/STRAVA/callback';
+    process.env.STRAVA_REDIRECT_URI || 'http://localhost:3000/api/v1/webhooks/oauth/STRAVA/callback';
 
   constructor(private prisma: PrismaService) {}
 
