@@ -73,9 +73,13 @@ export default function DashboardPage() {
       api.get('/users/athletes/alerts'),
     ])
       .then(([athletesRes, statsRes, alertsRes]) => {
-        setAthletes(athletesRes.data);
+        // API returns paginated { data: [...], total, page } — extract the array
+        const athletesList = Array.isArray(athletesRes.data)
+          ? athletesRes.data
+          : (athletesRes.data?.data ?? []);
+        setAthletes(athletesList);
         setCoachStats(statsRes.data);
-        setAlerts(alertsRes.data);
+        setAlerts(Array.isArray(alertsRes.data) ? alertsRes.data : []);
       })
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));

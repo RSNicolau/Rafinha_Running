@@ -45,7 +45,7 @@ export default function AiAssistantPanel() {
   useEffect(() => {
     // Load athletes and config
     Promise.all([
-      api.get('/users/me/athletes').catch(() => ({ data: [] })),
+      api.get('/users/athletes').catch(() => ({ data: [] })),
       api.get('/ai-assistant/config').catch(() => ({ data: { assistantName: 'Rafinha', voiceEnabled: false } })),
     ]).then(([athletesRes, configRes]) => {
       setAthletes(athletesRes.data?.athletes ?? athletesRes.data ?? []);

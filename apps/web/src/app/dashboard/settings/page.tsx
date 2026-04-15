@@ -271,7 +271,7 @@ export default function SettingsPage() {
         setBrainModel(data.model ?? '');
       }).catch(() => {});
 
-      api.get('/payments/settings').then(({ data }) => {
+      api.get('/settings').then(({ data }) => {
         setPaymentSettings(data);
         setPaymentProvider(data.provider ?? 'pagarme');
         setPaymentEnabled(data.paymentEnabled ?? false);
@@ -437,7 +437,7 @@ export default function SettingsPage() {
     setPaymentFeedback(null);
     setPaymentTestResult(null);
     try {
-      await api.put('/payments/settings', {
+      await api.put('/settings', {
         provider: paymentProvider,
         paymentEnabled,
         ...(pagarmeApiKey ? { pagarmeApiKey } : {}),
@@ -447,7 +447,7 @@ export default function SettingsPage() {
       });
       setPaymentFeedback({ type: 'success', message: 'Configurações de pagamento salvas.' });
       setPagarmeApiKey(''); setPagarmeWebhook(''); setStripeKey(''); setStripeWebhook('');
-      const { data } = await api.get('/payments/settings');
+      const { data } = await api.get('/settings');
       setPaymentSettings(data);
     } catch (err: any) {
       setPaymentFeedback({ type: 'error', message: err.response?.data?.message || 'Erro ao salvar.' });
@@ -461,7 +461,7 @@ export default function SettingsPage() {
     setPaymentTestResult(null);
     setPaymentFeedback(null);
     try {
-      const { data } = await api.post('/payments/settings/test');
+      const { data } = await api.post('/settings/test');
       setPaymentTestResult({ ok: true, latencyMs: data.latencyMs });
     } catch (err: any) {
       setPaymentFeedback({ type: 'error', message: err.response?.data?.message || 'Conexão falhou.' });
