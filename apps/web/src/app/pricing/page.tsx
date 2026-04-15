@@ -4,231 +4,316 @@ import { useState } from 'react';
 import Link from 'next/link';
 
 const RED = '#DC2626';
-const DARK = '#111827';
 
-const PLANS = [
+// ─── Tier 1: Athlete plans (what athletes pay coaches) ───────────────────────
+const ATHLETE_PLANS = [
   {
-    type: 'STARTER',
-    name: 'Starter',
-    price: 197,
-    maxAthletes: 30,
-    highlighted: false,
-    cta: 'Começar agora',
-    description: 'Perfeito para coaches iniciando sua assessoria.',
+    name: 'Mensal',
+    price: 174,
+    period: '/mês',
+    badge: null,
+    description: 'Flexibilidade total, cancele quando quiser.',
     features: [
-      'Até 30 atletas',
-      'Questionário de anamnese',
-      'Planos de treino personalizados',
-      'App para atletas',
-      'Loja virtual',
+      'Planilha de treinos personalizada',
+      'Treinos presenciais no grupo',
+      'Assessoria em provas',
+      'Acesso ao app da equipe',
+      'Acompanhamento individual',
     ],
   },
   {
-    type: 'PRO',
-    name: 'Pro',
-    price: 397,
-    maxAthletes: 100,
-    highlighted: false,
-    cta: 'Assinar Pro',
-    description: 'Para assessorias em crescimento com equipe estruturada.',
+    name: 'Trimestral',
+    price: 495,
+    period: '/3 meses',
+    badge: 'Mais popular',
+    description: 'Parcela única. Equivale a R$165/mês.',
     features: [
-      'Até 100 atletas',
-      'Tudo do Starter',
-      'Coach Brain IA (Claude)',
-      'Gestão de eventos e provas',
-      'Relatórios avançados',
-      'Suporte prioritário',
+      'Tudo do Mensal',
+      'Economia de R$27 vs mensal',
+      'Sem renovação automática',
     ],
   },
   {
-    type: 'SCALE',
-    name: 'Scale',
-    price: 697,
-    maxAthletes: 300,
-    highlighted: true,
-    cta: 'Assinar Scale',
-    description: 'Para times consolidados com grande base de atletas.',
+    name: 'Semestral',
+    price: 960,
+    period: '/6 meses',
+    badge: 'Melhor valor',
+    description: 'Parcela única. Equivale a R$160/mês.',
     features: [
-      'Até 300 atletas',
-      'Tudo do Pro',
-      'Múltiplos coaches',
-      'Dashboard analítico',
-      'Acesso à API',
-    ],
-  },
-  {
-    type: 'ELITE',
-    name: 'Elite',
-    price: 997,
-    maxAthletes: null,
-    highlighted: false,
-    cta: 'Assinar Elite',
-    description: 'Sem limites para as maiores assessorias do Brasil.',
-    features: [
-      'Atletas ilimitados',
-      'Tudo do Scale',
-      'SLA garantido',
-      'Onboarding dedicado',
-      'Integração Garmin & Strava',
-    ],
-  },
-  {
-    type: 'WHITE_LABEL',
-    name: 'White Label',
-    price: 1497,
-    maxAthletes: null,
-    highlighted: false,
-    cta: 'Falar com vendas',
-    description: 'Venda o app com sua própria marca para outros coaches.',
-    features: [
-      'Atletas ilimitados',
-      'Tudo do Elite',
-      'Domínio próprio',
-      'Sua marca (logo, cores)',
-      'Gerencie até 10 coaches',
-      'Coaches pagam licença para você',
-      'Suporte White Glove',
+      'Tudo do Mensal',
+      'Economia de R$84 vs mensal',
+      'Sem renovação automática',
     ],
   },
 ];
 
+// ─── Tier 2: Coach platform plans ───────────────────────────────────────────
+const COACH_PLANS = [
+  {
+    name: 'Starter',
+    price: 197,
+    maxAthletes: 30,
+    highlighted: false,
+    features: ['Até 30 atletas', 'Questionário de anamnese', 'Planos de treino', 'App para atletas', 'Loja virtual'],
+  },
+  {
+    name: 'Pro',
+    price: 397,
+    maxAthletes: 100,
+    highlighted: false,
+    features: ['Até 100 atletas', 'Tudo do Starter', 'Coach Brain IA', 'Eventos e provas', 'Relatórios avançados'],
+  },
+  {
+    name: 'Scale',
+    price: 697,
+    maxAthletes: 300,
+    highlighted: true,
+    features: ['Até 300 atletas', 'Tudo do Pro', 'Multi-coach', 'Dashboard analítico', 'Acesso à API'],
+  },
+  {
+    name: 'Elite',
+    price: 997,
+    maxAthletes: null,
+    highlighted: false,
+    features: ['Atletas ilimitados', 'Tudo do Scale', 'SLA garantido', 'Integração Garmin/Strava', 'Onboarding dedicado'],
+  },
+];
+
+// ─── Check icon ──────────────────────────────────────────────────────────────
+function Check({ color = RED }: { color?: string }) {
+  return (
+    <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke={color} strokeWidth={2.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+    </svg>
+  );
+}
+
 export default function PricingPage() {
-  const [annual, setAnnual] = useState(false);
-  const discount = 0.17; // 2 meses grátis no anual
+  const [activeTab, setActiveTab] = useState<'athletes' | 'coaches' | 'whitelabel'>('athletes');
 
   return (
     <main className="min-h-screen bg-gray-50">
       {/* Hero */}
-      <div style={{ background: RED }} className="py-16 px-4 text-center text-white">
-        <Link href="/" className="inline-block mb-6 opacity-80 hover:opacity-100 transition">
-          <span className="text-sm font-medium">← Voltar</span>
-        </Link>
-        <h1 className="text-3xl sm:text-4xl font-black mb-3">Planos para cada tamanho de assessoria</h1>
-        <p className="text-white/80 text-base sm:text-lg max-w-xl mx-auto">
-          Do coach solo às maiores equipes do Brasil. Cancele quando quiser.
+      <div style={{ background: RED }} className="py-14 px-4 text-center text-white">
+        <Link href="/" className="inline-block mb-4 text-white/70 hover:text-white text-sm transition">← Voltar</Link>
+        <h1 className="text-3xl sm:text-4xl font-black mb-2">Planos & Preços</h1>
+        <p className="text-white/80 max-w-lg mx-auto text-sm sm:text-base">
+          Transparência total em todas as camadas da plataforma.
         </p>
 
-        {/* Annual toggle */}
-        <div className="flex items-center justify-center gap-3 mt-6">
-          <span className={`text-sm font-medium ${!annual ? 'text-white' : 'text-white/60'}`}>Mensal</span>
-          <button
-            onClick={() => setAnnual(!annual)}
-            className={`w-12 h-6 rounded-full transition-colors relative ${annual ? 'bg-white/30' : 'bg-white/20'}`}
-          >
-            <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${annual ? 'left-7' : 'left-1'}`} />
-          </button>
-          <span className={`text-sm font-medium ${annual ? 'text-white' : 'text-white/60'}`}>
-            Anual <span className="bg-white/20 text-white text-xs px-2 py-0.5 rounded-full ml-1">2 meses grátis</span>
-          </span>
+        {/* Tab selector */}
+        <div className="flex items-center justify-center gap-2 mt-8 flex-wrap">
+          {[
+            { key: 'athletes', label: '🏃 Para Atletas' },
+            { key: 'coaches', label: '📋 Para Coaches' },
+            { key: 'whitelabel', label: '🏷️ White Label' },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key as any)}
+              className={`px-5 py-2 rounded-full text-sm font-bold transition-all ${
+                activeTab === tab.key
+                  ? 'bg-white text-red-600'
+                  : 'bg-white/15 text-white hover:bg-white/25'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Plans grid */}
-      <div className="max-w-7xl mx-auto px-4 py-12">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-5">
-          {PLANS.map(plan => {
-            const monthlyPrice = annual ? Math.round(plan.price * (1 - discount)) : plan.price;
-            return (
-              <div
-                key={plan.type}
-                className={`bg-white rounded-2xl border-2 flex flex-col ${
-                  plan.highlighted
-                    ? 'border-red-500 shadow-xl shadow-red-100 scale-[1.02]'
-                    : 'border-gray-100 shadow-sm'
-                }`}
-              >
-                {plan.highlighted && (
-                  <div className="text-center py-1.5 rounded-t-xl text-xs font-black uppercase tracking-widest text-white" style={{ background: RED }}>
-                    Mais popular
+      <div className="max-w-6xl mx-auto px-4 py-12">
+
+        {/* ── TAB: ATHLETES ── */}
+        {activeTab === 'athletes' && (
+          <div>
+            <div className="text-center mb-8">
+              <h2 className="text-xl font-black text-gray-900 mb-1">Planos para Atletas</h2>
+              <p className="text-gray-500 text-sm">Os planos incluem planilha personalizada, treinos presenciais e acesso ao app.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-3xl mx-auto">
+              {ATHLETE_PLANS.map(plan => (
+                <div key={plan.name} className={`bg-white rounded-2xl border-2 flex flex-col ${plan.badge === 'Mais popular' ? 'border-red-500 shadow-xl shadow-red-50' : 'border-gray-100 shadow-sm'}`}>
+                  {plan.badge && (
+                    <div className="text-center py-1.5 rounded-t-xl text-xs font-black uppercase tracking-widest text-white" style={{ background: RED }}>
+                      {plan.badge}
+                    </div>
+                  )}
+                  <div className="p-5 flex flex-col flex-1">
+                    <p className="font-black text-gray-900 text-base mb-0.5">{plan.name}</p>
+                    <p className="text-xs text-gray-400 mb-4">{plan.description}</p>
+                    <div className="mb-4">
+                      <span className="text-3xl font-black" style={{ color: RED }}>R${plan.price.toLocaleString('pt-BR')}</span>
+                      <span className="text-gray-400 text-sm">{plan.period}</span>
+                    </div>
+                    <ul className="space-y-2 flex-1 mb-5">
+                      {plan.features.map(f => (
+                        <li key={f} className="flex items-start gap-2 text-xs text-gray-600">
+                          <Check /> {f}
+                        </li>
+                      ))}
+                    </ul>
+                    <a href="/onboarding/rafinha" className="block text-center py-2.5 rounded-xl text-sm font-black uppercase tracking-wider text-white transition" style={{ background: RED }}>
+                      Quero treinar
+                    </a>
                   </div>
-                )}
-
-                <div className="p-5 flex flex-col flex-1">
-                  <p className="font-black text-lg text-gray-900">{plan.name}</p>
-                  <p className="text-xs text-gray-400 mt-0.5 mb-4">{plan.description}</p>
-
-                  <div className="mb-4">
-                    <span className="text-3xl font-black" style={{ color: RED }}>
-                      R${monthlyPrice.toLocaleString('pt-BR')}
-                    </span>
-                    <span className="text-gray-400 text-sm">/mês</span>
-                    {annual && (
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        R${(monthlyPrice * 10).toLocaleString('pt-BR')}/ano (10x)
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="text-xs font-semibold text-gray-500 mb-3">
-                    {plan.maxAthletes ? `Até ${plan.maxAthletes} atletas` : 'Atletas ilimitados'}
-                  </div>
-
-                  <ul className="space-y-2 flex-1 mb-5">
-                    {plan.features.map(f => (
-                      <li key={f} className="flex items-start gap-2 text-xs text-gray-600">
-                        <svg className="w-4 h-4 shrink-0 mt-0.5" style={{ color: RED }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                        {f}
-                      </li>
-                    ))}
-                  </ul>
-
-                  <a
-                    href={plan.type === 'WHITE_LABEL' ? 'https://wa.me/5521999987530' : '/login'}
-                    className="mt-auto block text-center py-2.5 rounded-xl text-sm font-black uppercase tracking-wider transition"
-                    style={plan.highlighted
-                      ? { background: RED, color: 'white' }
-                      : { background: '#F3F4F6', color: DARK }}
-                  >
-                    {plan.cta}
-                  </a>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* FAQ / comparison */}
-        <div className="mt-16 text-center">
-          <h2 className="text-xl font-black text-gray-900 mb-2">Como funciona o White Label?</h2>
-          <p className="text-gray-500 text-sm max-w-2xl mx-auto">
-            Você assina o plano White Label e recebe o app com sua marca, domínio próprio e cores personalizadas.
-            Então você vende licenças para outros coaches (ex: R$300/mês cada), que por sua vez cobram seus atletas.
-            Você controla tudo pelo painel de administração.
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-10 max-w-3xl mx-auto text-left">
-            {[
-              { step: '1', title: 'Você assina White Label', desc: 'R$1.497/mês com sua marca, domínio e até 10 coaches' },
-              { step: '2', title: 'Você vende para coaches', desc: 'Cada coach paga você (ex: R$300–500/mês) e gerencia seus atletas' },
-              { step: '3', title: 'Coaches vendem para atletas', desc: 'Cada atleta paga o coach mensalmente pelo app e pelos treinos' },
-            ].map(item => (
-              <div key={item.step} className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-                <div className="w-8 h-8 rounded-full flex items-center justify-center font-black text-white text-sm mb-3" style={{ background: RED }}>
-                  {item.step}
-                </div>
-                <p className="font-bold text-gray-900 text-sm mb-1">{item.title}</p>
-                <p className="text-xs text-gray-500">{item.desc}</p>
-              </div>
-            ))}
+              ))}
+            </div>
+            <p className="text-center text-xs text-gray-400 mt-6">
+              📍 Treinos na Concha Acústica (terças) e alternados aos sábados · 📞 21 99987-5830
+            </p>
           </div>
-        </div>
+        )}
 
-        {/* CTA */}
-        <div className="mt-16 text-center">
-          <p className="text-gray-500 text-sm mb-4">Dúvidas? Fale com a gente</p>
-          <a
-            href="https://wa.me/5521999987530"
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-white text-sm transition"
-            style={{ background: '#16A34A' }}
-          >
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-            </svg>
-            WhatsApp
-          </a>
-        </div>
+        {/* ── TAB: COACHES ── */}
+        {activeTab === 'coaches' && (
+          <div>
+            <div className="text-center mb-8">
+              <h2 className="text-xl font-black text-gray-900 mb-1">Planos para Coaches</h2>
+              <p className="text-gray-500 text-sm max-w-xl mx-auto">
+                O que a plataforma cobra do coach para gerir sua equipe. Você define o que cobra dos seus atletas.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              {COACH_PLANS.map(plan => (
+                <div key={plan.name} className={`bg-white rounded-2xl border-2 flex flex-col ${plan.highlighted ? 'border-red-500 shadow-xl shadow-red-50 scale-[1.02]' : 'border-gray-100 shadow-sm'}`}>
+                  {plan.highlighted && (
+                    <div className="text-center py-1.5 rounded-t-xl text-xs font-black uppercase tracking-widest text-white" style={{ background: RED }}>
+                      Mais popular
+                    </div>
+                  )}
+                  <div className="p-5 flex flex-col flex-1">
+                    <p className="font-black text-gray-900">{plan.name}</p>
+                    <div className="my-3">
+                      <span className="text-2xl font-black" style={{ color: RED }}>R${plan.price}</span>
+                      <span className="text-gray-400 text-sm">/mês</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mb-3">{plan.maxAthletes ? `Até ${plan.maxAthletes} atletas` : 'Atletas ilimitados'}</p>
+                    <ul className="space-y-1.5 flex-1 mb-4">
+                      {plan.features.map(f => (
+                        <li key={f} className="flex items-start gap-1.5 text-xs text-gray-600">
+                          <Check /> {f}
+                        </li>
+                      ))}
+                    </ul>
+                    <a href="/login" className="block text-center py-2 rounded-xl text-xs font-black uppercase tracking-wider transition" style={plan.highlighted ? { background: RED, color: 'white' } : { background: '#F3F4F6', color: '#111827' }}>
+                      Começar
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* ROI calculator teaser */}
+            <div className="mt-10 bg-white rounded-2xl border border-gray-100 shadow-sm p-6 max-w-2xl mx-auto">
+              <h3 className="font-black text-gray-900 mb-3">Quanto você ganha com o Scale?</h3>
+              <div className="grid grid-cols-3 gap-4 text-center">
+                {[
+                  { label: '150 atletas × R$174/mês', value: 'R$26.100', sub: 'receita bruta' },
+                  { label: 'Plano Scale', value: '– R$697', sub: 'custo da plataforma' },
+                  { label: 'Margem líquida', value: 'R$25.403', sub: '97,3% de margem' },
+                ].map(item => (
+                  <div key={item.label}>
+                    <p className="text-xs text-gray-400 mb-1">{item.label}</p>
+                    <p className="text-lg font-black" style={{ color: RED }}>{item.value}</p>
+                    <p className="text-xs text-gray-500">{item.sub}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB: WHITE LABEL ── */}
+        {activeTab === 'whitelabel' && (
+          <div>
+            <div className="text-center mb-8">
+              <h2 className="text-xl font-black text-gray-900 mb-1">White Label</h2>
+              <p className="text-gray-500 text-sm max-w-2xl mx-auto">
+                Compre a licença da plataforma com sua marca e revenda para coaches de qualquer esporte.
+                Você define os preços e fica com 100% da diferença.
+              </p>
+            </div>
+
+            {/* WL plan card */}
+            <div className="max-w-md mx-auto mb-10">
+              <div className="bg-white rounded-2xl border-2 border-amber-400 shadow-xl shadow-amber-50 p-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-lg">🏷️</span>
+                  <p className="font-black text-gray-900 text-lg">White Label</p>
+                </div>
+                <p className="text-xs text-gray-400 mb-4">Licença completa da plataforma com sua marca</p>
+                <div className="mb-4">
+                  <span className="text-4xl font-black" style={{ color: RED }}>R$1.497</span>
+                  <span className="text-gray-400 text-sm">/mês</span>
+                </div>
+                <ul className="space-y-2 mb-6">
+                  {[
+                    'Atletas e coaches ilimitados',
+                    'Domínio próprio (seusite.com.br)',
+                    'Logo, cores e marca personalizados',
+                    'Gerencie até 10 coaches',
+                    'Coaches pagam licença para você',
+                    'Tudo do plano Elite incluído',
+                    'Suporte White Glove dedicado',
+                    'Onboarding completo da equipe',
+                  ].map(f => (
+                    <li key={f} className="flex items-start gap-2 text-sm text-gray-700">
+                      <Check color="#D97706" /> {f}
+                    </li>
+                  ))}
+                </ul>
+                <a href="https://wa.me/5521999987530" className="block text-center py-3 rounded-xl text-sm font-black uppercase tracking-wider text-white transition" style={{ background: '#D97706' }}>
+                  Falar com especialista
+                </a>
+              </div>
+            </div>
+
+            {/* How it works */}
+            <h3 className="text-center font-black text-gray-900 mb-6">Como funciona o fluxo de licenças</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-3xl mx-auto mb-10">
+              {[
+                { step: '1', title: 'Você assina White Label', desc: 'R$1.497/mês — plataforma com sua marca, domínio e painel de controle de coaches.' },
+                { step: '2', title: 'Você vende para coaches', desc: 'Cada coach paga você (ex: R$300–500/mês) e gerencia sua equipe de atletas no app.' },
+                { step: '3', title: 'Coaches vendem para atletas', desc: 'Cada atleta paga o coach (ex: R$150–300/mês) pelos treinos e pelo acesso ao app.' },
+              ].map(item => (
+                <div key={item.step} className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center font-black text-white text-sm mb-3" style={{ background: '#D97706' }}>
+                    {item.step}
+                  </div>
+                  <p className="font-bold text-gray-900 text-sm mb-1">{item.title}</p>
+                  <p className="text-xs text-gray-500">{item.desc}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Revenue example */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 max-w-2xl mx-auto">
+              <h4 className="font-black text-gray-900 mb-4">Exemplo de receita com 5 coaches</h4>
+              <div className="space-y-2 text-sm">
+                {[
+                  { label: '5 coaches × R$400/mês', value: 'R$2.000', positive: true },
+                  { label: 'Licença White Label', value: '– R$1.497', positive: false },
+                  { label: 'Lucro líquido', value: 'R$503/mês', positive: true, bold: true },
+                ].map(row => (
+                  <div key={row.label} className={`flex justify-between py-2 ${row.bold ? 'border-t border-gray-100 pt-3' : ''}`}>
+                    <span className="text-gray-500">{row.label}</span>
+                    <span className={`font-bold ${row.bold ? 'text-lg' : ''}`} style={{ color: row.positive ? '#16A34A' : '#DC2626' }}>{row.value}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-3">* Com 10 coaches você lucra R$2.503/mês mantendo o mesmo custo.</p>
+            </div>
+
+            <div className="text-center mt-8">
+              <a href="/white-label" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-white text-sm transition" style={{ background: RED }}>
+                Ver plataforma completa →
+              </a>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );
