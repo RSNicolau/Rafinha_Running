@@ -91,7 +91,7 @@ export default function EventoPage() {
     setSubmitting(true);
     setError('');
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('rr_access_token');
       const res = await fetch(`${API}/events/${eventId}/register`, {
         method: 'POST',
         headers: {

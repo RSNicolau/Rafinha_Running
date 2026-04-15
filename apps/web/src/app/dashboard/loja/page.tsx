@@ -101,7 +101,7 @@ export default function DashboardLojaPage() {
 
   const API = '/api/v1';
   const headers = () => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
+    const token = typeof window !== 'undefined' ? localStorage.getItem('rr_access_token') : '';
     return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   };
 
