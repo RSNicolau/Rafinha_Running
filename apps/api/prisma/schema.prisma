@@ -219,6 +219,9 @@ model User {
   coachSubscription     CoachSubscription?     @relation("CoachSubscription")
   whiteLabelAccount     WhiteLabelAccount?     @relation("WhiteLabelOwner")
 
+  // Badges
+  athleteBadges         AthleteBadge[]         @relation("AthleteBadges")
+
   @@map("users")
 }
 
@@ -1119,4 +1122,37 @@ model WhiteLabelAccount {
   coaches        CoachSubscription[]
 
   @@map("white_label_accounts")
+}
+
+// ============================================
+// BADGES & ACHIEVEMENTS
+// ============================================
+
+model Badge {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  name        String
+  description String
+  icon        String
+  category    String   @default("performance") // performance | consistency | milestone
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  athleteBadges AthleteBadge[]
+
+  @@map("badges")
+}
+
+model AthleteBadge {
+  id        String   @id @default(uuid())
+  athleteId String   @map("athlete_id")
+  badgeId   String   @map("badge_id")
+  earnedAt  DateTime @default(now()) @map("earned_at")
+  metadata  Json?
+
+  athlete User  @relation("AthleteBadges", fields: [athleteId], references: [id], onDelete: Cascade)
+  badge   Badge @relation(fields: [badgeId], references: [id])
+
+  @@unique([athleteId, badgeId])
+  @@index([athleteId])
+  @@map("athlete_badges")
 }

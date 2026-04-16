@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import dynamic from 'next/dynamic';
 
 const GarminRecoveryCard = dynamic(() => import('../_components/GarminRecoveryCard'), { ssr: false });
+const TrainingLoadChart = dynamic(() => import('./TrainingLoadChart'), { ssr: false });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -994,6 +995,14 @@ export default function AthleteDetailPage() {
           <EvolutionChart weeks={weeklyData} />
         </div>
       )}
+
+      {/* Training Load ATL/CTL/TSB */}
+      <div className="glass-card p-6 mb-6">
+        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">
+          Carga de Treino — ATL / CTL / TSB
+        </h2>
+        <TrainingLoadChart athleteId={id} />
+      </div>
 
       {/* Assessments section */}
       <AssessmentsSection athleteId={id} />

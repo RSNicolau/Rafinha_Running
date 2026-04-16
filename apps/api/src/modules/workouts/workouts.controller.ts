@@ -3,6 +3,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { WorkoutsService } from './workouts.service';
+import { TrainingLoadService } from './training-load.service';
 import { CreateWorkoutDto, SubmitResultDto, SubmitFeedbackDto } from './dto/workout.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -13,7 +14,10 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('workouts')
 export class WorkoutsController {
-  constructor(private workoutsService: WorkoutsService) {}
+  constructor(
+    private workoutsService: WorkoutsService,
+    private trainingLoadService: TrainingLoadService,
+  ) {}
 
   @Post()
   @Roles(UserRole.COACH)
@@ -76,5 +80,26 @@ export class WorkoutsController {
       return this.workoutsService.syncFromAppleHealthBatch(athleteId, body);
     }
     return this.workoutsService.syncFromAppleHealth(athleteId, body);
+  }
+
+  @Get('training-load')
+  @ApiOperation({ summary: 'Carga de treino do atleta logado (ATL/CTL/TSB)' })
+  @ApiQuery({ name: 'days', required: false, example: 60 })
+  async getMyTrainingLoad(
+    @CurrentUser('id') athleteId: string,
+    @Query('days') days?: number,
+  ) {
+    return this.trainingLoadService.getTrainingLoad(athleteId, days ? Number(days) : 60);
+  }
+
+  @Get('training-load/:athleteId')
+  @Roles(UserRole.COACH)
+  @ApiOperation({ summary: 'Carga de treino de um atleta (coach)' })
+  @ApiQuery({ name: 'days', required: false, example: 60 })
+  async getAthleteTrainingLoad(
+    @Param('athleteId') athleteId: string,
+    @Query('days') days?: number,
+  ) {
+    return this.trainingLoadService.getTrainingLoad(athleteId, days ? Number(days) : 60);
   }
 }
