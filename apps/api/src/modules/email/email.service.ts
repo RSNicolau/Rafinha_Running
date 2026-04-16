@@ -180,17 +180,94 @@ export class EmailService {
 
   async sendWelcome(to: string, name: string): Promise<void> {
     const platformName = process.env.PLATFORM_NAME || 'Rafinha Running';
+    const loginUrl = `${process.env.FRONTEND_URL || this.appUrl}/athlete-login`;
     await this.send(
       to,
-      `Bem-vindo(a) à ${platformName}!`,
-      `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px">
-        <h2 style="color:#DC2626;margin-bottom:8px">Bem-vindo(a), ${name}!</h2>
-        <p>Sua conta foi criada com sucesso. Agora você pode acessar seu portal de treinos.</p>
-        <a href="${process.env.FRONTEND_URL || this.appUrl}/athlete-login" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#DC2626;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
-          Acessar portal
-        </a>
-        <hr style="border:none;border-top:1px solid #E5E7EB;margin:24px 0"/>
-        <p style="color:#9CA3AF;font-size:12px">${platformName} &bull; Treinamento de corrida personalizado</p>
+      `Bem-vindo(a) ao ${platformName}! 🏃`,
+      `<div style="font-family:Georgia,serif;max-width:580px;margin:0 auto;background:#ffffff">
+
+        <!-- Header -->
+        <div style="background:#DC2626;padding:32px 40px;text-align:center">
+          <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:700;letter-spacing:1px">RR RAFINHA RUNNING</h1>
+          <p style="color:#FCA5A5;margin:6px 0 0;font-size:13px;letter-spacing:2px">ASSESSORIA ESPORTIVA</p>
+        </div>
+
+        <!-- Body -->
+        <div style="padding:40px 40px 32px;background:#fff">
+          <p style="font-size:18px;color:#111827;margin:0 0 8px">Olá, <strong>${name}</strong>! 👋</p>
+          <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 24px">
+            Seja muito bem-vindo(a) ao <strong>RR Rafinha Running</strong>!
+          </p>
+          <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 24px">
+            A partir de agora, você faz parte de um programa pensado para levar sua corrida a um novo nível — com estratégia, acompanhamento e evolução constante.
+          </p>
+          <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 24px">
+            Aqui, você não é apenas mais um aluno. <strong>Você é um atleta em desenvolvimento.</strong>
+          </p>
+          <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 32px">
+            Nosso objetivo é simples e direto:<br>
+            <strong>extrair o seu melhor desempenho com inteligência, consistência e segurança.</strong>
+          </p>
+
+          <!-- What to expect -->
+          <div style="background:#FEF2F2;border-left:4px solid #DC2626;border-radius:0 8px 8px 0;padding:20px 24px;margin:0 0 32px">
+            <p style="font-size:15px;font-weight:700;color:#DC2626;margin:0 0 12px">🚀 O que você pode esperar a partir de agora:</p>
+            <ul style="margin:0;padding:0 0 0 18px;color:#374151;font-size:14px;line-height:2">
+              <li>Planilhas de treino personalizadas, ajustadas ao seu nível e objetivo</li>
+              <li>Acompanhamento contínuo da sua evolução</li>
+              <li>Estratégias para melhorar performance, resistência e ritmo</li>
+              <li>Orientações sobre recuperação, prevenção de lesões e constância</li>
+              <li>Suporte direto sempre que necessário</li>
+            </ul>
+          </div>
+
+          <!-- Important -->
+          <div style="background:#F9FAFB;border-radius:8px;padding:20px 24px;margin:0 0 32px">
+            <p style="font-size:15px;font-weight:700;color:#111827;margin:0 0 8px">📊 Importante:</p>
+            <p style="font-size:14px;color:#374151;line-height:1.7;margin:0">
+              Para que o programa funcione com excelência, sua dedicação e feedback são fundamentais.<br>
+              <strong>Quanto mais você se envolve, melhores serão seus resultados.</strong>
+            </p>
+          </div>
+
+          <!-- Next steps -->
+          <p style="font-size:15px;font-weight:700;color:#111827;margin:0 0 12px">📲 Próximos passos:</p>
+          <ol style="margin:0 0 32px;padding:0 0 0 18px;color:#374151;font-size:14px;line-height:2.2">
+            <li>Acesse sua plataforma/app de treinos</li>
+            <li>Revise sua primeira planilha</li>
+            <li>Siga as orientações com atenção</li>
+            <li>Envie feedbacks sempre que necessário</li>
+          </ol>
+
+          <!-- CTA -->
+          <div style="text-align:center;margin:0 0 32px">
+            <a href="${loginUrl}" style="display:inline-block;padding:14px 36px;background:#DC2626;color:#fff;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px;letter-spacing:0.5px">
+              Acessar minha plataforma →
+            </a>
+          </div>
+
+          <!-- Motivational -->
+          <div style="border-top:1px solid #E5E7EB;padding-top:24px;text-align:center">
+            <p style="font-size:14px;color:#DC2626;font-weight:700;margin:0 0 8px">🔥 Lembre-se:</p>
+            <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 24px;font-style:italic">
+              "Resultados consistentes vêm da soma de pequenas ações bem feitas, todos os dias."
+            </p>
+            <p style="font-size:14px;color:#374151;margin:0">
+              Estamos juntos nessa jornada.<br>
+              <strong>Vamos evoluir. Vamos performar. Vamos correr melhor.</strong>
+            </p>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div style="background:#111827;padding:24px 40px;text-align:center">
+          <p style="color:#9CA3AF;font-size:13px;margin:0 0 4px">Conte com a gente! 💪</p>
+          <p style="color:#DC2626;font-size:13px;font-weight:700;margin:0">Equipe RR Rafinha Running</p>
+          <p style="color:#6B7280;font-size:11px;margin:12px 0 0">
+            ${platformName} &bull; Assessoria Esportiva &bull; Treinamento de corrida personalizado
+          </p>
+        </div>
+
       </div>`,
     );
   }
