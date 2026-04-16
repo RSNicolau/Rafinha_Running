@@ -532,6 +532,11 @@ model Event {
   kitPickupLocation  String?   @map("kit_pickup_location")  // endereço de retirada
   kitPickupDate      DateTime? @map("kit_pickup_date")      // data/hora de retirada
   routeMapUrl        String?   @map("route_map_url")
+  latitude           Float?    @map("latitude")
+  longitude          Float?    @map("longitude")
+  meetingPoint       String?   @map("meeting_point")
+  meetingPointLat    Float?    @map("meeting_point_lat")
+  meetingPointLng    Float?    @map("meeting_point_lng")
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
 

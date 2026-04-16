@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { api } from '@/lib/api';
+
+const AddressPicker = dynamic(() => import('@/components/maps/AddressPicker'), { ssr: false });
 
 interface Event {
   id: string;
@@ -19,6 +23,9 @@ interface Event {
   status: string;
   tags: string[];
   coverImageUrl?: string;
+  latitude?: number;
+  longitude?: number;
+  meetingPoint?: string;
   _count?: { registrations: number };
 }
 
@@ -31,11 +38,15 @@ interface EventForm {
   modality: string;
   maxParticipants: string;
   price: string;
+  meetingPoint: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 const EMPTY_FORM: EventForm = {
   title: '', description: '', eventDate: '', location: '',
   city: '', modality: '', maxParticipants: '', price: '0',
+  meetingPoint: '', latitude: undefined, longitude: undefined,
 };
 
 const MODALITIES = ['5K', '10K', '21K', '42K', 'Trail', 'Ultra', 'Ciclismo', 'Triátlon', 'CrossFit', 'Outro'];
@@ -93,6 +104,9 @@ export default function EventsPage() {
         modality: form.modality || undefined,
         maxParticipants: form.maxParticipants ? Number(form.maxParticipants) : undefined,
         price: form.price ? Math.round(Number(form.price) * 100) : 0,
+        latitude: form.latitude,
+        longitude: form.longitude,
+        meetingPoint: form.meetingPoint || undefined,
       };
       const { data } = await api.post('/events', payload);
       setEvents((prev) => [data, ...prev]);
@@ -161,12 +175,34 @@ export default function EventsPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelClass}>Local</label>
-                  <input type="text" value={form.location} onChange={(e) => setForm(p => ({ ...p, location: e.target.value }))} placeholder="Parque Ibirapuera" className={inputClass} />
+                  <AddressPicker
+                    value={form.location}
+                    onChange={(val) => setForm(p => ({ ...p, location: val }))}
+                    onPlaceSelected={(place) => setForm(p => ({
+                      ...p,
+                      location: place.address,
+                      city: place.city || p.city,
+                      latitude: place.lat,
+                      longitude: place.lng,
+                    }))}
+                    placeholder="Parque Ibirapuera"
+                    className={inputClass}
+                  />
                 </div>
                 <div>
                   <label className={labelClass}>Cidade</label>
                   <input type="text" value={form.city} onChange={(e) => setForm(p => ({ ...p, city: e.target.value }))} placeholder="São Paulo" className={inputClass} />
                 </div>
+              </div>
+              <div>
+                <label className={labelClass}>Ponto de encontro</label>
+                <input
+                  type="text"
+                  value={form.meetingPoint}
+                  onChange={(e) => setForm(p => ({ ...p, meetingPoint: e.target.value }))}
+                  placeholder="Ex: Portão 3 do Parque Ibirapuera"
+                  className={inputClass}
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -218,39 +254,55 @@ export default function EventsPage() {
       ) : (
         <div className="space-y-3">
           {(tab === 'upcoming' ? upcoming : past).map((event) => (
-            <div key={event.id} className="glass-card p-5 hover:shadow-md transition-shadow">
-              <div className="flex items-start gap-4">
-                <div className="w-14 h-14 rounded-xl bg-primary/10 flex flex-col items-center justify-center shrink-0 text-primary">
-                  <span className="text-lg font-bold leading-none">{new Date(event.eventDate).getDate()}</span>
-                  <span className="text-xs uppercase">{new Date(event.eventDate).toLocaleDateString('pt-BR', { month: 'short' })}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div>
-                      <h3 className="text-base font-semibold text-gray-900">{event.title}</h3>
-                      <div className="flex items-center gap-3 mt-1 flex-wrap">
-                        {event.modality && <span className="text-xs font-medium text-primary">{event.modality}</span>}
-                        {event.city && <span className="text-xs text-gray-400">{event.city}</span>}
-                        {event.location && <span className="text-xs text-gray-400">{event.location}</span>}
-                        <span className="text-xs text-gray-400">{formatDate(event.eventDate)}</span>
+            <Link key={event.id} href={`/dashboard/events/${event.id}`} className="block">
+              <div className="glass-card p-5 hover:shadow-md transition-shadow">
+                <div className="flex items-start gap-4">
+                  <div className="w-14 h-14 rounded-xl bg-primary/10 flex flex-col items-center justify-center shrink-0 text-primary">
+                    <span className="text-lg font-bold leading-none">{new Date(event.eventDate).getDate()}</span>
+                    <span className="text-xs uppercase">{new Date(event.eventDate).toLocaleDateString('pt-BR', { month: 'short' })}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div>
+                        <h3 className="text-base font-semibold text-gray-900">{event.title}</h3>
+                        <div className="flex items-center gap-3 mt-1 flex-wrap">
+                          {event.modality && <span className="text-xs font-medium text-primary">{event.modality}</span>}
+                          {event.city && <span className="text-xs text-gray-400">{event.city}</span>}
+                          {event.location && <span className="text-xs text-gray-400">{event.location}</span>}
+                          <span className="text-xs text-gray-400">{formatDate(event.eventDate)}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${STATUS_COLORS[event.status] ?? 'bg-gray-100 text-gray-500'}`}>
+                          {STATUS_LABELS[event.status] ?? event.status}
+                        </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${STATUS_COLORS[event.status] ?? 'bg-gray-100 text-gray-500'}`}>
-                        {STATUS_LABELS[event.status] ?? event.status}
-                      </span>
+                    <div className="flex items-center gap-4 mt-2 flex-wrap">
+                      <span className="text-xs text-gray-500">{formatPrice(event.price, event.currency)}</span>
+                      {event.maxParticipants && (
+                        <span className="text-xs text-gray-400">{event._count?.registrations ?? 0}/{event.maxParticipants} inscritos</span>
+                      )}
+                      {event.description && <p className="text-xs text-gray-400 truncate">{event.description}</p>}
+                      {event.location && (
+                        <a
+                          href={`https://maps.google.com/maps?q=${encodeURIComponent([event.location, event.city].filter(Boolean).join(', '))}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-blue-600 hover:underline text-xs flex items-center gap-1"
+                        >
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                          </svg>
+                          Ver no Maps
+                        </a>
+                      )}
                     </div>
-                  </div>
-                  <div className="flex items-center gap-4 mt-2">
-                    <span className="text-xs text-gray-500">{formatPrice(event.price, event.currency)}</span>
-                    {event.maxParticipants && (
-                      <span className="text-xs text-gray-400">{event._count?.registrations ?? 0}/{event.maxParticipants} inscritos</span>
-                    )}
-                    {event.description && <p className="text-xs text-gray-400 truncate">{event.description}</p>}
                   </div>
                 </div>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       )}

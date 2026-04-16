@@ -5,6 +5,7 @@ import {
   IsDateString,
   IsEnum,
   IsArray,
+  IsNumber,
   Min,
   MaxLength,
 } from 'class-validator';
@@ -93,4 +94,29 @@ export class CreateEventDto {
   @IsString()
   @IsOptional()
   routeMapUrl?: string;
+
+  @ApiPropertyOptional({ description: 'Latitude do evento' })
+  @IsNumber()
+  @IsOptional()
+  latitude?: number;
+
+  @ApiPropertyOptional({ description: 'Longitude do evento' })
+  @IsNumber()
+  @IsOptional()
+  longitude?: number;
+
+  @ApiPropertyOptional({ description: 'Ponto de encontro' })
+  @IsString()
+  @IsOptional()
+  meetingPoint?: string;
+
+  @ApiPropertyOptional({ description: 'Latitude do ponto de encontro' })
+  @IsNumber()
+  @IsOptional()
+  meetingPointLat?: number;
+
+  @ApiPropertyOptional({ description: 'Longitude do ponto de encontro' })
+  @IsNumber()
+  @IsOptional()
+  meetingPointLng?: number;
 }
