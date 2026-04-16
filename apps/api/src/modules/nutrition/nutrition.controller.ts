@@ -1,13 +1,15 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, ForbiddenException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { NutritionService } from './nutrition.service';
-import { CreateMealDto, UpdateWaterDto } from './dto/nutrition.dto';
+import { CreateMealDto, UpdateWaterDto, CreateNutritionLogDto, CreateWaterLogDto } from './dto/nutrition.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('nutrition')
 @UseGuards(AuthGuard('jwt'))
 export class NutritionController {
   constructor(private readonly nutritionService: NutritionService) {}
+
+  // ── Original endpoints (kept for backwards compat) ──────────────────────────
 
   @Get('day')
   getDaySummary(@CurrentUser('id') userId: string, @Query('date') date: string) {
@@ -33,5 +35,66 @@ export class NutritionController {
   @Post('water')
   updateWater(@CurrentUser('id') userId: string, @Body() dto: UpdateWaterDto) {
     return this.nutritionService.updateWater(userId, dto);
+  }
+
+  // ── New standardized endpoints ───────────────────────────────────────────────
+
+  /** GET /nutrition/my — athlete fetches their own logs (day + week) */
+  @Get('my')
+  getMyLogs(@CurrentUser('id') userId: string, @Query('date') date: string) {
+    const today = new Date().toISOString().slice(0, 10);
+    return this.nutritionService.getDaySummary(userId, date || today);
+  }
+
+  /** POST /nutrition — athlete registers a meal */
+  @Post()
+  createNutritionLog(@CurrentUser('id') userId: string, @Body() dto: CreateNutritionLogDto) {
+    const mealDto: CreateMealDto = {
+      date: dto.loggedAt ? dto.loggedAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+      mealName: dto.description,
+      mealTime: dto.mealType,
+      calories: dto.calories ?? 0,
+      protein: dto.protein ?? 0,
+      carbs: dto.carbs ?? 0,
+      fat: dto.fat ?? 0,
+    };
+    return this.nutritionService.logMeal(userId, mealDto);
+  }
+
+  /** DELETE /nutrition/:id */
+  @Delete(':id')
+  deleteNutritionLog(@CurrentUser('id') userId: string, @Param('id') id: string) {
+    return this.nutritionService.deleteMeal(userId, id);
+  }
+
+  /** GET /nutrition/water/my — athlete fetches water logs */
+  @Get('water/my')
+  getMyWaterLogs(@CurrentUser('id') userId: string, @Query('date') date: string) {
+    const today = new Date().toISOString().slice(0, 10);
+    return this.nutritionService.getWaterLog(userId, date || today);
+  }
+
+  /** POST /nutrition/water/log — athlete adds water intake */
+  @Post('water/log')
+  addWaterLog(@CurrentUser('id') userId: string, @Body() dto: CreateWaterLogDto) {
+    const waterDto: UpdateWaterDto = {
+      amount: dto.amountMl,
+      date: dto.loggedAt ? dto.loggedAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+    };
+    return this.nutritionService.updateWater(userId, waterDto);
+  }
+
+  /** GET /nutrition/coach/:athleteId — coach views athlete logs */
+  @Get('coach/:athleteId')
+  getAthleteLogsForCoach(
+    @CurrentUser() user: { id: string; role: string },
+    @Param('athleteId') athleteId: string,
+    @Query('date') date: string,
+  ) {
+    if (user.role !== 'COACH' && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
+      throw new ForbiddenException('Acesso restrito a coaches');
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    return this.nutritionService.getDaySummary(athleteId, date || today);
   }
 }

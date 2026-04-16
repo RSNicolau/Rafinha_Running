@@ -134,6 +134,8 @@ enum EventRegistrationStatus {
   CONFIRMED
   CANCELED
   WAITLIST
+  CHECKED_IN
+  ABSENT
 }
 
 enum KitType {
@@ -255,6 +257,7 @@ model CoachProfile {
   paymentEnabled       Boolean  @default(false) @map("payment_enabled")
   niche                SportNiche @default(RUNNING) @map("niche")
   nicheConfig          Json?      @map("niche_config") // custom branding/pricing overrides
+  appointmentUrl       String?    @map("appointment_url")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -566,6 +569,7 @@ model EventRegistration {
   medicalInfo            String?   @map("medical_info")
   registeredAt           DateTime  @default(now()) @map("registered_at")
   confirmedAt            DateTime? @map("confirmed_at")
+  checkinAt              DateTime? @map("checkin_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
 
   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)

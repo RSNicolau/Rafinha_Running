@@ -73,6 +73,18 @@ export class NutritionService {
     });
   }
 
+  async getWaterLog(userId: string, date: string) {
+    const dateObj = new Date(date);
+    const waterLog = await this.prisma.waterLog.findUnique({
+      where: { userId_date: { userId, date: dateObj } },
+    });
+    return {
+      date,
+      amount: waterLog?.amount ?? 0,
+      goal: waterLog?.goal ?? 2000,
+    };
+  }
+
   async getWeekHistory(userId: string) {
     const today = new Date();
     const sevenDaysAgo = new Date(today);

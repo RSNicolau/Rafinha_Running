@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsInt, IsNumber, IsArray, Min, IsDateString } from 'class-validator';
+import { IsString, IsOptional, IsInt, IsNumber, IsArray, Min, IsDateString, IsEnum } from 'class-validator';
 
 export class CreateMealDto {
   @IsDateString()
@@ -48,4 +48,47 @@ export class UpdateWaterDto {
 
   @IsDateString()
   date: string;
+}
+
+export class CreateNutritionLogDto {
+  @IsString()
+  @IsOptional()
+  mealType?: string;
+
+  @IsString()
+  description: string;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  calories?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  carbs?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  protein?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  fat?: number;
+
+  @IsString()
+  @IsOptional()
+  loggedAt?: string;
+}
+
+export class CreateWaterLogDto {
+  @IsInt()
+  @Min(0)
+  amountMl: number;
+
+  @IsString()
+  @IsOptional()
+  loggedAt?: string;
 }

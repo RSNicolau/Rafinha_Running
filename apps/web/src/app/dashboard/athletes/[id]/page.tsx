@@ -489,6 +489,137 @@ function MetricMini({ label, value }: { label: string; value: string }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
+// ─── Nutrition Tab ────────────────────────────────────────────────────────────
+
+interface NutritionMeal {
+  id: string;
+  mealName: string;
+  mealTime?: string | null;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  date: string;
+}
+
+interface NutritionDay {
+  date: string;
+  meals: NutritionMeal[];
+  totals: { calories: number; protein: number; carbs: number; fat: number };
+  water: { amount: number; goal: number };
+}
+
+const MEAL_TYPE_ICONS: Record<string, string> = {
+  breakfast: '🌅',
+  lunch: '☀️',
+  snack: '🍎',
+  dinner: '🌙',
+  supper: '⭐',
+};
+
+function AthleteNutritionTab({ athleteId }: { athleteId: string }) {
+  const [days, setDays] = useState<NutritionDay[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchWeek = async () => {
+      setLoading(true);
+      const today = new Date();
+      const results: NutritionDay[] = [];
+      const fetches: Promise<void>[] = [];
+
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const dateStr = d.toISOString().slice(0, 10);
+        fetches.push(
+          api.get<NutritionDay>(`/nutrition/coach/${athleteId}?date=${dateStr}`)
+            .then(({ data }) => { results.push(data); })
+            .catch(() => {
+              results.push({
+                date: dateStr,
+                meals: [],
+                totals: { calories: 0, protein: 0, carbs: 0, fat: 0 },
+                water: { amount: 0, goal: 2000 },
+              });
+            }),
+        );
+      }
+
+      await Promise.all(fetches);
+      results.sort((a, b) => a.date.localeCompare(b.date));
+      setDays(results);
+      setLoading(false);
+    };
+
+    fetchWeek();
+  }, [athleteId]);
+
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-24 bg-gray-50 rounded-xl animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  const hasAnyData = days.some((d) => d.meals.length > 0 || d.water.amount > 0);
+
+  if (!hasAnyData) {
+    return (
+      <div className="text-center py-10">
+        <p className="text-2xl mb-2">🥗</p>
+        <p className="text-sm text-gray-400">Nenhum registro nutricional nos últimos 7 dias</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {days.map((day) => {
+        const label = new Date(day.date + 'T12:00:00').toLocaleDateString('pt-BR', {
+          weekday: 'short',
+          day: '2-digit',
+          month: 'short',
+        });
+        const waterPct = Math.min(100, Math.round((day.water.amount / (day.water.goal || 2000)) * 100));
+        return (
+          <div key={day.date} className="border border-gray-100 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold text-gray-800 capitalize">{label}</p>
+              <div className="flex items-center gap-3 text-xs text-gray-500">
+                <span className="flex items-center gap-1">
+                  <span>💧</span>
+                  {day.water.amount}ml ({waterPct}%)
+                </span>
+                <span className="font-semibold text-gray-700">{day.totals.calories} kcal</span>
+              </div>
+            </div>
+
+            {day.meals.length > 0 ? (
+              <div className="space-y-1.5">
+                {day.meals.map((meal) => (
+                  <div key={meal.id} className="flex items-center gap-2 text-xs text-gray-600">
+                    <span className="shrink-0">{MEAL_TYPE_ICONS[meal.mealTime ?? ''] ?? '🍽️'}</span>
+                    <span className="flex-1 truncate">{meal.mealName}</span>
+                    <span className="shrink-0 text-gray-400">{meal.calories} kcal</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-300">Sem refeições registradas</p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
 export default function AthleteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -501,6 +632,7 @@ export default function AthleteDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [pushingGarmin, setPushingGarmin] = useState(false);
   const [garminPushMsg, setGarminPushMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<'overview' | 'nutrition'>('overview');
 
   useEffect(() => {
     if (!id) return;
@@ -690,6 +822,39 @@ export default function AthleteDetailPage() {
           ))}
         </div>
       )}
+
+      {/* Tabs */}
+      <div className="flex gap-1 mb-6 border-b border-gray-100 pb-0">
+        {[
+          { key: 'overview' as const, label: 'Visão Geral' },
+          { key: 'nutrition' as const, label: 'Nutrição' },
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-4 py-2.5 text-sm font-medium rounded-t-xl border-b-2 transition-all cursor-pointer ${
+              activeTab === tab.key
+                ? 'border-primary text-primary'
+                : 'border-transparent text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Nutrition Tab */}
+      {activeTab === 'nutrition' && (
+        <div className="glass-card p-6">
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">
+            Nutrição — Últimos 7 dias
+          </h2>
+          <AthleteNutritionTab athleteId={id} />
+        </div>
+      )}
+
+      {activeTab === 'overview' && (
+        <>
 
       {/* Garmin Recovery Card */}
       <div className="mb-6">
@@ -1009,6 +1174,8 @@ export default function AthleteDetailPage() {
 
       {/* Assessments section */}
       <AssessmentsSection athleteId={id} />
+        </>
+      )}
     </div>
   );
 }

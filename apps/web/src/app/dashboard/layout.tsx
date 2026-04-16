@@ -29,6 +29,10 @@ const navItems = [
   { href: '/dashboard/athlete/training-load', label: 'Carga de Treino', icon: 'chart', roles: ['ATHLETE'] },
   { href: '/dashboard/athlete/niche-zones', label: 'Zonas de Treino', icon: 'zones', roles: ['ATHLETE'] },
   { href: '/dashboard/athlete/badges', label: 'Conquistas', icon: 'trophy', roles: ['ATHLETE'] },
+  { href: '/dashboard/athlete/events', label: 'Eventos', icon: 'flag', roles: ['ATHLETE'] },
+  { href: '/dashboard/athlete/group', label: 'Meu Grupo', icon: 'users', roles: ['ATHLETE'] },
+  { href: '/dashboard/athlete/nutrition', label: 'Nutrição', icon: 'nutrition', roles: ['ATHLETE'] },
+  { href: '/dashboard/athlete/schedule', label: 'Agendar Sessão', icon: 'calendar', roles: ['ATHLETE'] },
   { href: '/dashboard/chat', label: 'Chat', icon: 'chat', roles: ['ATHLETE'] },
   { href: '/dashboard/integrations', label: 'Integrações', icon: 'integrations', roles: ['ATHLETE'] },
 ];
@@ -119,6 +123,17 @@ function NavIcon({ name, className }: { name: string; className?: string }) {
     zones: (
       <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+      </svg>
+    ),
+    nutrition: (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c-1.2 5.4-6 7.8-6 12a6 6 0 0012 0c0-4.2-4.8-6.6-6-12z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v8M9 13l3-3 3 3" />
+      </svg>
+    ),
+    flag: (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v18M3 5l9-2 9 2v10l-9-2-9 2V5z" />
       </svg>
     ),
   };

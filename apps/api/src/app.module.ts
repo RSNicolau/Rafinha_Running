@@ -32,6 +32,7 @@ import { StoreModule } from './modules/store/store.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { BadgesModule } from './modules/badges/badges.module';
 import { NicheModule } from './modules/niche/niche.module';
+import { AppointmentsModule } from './modules/appointments/appointments.module';
 
 @Module({
   imports: [
@@ -78,6 +79,7 @@ import { NicheModule } from './modules/niche/niche.module';
     PlatformModule,
     BadgesModule,
     NicheModule,
+    AppointmentsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: CustomThrottlerGuard },
