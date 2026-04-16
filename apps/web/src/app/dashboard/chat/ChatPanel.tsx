@@ -486,7 +486,17 @@ function formatTime(iso: string) {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
 }
 
-function AthletesChatPanel({ userId }: { userId: string }) {
+type BroadcastGroup = 'ALL' | 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' | 'ELITE';
+
+const BROADCAST_GROUPS: { value: BroadcastGroup; label: string }[] = [
+  { value: 'ALL', label: 'Todos os atletas' },
+  { value: 'BEGINNER', label: 'Iniciantes' },
+  { value: 'INTERMEDIATE', label: 'Intermediários' },
+  { value: 'ADVANCED', label: 'Avançados' },
+  { value: 'ELITE', label: 'Elite' },
+];
+
+function AthletesChatPanel({ userId, isCoach }: { userId: string; isCoach: boolean }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selected, setSelected] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -496,12 +506,37 @@ function AthletesChatPanel({ userId }: { userId: string }) {
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Broadcast state
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const [broadcastGroup, setBroadcastGroup] = useState<BroadcastGroup>('ALL');
+  const [broadcastMsg, setBroadcastMsg] = useState('');
+  const [broadcasting, setBroadcasting] = useState(false);
+  const [broadcastResult, setBroadcastResult] = useState<{ sent: number } | null>(null);
+
   useEffect(() => {
     api.get('/conversations')
       .then(r => setConversations(r.data || []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  const handleBroadcast = async () => {
+    if (!broadcastMsg.trim() || broadcasting) return;
+    setBroadcasting(true);
+    setBroadcastResult(null);
+    try {
+      const { data } = await api.post('/conversations/broadcast', {
+        message: broadcastMsg.trim(),
+        targetGroup: broadcastGroup,
+      });
+      setBroadcastResult(data);
+      setBroadcastMsg('');
+    } catch {
+      // ignore
+    } finally {
+      setBroadcasting(false);
+    }
+  };
 
   const selectConversation = async (conv: Conversation) => {
     setSelected(conv);
@@ -539,10 +574,95 @@ function AthletesChatPanel({ userId }: { userId: string }) {
 
   return (
     <div className="flex h-full">
+      {/* Broadcast Modal */}
+      {broadcastOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 w-full max-w-md shadow-xl mx-4">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-base font-bold text-gray-900">Mensagem para o Grupo</h2>
+              <button
+                onClick={() => { setBroadcastOpen(false); setBroadcastResult(null); setBroadcastMsg(''); }}
+                className="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center text-gray-400"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {broadcastResult ? (
+              <div className="text-center py-4">
+                <div className="w-14 h-14 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-3">
+                  <svg className="w-7 h-7 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <p className="text-sm font-semibold text-gray-900 mb-1">
+                  Mensagem enviada para {broadcastResult.sent} atleta{broadcastResult.sent !== 1 ? 's' : ''}
+                </p>
+                <button
+                  onClick={() => { setBroadcastOpen(false); setBroadcastResult(null); }}
+                  className="mt-4 px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 transition"
+                >
+                  Fechar
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="mb-4">
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">Para quem?</label>
+                  <select
+                    value={broadcastGroup}
+                    onChange={e => setBroadcastGroup(e.target.value as BroadcastGroup)}
+                    className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/40 transition"
+                  >
+                    {BROADCAST_GROUPS.map(g => (
+                      <option key={g.value} value={g.value}>{g.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">
+                    Mensagem <span className="text-gray-300">({broadcastMsg.length}/500)</span>
+                  </label>
+                  <textarea
+                    value={broadcastMsg}
+                    onChange={e => setBroadcastMsg(e.target.value.slice(0, 500))}
+                    rows={4}
+                    placeholder="Escreva a mensagem para seus atletas..."
+                    className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/40 transition resize-none"
+                  />
+                </div>
+                <button
+                  onClick={handleBroadcast}
+                  disabled={!broadcastMsg.trim() || broadcasting}
+                  className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {broadcasting && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                  Enviar para atletas
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Sidebar */}
       <div className="w-72 shrink-0 border-r border-gray-100 flex flex-col">
-        <div className="p-4 border-b border-gray-100">
+        <div className="p-4 border-b border-gray-100 flex items-center justify-between">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Conversas</p>
+          {isCoach && (
+            <button
+              onClick={() => { setBroadcastOpen(true); setBroadcastResult(null); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition"
+              title="Enviar mensagem para grupo"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
+              </svg>
+              Broadcast
+            </button>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto">
           {loading ? (
@@ -700,7 +820,7 @@ export default function ChatPage() {
 
       <div className="glass-card overflow-hidden" style={{ height: 'calc(100vh - 220px)', minHeight: 500 }}>
         {tab === 'brain' && isCoach && <CoachBrainPanel />}
-        {tab === 'athletes' && <AthletesChatPanel userId={user?.id ?? ''} />}
+        {tab === 'athletes' && <AthletesChatPanel userId={user?.id ?? ''} isCoach={isCoach} />}
       </div>
     </div>
   );

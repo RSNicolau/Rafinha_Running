@@ -1,8 +1,11 @@
 import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
 import { ChatService } from './chat.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 
 @ApiTags('Chat')
 @ApiBearerAuth()
@@ -27,6 +30,18 @@ export class ChatController {
     @Body('coachId') coachId: string,
   ) {
     return this.chatService.getOrCreateConversation(athleteId, coachId);
+  }
+
+  @Post('broadcast')
+  @ApiOperation({ summary: 'Enviar mensagem para grupo de atletas' })
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  async broadcast(
+    @CurrentUser('id') coachId: string,
+    @Body('message') message: string,
+    @Body('targetGroup') targetGroup?: 'ALL' | 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' | 'ELITE',
+  ) {
+    return this.chatService.broadcastMessage(coachId, message, targetGroup ?? 'ALL');
   }
 
   @Get(':id/messages')

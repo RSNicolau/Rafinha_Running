@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { AthleteLevel, NotificationType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
@@ -103,5 +104,61 @@ export class ChatService {
     }
 
     return conversation;
+  }
+
+  async broadcastMessage(
+    coachId: string,
+    message: string,
+    targetGroup: 'ALL' | 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' | 'ELITE',
+  ): Promise<{ sent: number }> {
+    // Find athletes for this coach, optionally filtered by level
+    const levelFilter =
+      targetGroup !== 'ALL'
+        ? { level: targetGroup as AthleteLevel }
+        : {};
+
+    const athleteProfiles = await this.prisma.athleteProfile.findMany({
+      where: {
+        coachId,
+        user: { deletedAt: null },
+        ...levelFilter,
+      },
+      select: { userId: true, user: { select: { name: true } } },
+    });
+
+    let sent = 0;
+
+    for (const ap of athleteProfiles) {
+      try {
+        // Get or create conversation
+        const conversation = await this.getOrCreateConversation(ap.userId, coachId);
+
+        // Create message in conversation
+        await this.prisma.message.create({
+          data: { conversationId: conversation.id, senderId: coachId, content: message },
+        });
+
+        await this.prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { lastMessageAt: new Date() },
+        });
+
+        // Create notification for athlete
+        await this.prisma.notification.create({
+          data: {
+            userId: ap.userId,
+            type: NotificationType.NEW_MESSAGE,
+            title: 'Nova mensagem do coach',
+            body: message.length > 100 ? message.slice(0, 97) + '...' : message,
+          },
+        });
+
+        sent++;
+      } catch {
+        // Continue with other athletes if one fails
+      }
+    }
+
+    return { sent };
   }
 }

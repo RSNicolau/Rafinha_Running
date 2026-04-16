@@ -5,7 +5,7 @@ import { CacheService } from '../cache/cache.service';
 import { EmailService } from '../email/email.service';
 import { RankingsService } from '../rankings/rankings.service';
 import { CoachBrainService } from '../coach-brain/coach-brain.service';
-import { SubscriptionStatus, WorkoutStatus, InviteStatus } from '@prisma/client';
+import { SubscriptionStatus, WorkoutStatus, InviteStatus, NotificationType, PlanStatus } from '@prisma/client';
 
 @Injectable()
 export class SchedulerService {
@@ -182,6 +182,239 @@ export class SchedulerService {
       await this.coachBrain.processFailedJobs();
     } catch (err) {
       this.logger.error(`AI job retry failed: ${err}`);
+    }
+  }
+
+  /** Sunday 18h — weekly summary email for each active athlete */
+  @Cron('0 18 * * 0', { name: 'weekly-athlete-summary' })
+  async sendWeeklySummary() {
+    this.logger.log('Running weekly athlete summary...');
+    try {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      // Find athletes that have an active training plan
+      const athletes = await this.prisma.user.findMany({
+        where: {
+          role: 'ATHLETE',
+          deletedAt: null,
+          athleteProfile: { coachId: { not: null } },
+          athletePlans: {
+            some: { status: PlanStatus.ACTIVE },
+          },
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          athleteProfile: {
+            select: { coachId: true },
+          },
+        },
+      });
+
+      for (const athlete of athletes) {
+        try {
+          // Workouts completed this week
+          const workoutsThisWeek = await this.prisma.workout.findMany({
+            where: {
+              athleteId: athlete.id,
+              status: WorkoutStatus.COMPLETED,
+              completedAt: { gte: sevenDaysAgo },
+            },
+            include: { result: true },
+          });
+
+          const totalWorkouts = workoutsThisWeek.length;
+          if (totalWorkouts === 0) continue;
+
+          const totalKm = workoutsThisWeek.reduce((acc, w) => {
+            return acc + (w.result ? w.result.distanceMeters / 1000 : 0);
+          }, 0);
+
+          // Find coach name
+          let coachName = 'Seu Coach';
+          if (athlete.athleteProfile?.coachId) {
+            const coach = await this.prisma.user.findUnique({
+              where: { id: athlete.athleteProfile.coachId },
+              select: { name: true },
+            });
+            if (coach?.name) coachName = coach.name;
+          }
+
+          // Calculate streak (consecutive days with workouts)
+          const workoutDates = new Set(
+            workoutsThisWeek.map(w => w.completedAt?.toDateString()).filter(Boolean),
+          );
+          const streak = workoutDates.size;
+
+          // Best avg pace from results
+          const paces = workoutsThisWeek
+            .map(w => w.result?.avgPace)
+            .filter((p): p is string => !!p);
+          const avgPace = paces.length > 0 ? paces[0] : undefined;
+
+          await this.email.sendWeeklySummary(athlete.email ?? '', athlete.name, {
+            totalKm: Math.round(totalKm * 10) / 10,
+            totalWorkouts,
+            avgPace,
+            streak,
+            coachName,
+          });
+        } catch (athleteErr) {
+          this.logger.warn(`Weekly summary failed for athlete ${athlete.id}: ${athleteErr}`);
+        }
+      }
+
+      this.logger.log(`Sent weekly summaries to ${athletes.length} athletes`);
+    } catch (err) {
+      this.logger.error(`Weekly summary cron failed: ${err}`);
+    }
+  }
+
+  /** Daily 9h — alert coach about inactive athletes (no workout in 7+ days) */
+  @Cron('0 9 * * *', { name: 'check-inactive-athletes' })
+  async checkInactiveAthletes() {
+    this.logger.log('Checking inactive athletes...');
+    try {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const coaches = await this.prisma.user.findMany({
+        where: { role: 'COACH', deletedAt: null },
+        select: { id: true, name: true },
+      });
+
+      for (const coach of coaches) {
+        const athletes = await this.prisma.athleteProfile.findMany({
+          where: { coachId: coach.id, user: { deletedAt: null } },
+          select: { userId: true, user: { select: { name: true } } },
+        });
+
+        if (!athletes.length) continue;
+
+        const inactiveAthletes: string[] = [];
+
+        for (const ap of athletes) {
+          const recentWorkout = await this.prisma.workoutResult.findFirst({
+            where: {
+              workout: { athleteId: ap.userId },
+              createdAt: { gte: sevenDaysAgo },
+            },
+          });
+          if (!recentWorkout) {
+            inactiveAthletes.push(ap.user.name);
+          }
+        }
+
+        if (inactiveAthletes.length === 0) continue;
+
+        await this.prisma.notification.create({
+          data: {
+            userId: coach.id,
+            type: NotificationType.SYSTEM,
+            title: `${inactiveAthletes.length} atleta${inactiveAthletes.length > 1 ? 's' : ''} sem treino há 7+ dias`,
+            body: `Atletas sem atividade: ${inactiveAthletes.join(', ')}`,
+            data: { athleteNames: inactiveAthletes, count: inactiveAthletes.length },
+          },
+        });
+      }
+
+      this.logger.log('Inactive athlete check complete');
+    } catch (err) {
+      this.logger.error(`Inactive athlete check failed: ${err}`);
+    }
+  }
+
+  /** Daily 7h — alert coach about athletes with low HRV (< 30) */
+  @Cron('0 7 * * *', { name: 'check-low-hrv' })
+  async checkLowHRV() {
+    this.logger.log('Checking low HRV snapshots...');
+    try {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const dayStart = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
+      const dayEnd = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+
+      const lowHRVSnapshots = await this.prisma.garminHealthSnapshot.findMany({
+        where: {
+          date: { gte: dayStart, lt: dayEnd },
+          hrv: { lt: 30, not: null },
+        },
+        include: {
+          athlete: {
+            select: {
+              id: true,
+              name: true,
+              athleteProfile: { select: { coachId: true } },
+            },
+          },
+        },
+      });
+
+      for (const snapshot of lowHRVSnapshots) {
+        const coachId = snapshot.athlete.athleteProfile?.coachId;
+        if (!coachId) continue;
+
+        await this.prisma.notification.create({
+          data: {
+            userId: coachId,
+            type: NotificationType.SYSTEM,
+            title: 'Alerta de HRV Baixo',
+            body: `${snapshot.athlete.name} tem HRV baixo (${snapshot.hrv}ms) - considere ajustar o treino`,
+            data: { athleteId: snapshot.athlete.id, hrv: snapshot.hrv },
+          },
+        });
+      }
+
+      this.logger.log(`Sent ${lowHRVSnapshots.length} HRV alerts`);
+    } catch (err) {
+      this.logger.error(`Low HRV check failed: ${err}`);
+    }
+  }
+
+  /** Daily 8h — notify coach about athletes whose race is in 14 days */
+  @Cron('0 8 * * *', { name: 'check-upcoming-races' })
+  async checkUpcomingRaces() {
+    this.logger.log('Checking upcoming races...');
+    try {
+      const targetDate = new Date();
+      targetDate.setDate(targetDate.getDate() + 14);
+      const targetStr = targetDate.toISOString().slice(0, 10); // "YYYY-MM-DD"
+
+      // OnboardingProfiles with coach and answers containing a race date
+      const profiles = await this.prisma.onboardingProfile.findMany({
+        where: {},
+        select: {
+          id: true,
+          coachId: true,
+          answers: true,
+          athlete: { select: { name: true } },
+        },
+      });
+
+      for (const profile of profiles) {
+        if (!profile.answers) continue;
+
+        // answers is a Json field — try to find a date-like value matching 14 days from now
+        const answersStr = JSON.stringify(profile.answers);
+        if (!answersStr.includes(targetStr)) continue;
+
+        await this.prisma.notification.create({
+          data: {
+            userId: profile.coachId,
+            type: NotificationType.EVENT_REMINDER,
+            title: 'Prova em 14 dias',
+            body: `Prova de ${profile.athlete.name} em 14 dias - considere tapering`,
+            data: { athleteName: profile.athlete.name, raceDate: targetStr },
+          },
+        });
+      }
+
+      this.logger.log('Upcoming race check complete');
+    } catch (err) {
+      this.logger.error(`Upcoming race check failed: ${err}`);
     }
   }
 }

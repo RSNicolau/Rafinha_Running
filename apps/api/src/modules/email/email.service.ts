@@ -135,6 +135,49 @@ export class EmailService {
     );
   }
 
+  async sendWeeklySummary(
+    to: string,
+    name: string,
+    data: {
+      totalKm: number;
+      totalWorkouts: number;
+      avgPace?: string;
+      streak: number;
+      coachName: string;
+    },
+  ): Promise<void> {
+    const platformName = process.env.PLATFORM_NAME || 'Rafinha Running';
+    const { totalKm, totalWorkouts, avgPace, streak, coachName } = data;
+    await this.send(
+      to,
+      `Sua semana em números — ${platformName}`,
+      `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px;background:#fff">
+        <h2 style="color:#DC2626;margin-bottom:4px">Sua semana em números</h2>
+        <p style="color:#6B7280;font-size:14px;margin-bottom:24px">Olá, <strong style="color:#111">${name}</strong>! Aqui está o resumo da sua semana:</p>
+        <div style="display:flex;gap:12px;margin-bottom:24px">
+          <div style="flex:1;background:#FEF2F2;border-radius:12px;padding:16px;text-align:center">
+            <p style="font-size:28px;font-weight:700;color:#DC2626;margin:0">${totalWorkouts}</p>
+            <p style="font-size:12px;color:#6B7280;margin:4px 0 0">treino${totalWorkouts !== 1 ? 's' : ''}</p>
+          </div>
+          <div style="flex:1;background:#F0FDF4;border-radius:12px;padding:16px;text-align:center">
+            <p style="font-size:28px;font-weight:700;color:#16A34A;margin:0">${totalKm}km</p>
+            <p style="font-size:12px;color:#6B7280;margin:4px 0 0">percorridos</p>
+          </div>
+          <div style="flex:1;background:#EFF6FF;border-radius:12px;padding:16px;text-align:center">
+            <p style="font-size:28px;font-weight:700;color:#2563EB;margin:0">${streak}</p>
+            <p style="font-size:12px;color:#6B7280;margin:4px 0 0">dias ativos</p>
+          </div>
+        </div>
+        ${avgPace ? `<p style="color:#374151;font-size:14px;margin-bottom:16px">Pace médio: <strong>${avgPace} min/km</strong></p>` : ''}
+        <a href="${this.appUrl}/dashboard" style="display:inline-block;margin:8px 0 24px;padding:12px 24px;background:#DC2626;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">
+          Ver meu painel
+        </a>
+        <hr style="border:none;border-top:1px solid #E5E7EB;margin:0 0 16px"/>
+        <p style="color:#9CA3AF;font-size:12px">Enviado por <strong>${coachName}</strong> via ${platformName}</p>
+      </div>`,
+    );
+  }
+
   async sendWelcome(to: string, name: string): Promise<void> {
     const platformName = process.env.PLATFORM_NAME || 'Rafinha Running';
     await this.send(
