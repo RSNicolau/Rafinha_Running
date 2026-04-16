@@ -17,7 +17,7 @@ import {
   ApiQuery,
   ApiParam,
 } from '@nestjs/swagger';
-import { UserRole } from '@prisma/client';
+import { UserRole, EventRegistrationStatus } from '@prisma/client';
 import { EventsService } from './events.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
@@ -133,5 +133,46 @@ export class EventsController {
     @Query('limit') limit?: number,
   ) {
     return this.eventsService.getRegistrations(id, userId, page, limit);
+  }
+
+  @Post(':id/checkin')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'))
+  @ApiOperation({ summary: 'Atleta faz check-in no evento (±1h do horario)' })
+  @ApiParam({ name: 'id', description: 'ID do evento' })
+  async checkin(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.eventsService.checkin(id, userId);
+  }
+
+  @Get(':id/attendees')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.COACH, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Coach ve lista de presenca do evento (CHECKED_IN, REGISTERED, ABSENT)' })
+  @ApiParam({ name: 'id', description: 'ID do evento' })
+  async getAttendees(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.eventsService.getAttendees(id, userId);
+  }
+
+  @Put(':id/registrations/:regId')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.COACH, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Coach atualiza status da inscricao manualmente' })
+  @ApiParam({ name: 'id', description: 'ID do evento' })
+  @ApiParam({ name: 'regId', description: 'ID da inscricao' })
+  async updateRegistration(
+    @Param('id') id: string,
+    @Param('regId') regId: string,
+    @CurrentUser('id') userId: string,
+    @Body() body: { status: EventRegistrationStatus },
+  ) {
+    return this.eventsService.updateRegistrationStatus(id, regId, userId, body.status);
   }
 }

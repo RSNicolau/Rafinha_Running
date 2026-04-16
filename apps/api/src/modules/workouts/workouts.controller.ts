@@ -102,4 +102,11 @@ export class WorkoutsController {
   ) {
     return this.trainingLoadService.getTrainingLoad(athleteId, days ? Number(days) : 60);
   }
+
+  @Get('group-comparison')
+  @Roles(UserRole.ATHLETE)
+  @ApiOperation({ summary: 'Comparacao anonima do atleta com grupo (mesmo coach)' })
+  async getGroupComparison(@CurrentUser('id') athleteId: string) {
+    return this.workoutsService.getGroupComparison(athleteId);
+  }
 }

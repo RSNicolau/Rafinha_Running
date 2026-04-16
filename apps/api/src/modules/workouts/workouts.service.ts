@@ -354,4 +354,105 @@ export class WorkoutsService {
       },
     });
   }
+
+  async getGroupComparison(athleteId: string) {
+    // Find the athlete's coach
+    const athleteProfile = await this.prisma.athleteProfile.findUnique({
+      where: { userId: athleteId },
+      select: { coachId: true },
+    });
+
+    if (!athleteProfile?.coachId) {
+      return { data: [], myRank: null, groupAvgKm: 0 };
+    }
+
+    const coachId = athleteProfile.coachId;
+
+    // Get all athletes under the same coach
+    const coachAthletes = await this.prisma.athleteProfile.findMany({
+      where: { coachId },
+      select: { userId: true },
+    });
+
+    const athleteIds = coachAthletes.map((a) => a.userId);
+
+    // Current week boundaries
+    const now = new Date();
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay());
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 7);
+
+    // For each athlete: total weekly km, workout count, best pace
+    const athleteStats = await Promise.all(
+      athleteIds.map(async (uid) => {
+        const [weeklyResults, weeklyWorkoutCount, bestPaceResult] = await Promise.all([
+          this.prisma.workoutResult.findMany({
+            where: {
+              workout: { athleteId: uid, status: WorkoutStatus.COMPLETED, scheduledDate: { gte: weekStart, lt: weekEnd } },
+            },
+            select: { distanceMeters: true, durationSeconds: true, avgPace: true },
+          }),
+          this.prisma.workout.count({
+            where: { athleteId: uid, status: WorkoutStatus.COMPLETED, scheduledDate: { gte: weekStart, lt: weekEnd } },
+          }),
+          this.prisma.workoutResult.findFirst({
+            where: {
+              workout: { athleteId: uid },
+              distanceMeters: { gte: 4500, lte: 5500 }, // ~5K
+            },
+            orderBy: { durationSeconds: 'asc' },
+            select: { durationSeconds: true, distanceMeters: true },
+          }),
+        ]);
+
+        const weeklyMeters = weeklyResults.reduce((s, r) => s + r.distanceMeters, 0);
+        const weeklyKm = Math.round(weeklyMeters / 10) / 100;
+
+        // Best 5K pace string
+        let best5kPace: string | null = null;
+        if (bestPaceResult && bestPaceResult.distanceMeters > 0) {
+          const paceSecPerKm = (bestPaceResult.durationSeconds / bestPaceResult.distanceMeters) * 1000;
+          const mins = Math.floor(paceSecPerKm / 60);
+          const secs = Math.round(paceSecPerKm % 60).toString().padStart(2, '0');
+          best5kPace = `${mins}:${secs}`;
+        }
+
+        return {
+          userId: uid,
+          weeklyKm,
+          workouts: weeklyWorkoutCount,
+          best5kPace,
+        };
+      }),
+    );
+
+    // Sort by weekly km desc
+    athleteStats.sort((a, b) => b.weeklyKm - a.weeklyKm);
+
+    const groupAvgKm =
+      athleteStats.length > 0
+        ? Math.round((athleteStats.reduce((s, a) => s + a.weeklyKm, 0) / athleteStats.length) * 100) / 100
+        : 0;
+
+    // Build anonymous ranking — only caller sees themselves as "Você"
+    const ranked = athleteStats.map((a, idx) => ({
+      rank: idx + 1,
+      isMe: a.userId === athleteId,
+      label: a.userId === athleteId ? 'Você' : `Atleta #${idx + 1}`,
+      weeklyKm: a.weeklyKm,
+      workouts: a.workouts,
+      best5kPace: a.best5kPace,
+    }));
+
+    const myEntry = ranked.find((r) => r.isMe);
+
+    return {
+      data: ranked,
+      myRank: myEntry?.rank ?? null,
+      total: ranked.length,
+      groupAvgKm,
+    };
+  }
 }

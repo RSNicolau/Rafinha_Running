@@ -304,6 +304,85 @@ export class EventsService {
     return { data: registrations, total, page, totalPages: Math.ceil(total / limit) };
   }
 
+  async checkin(eventId: string, userId: string) {
+    const registration = await this.prisma.eventRegistration.findUnique({
+      where: { eventId_userId: { eventId, userId } },
+    });
+
+    if (!registration) throw new NotFoundException('Você não está inscrito neste evento');
+    if (registration.status === EventRegistrationStatus.CANCELED) {
+      throw new BadRequestException('Sua inscrição está cancelada');
+    }
+    if (registration.status === EventRegistrationStatus.CHECKED_IN) {
+      throw new ConflictException('Check-in já realizado');
+    }
+
+    const event = await this.prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) throw new NotFoundException('Evento não encontrado');
+
+    // Allow check-in ±1 hour from event start
+    const now = new Date();
+    const diffMs = Math.abs(now.getTime() - event.eventDate.getTime());
+    const oneHour = 60 * 60 * 1000;
+    if (diffMs > oneHour) {
+      throw new BadRequestException(
+        'Check-in disponível apenas 1 hora antes ou após o início do evento',
+      );
+    }
+
+    return this.prisma.eventRegistration.update({
+      where: { id: registration.id },
+      data: {
+        status: EventRegistrationStatus.CHECKED_IN,
+        checkinAt: new Date(),
+      },
+    });
+  }
+
+  async getAttendees(eventId: string, requesterId: string) {
+    const event = await this.prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) throw new NotFoundException('Evento não encontrado');
+    if (event.createdById !== requesterId) throw new ForbiddenException('Apenas o criador pode ver a lista de presença');
+
+    const registrations = await this.prisma.eventRegistration.findMany({
+      where: { eventId, status: { not: EventRegistrationStatus.CANCELED } },
+      include: { user: { select: { id: true, name: true, email: true, avatarUrl: true, phone: true } } },
+      orderBy: { registeredAt: 'asc' },
+    });
+
+    const counts = {
+      total: registrations.length,
+      checkedIn: registrations.filter((r) => r.status === EventRegistrationStatus.CHECKED_IN).length,
+      registered: registrations.filter(
+        (r) => r.status === EventRegistrationStatus.CONFIRMED || r.status === EventRegistrationStatus.PENDING,
+      ).length,
+      absent: registrations.filter((r) => r.status === EventRegistrationStatus.ABSENT).length,
+    };
+
+    return { registrations, counts };
+  }
+
+  async updateRegistrationStatus(
+    eventId: string,
+    registrationId: string,
+    requesterId: string,
+    status: EventRegistrationStatus,
+  ) {
+    const event = await this.prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) throw new NotFoundException('Evento não encontrado');
+    if (event.createdById !== requesterId) throw new ForbiddenException('Apenas o criador pode atualizar inscrições');
+
+    const registration = await this.prisma.eventRegistration.findUnique({ where: { id: registrationId } });
+    if (!registration || registration.eventId !== eventId) throw new NotFoundException('Inscrição não encontrada');
+
+    const data: any = { status };
+    if (status === EventRegistrationStatus.CHECKED_IN && !registration.checkinAt) {
+      data.checkinAt = new Date();
+    }
+
+    return this.prisma.eventRegistration.update({ where: { id: registrationId }, data });
+  }
+
   async getMyRegistrations(userId: string, page = 1, limit = 20) {
     const skip = (page - 1) * limit;
 
