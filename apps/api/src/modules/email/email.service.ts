@@ -187,9 +187,8 @@ export class EmailService {
       `<div style="font-family:Georgia,serif;max-width:580px;margin:0 auto;background:#ffffff">
 
         <!-- Header -->
-        <div style="background:#DC2626;padding:32px 40px;text-align:center">
-          <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:700;letter-spacing:1px">RR RAFINHA RUNNING</h1>
-          <p style="color:#FCA5A5;margin:6px 0 0;font-size:13px;letter-spacing:2px">ASSESSORIA ESPORTIVA</p>
+        <div style="background:#DC2626;padding:8px 40px;text-align:center">
+          <img src="https://rrweb-production.up.railway.app/logo.png" alt="RR Rafinha Running" style="width:200px;max-width:100%;display:block;margin:0 auto" />
         </div>
 
         <!-- Body -->
