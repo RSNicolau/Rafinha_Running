@@ -15,12 +15,20 @@ interface Question {
   placeholder?: string | null;
 }
 
+interface NicheInfo {
+  key: string;
+  label: string;
+  icon: string;
+  color: string;
+}
+
 interface FormData {
   coachId: string;
   coachName: string;
   brandName: string;
   primaryColor: string;
   logoUrl?: string | null;
+  niche?: NicheInfo | null;
   form: {
     id: string;
     title: string;
@@ -312,9 +320,23 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
                 }}
               />
             </div>
-            <p className="text-xs font-bold uppercase tracking-[0.3em] text-red-100 mb-2">Assessoria de Corrida</p>
+            {/* Niche badge */}
+            {formData.niche ? (
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full mb-3"
+                style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)' }}>
+                <span className="text-lg">{formData.niche.icon}</span>
+                <span className="text-xs font-bold uppercase tracking-widest text-white">
+                  {formData.niche.label}
+                </span>
+              </div>
+            ) : (
+              <p className="text-xs font-bold uppercase tracking-[0.3em] text-red-100 mb-2">Assessoria de Corrida</p>
+            )}
             <h1 className="text-3xl font-black uppercase tracking-tight leading-tight text-white">
-              Transforme seu<br /><span className="text-red-200">treino de corrida</span>
+              Transforme seu<br />
+              <span className="text-red-200">
+                {formData.niche ? `treino de ${formData.niche.label.toLowerCase()}` : 'treino de corrida'}
+              </span>
             </h1>
             <p className="text-sm text-red-100 mt-3 max-w-xs mx-auto">
               Planilhas personalizadas • IA + Garmin • Coach dedicado

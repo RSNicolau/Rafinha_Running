@@ -31,6 +31,7 @@ import { CoachBrainModule } from './modules/coach-brain/coach-brain.module';
 import { StoreModule } from './modules/store/store.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { BadgesModule } from './modules/badges/badges.module';
+import { NicheModule } from './modules/niche/niche.module';
 
 @Module({
   imports: [
@@ -76,6 +77,7 @@ import { BadgesModule } from './modules/badges/badges.module';
     StoreModule,
     PlatformModule,
     BadgesModule,
+    NicheModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: CustomThrottlerGuard },

@@ -1315,6 +1315,25 @@ export default function SettingsPage() {
           </div>
         )}
 
+        {/* Nicho do Esporte — COACH only */}
+        {isCoach && (
+          <div className="glass-card p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Nicho do Esporte</h2>
+                <p className="text-sm text-gray-600">Configure o esporte principal e métricas da sua assessoria</p>
+                <p className="text-xs text-gray-400 mt-0.5">Ajusta perguntas, zonas de treino e integrações por modalidade</p>
+              </div>
+              <a
+                href="/dashboard/settings/niche"
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary/90 transition shrink-0"
+              >
+                🎯 Configurar →
+              </a>
+            </div>
+          </div>
+        )}
+
         {/* Onboarding Form — COACH only */}
         {isCoach && (
           <div className="glass-card p-6">

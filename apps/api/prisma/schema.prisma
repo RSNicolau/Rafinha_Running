@@ -147,6 +147,16 @@ enum AIAssistantTone {
   MOTIVATIONAL
 }
 
+enum SportNiche {
+  RUNNING
+  CYCLING
+  TRIATHLON
+  SWIMMING
+  CROSSFIT
+  FITNESS
+  GENERAL
+}
+
 // ============================================
 // MODELS
 // ============================================
@@ -243,6 +253,8 @@ model CoachProfile {
   stripeSecretKey      String?  @map("stripe_secret_key")        // encrypted AES-256
   stripeWebhookSecret  String?  @map("stripe_webhook_secret")    // encrypted AES-256
   paymentEnabled       Boolean  @default(false) @map("payment_enabled")
+  niche                SportNiche @default(RUNNING) @map("niche")
+  nicheConfig          Json?      @map("niche_config") // custom branding/pricing overrides
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -260,6 +272,7 @@ model AthleteProfile {
   maxHR        Int?         @map("max_hr")
   weeklyGoalKm Float?      @map("weekly_goal_km")
   level        AthleteLevel @default(BEGINNER)
+  niche        SportNiche   @default(RUNNING) @map("niche")
   createdAt    DateTime     @default(now()) @map("created_at")
   updatedAt    DateTime     @updatedAt @map("updated_at")
 
@@ -738,6 +751,7 @@ model OnboardingForm {
   title       String               @default("Questionário de Anamnese")
   description String?
   isActive    Boolean              @default(true) @map("is_active")
+  niche       SportNiche           @default(RUNNING) @map("niche")
   createdAt   DateTime             @default(now()) @map("created_at")
   updatedAt   DateTime             @updatedAt @map("updated_at")
 

@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/lib/api';
 import { useDemo, MOCK_ATHLETES, MOCK_STATS, MOCK_ALERTS } from '@/contexts/demo-mode';
 import { getNiche } from '@/lib/niches';
+import NicheSetupBanner from '@/components/NicheSetupBanner';
 
 interface Athlete {
   id: string;
@@ -154,6 +155,9 @@ export default function DashboardPage() {
             : `Painel do treinador de ${niche.label.toLowerCase()}`}
         </p>
       </div>
+
+      {/* Niche setup banner — coaches only */}
+      {(user?.role === 'COACH' || user?.role === 'ADMIN') && <NicheSetupBanner />}
 
       {/* API Error banner */}
       {loadError && (
