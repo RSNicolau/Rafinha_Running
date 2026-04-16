@@ -4,7 +4,7 @@ buildCommand = "pnpm install --no-frozen-lockfile && cd apps/api && npx prisma g
 
 [deploy]
 startCommand = "cd /app/apps/api && npx prisma db push --skip-generate --accept-data-loss && node /app/apps/api/dist/main"
-healthcheckPath = "/api/v1/auth/me"
+healthcheckPath = "/health"
 healthcheckTimeout = 120
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3

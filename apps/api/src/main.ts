@@ -82,6 +82,9 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // Public health check — must be registered BEFORE global prefix
+  app.use('/health', (_req: any, res: any) => res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() }));
+
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
 
