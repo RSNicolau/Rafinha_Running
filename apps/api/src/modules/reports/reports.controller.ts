@@ -12,39 +12,24 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 export class ReportsController {
   constructor(private reportsService: ReportsService) {}
 
-  // IMPORTANT: /me must come BEFORE /:athleteId to avoid NestJS route conflict
-  @Get('monthly/me')
-  @ApiOperation({ summary: 'Gerar meu relatório mensal em PDF (atleta logado)' })
-  @ApiQuery({ name: 'month', required: false, description: 'Mês no formato YYYY-MM' })
-  async getMyMonthlyReport(
-    @CurrentUser('id') athleteId: string,
-    @Query('month') month: string | undefined,
-    @Res() res: Response,
-  ) {
-    const pdfBuffer = await this.reportsService.generateMonthlyPdf(athleteId, athleteId, month);
-
-    const monthLabel = month ?? this.lastMonthString();
-    const filename = `meu-relatorio-${monthLabel}.pdf`;
-
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-      'Content-Length': pdfBuffer.length,
-    });
-
-    res.end(pdfBuffer);
-  }
-
+  /**
+   * GET /reports/monthly/:athleteId?month=YYYY-MM
+   * - Use "me" as athleteId to get your own report
+   * - Coaches can pass any athleteId
+   */
   @Get('monthly/:athleteId')
-  @ApiOperation({ summary: 'Gerar relatório mensal em PDF para o atleta (coach)' })
-  @ApiParam({ name: 'athleteId', description: 'ID do atleta' })
+  @ApiOperation({ summary: 'Gerar relatório mensal em PDF — use "me" para o próprio atleta' })
+  @ApiParam({ name: 'athleteId', description: 'ID do atleta ou "me" para o usuário logado' })
   @ApiQuery({ name: 'month', required: false, description: 'Mês no formato YYYY-MM (padrão: mês anterior)' })
   async getMonthlyReport(
     @CurrentUser('id') requesterId: string,
-    @Param('athleteId') athleteId: string,
+    @Param('athleteId') athleteIdParam: string,
     @Query('month') month: string | undefined,
     @Res() res: Response,
   ) {
+    // "me" is an alias for the authenticated user's own ID
+    const athleteId = athleteIdParam === 'me' ? requesterId : athleteIdParam;
+
     const pdfBuffer = await this.reportsService.generateMonthlyPdf(requesterId, athleteId, month);
 
     const monthLabel = month ?? this.lastMonthString();
