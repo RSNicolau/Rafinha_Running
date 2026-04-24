@@ -10,6 +10,9 @@ function getSubscriptionRoute(status: string | undefined): string {
   return status === 'ACTIVE' || status === 'TRIALING' ? '/dashboard' : '/subscribe';
 }
 
+// Roles that bypass subscription check and go straight to dashboard
+const BYPASS_SUBSCRIPTION_ROLES = ['COACH', 'SUPER_ADMIN', 'ADMIN'];
+
 function validateLoginForm(email: string, password: string): string | null {
   if (!email.trim()) return 'E-mail é obrigatório';
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'E-mail inválido';
@@ -44,6 +47,8 @@ function LoginContent() {
         .then(({ data: me }) => {
           if (me?.role === 'SUPER_ADMIN') { router.replace('/super-admin'); return; }
           if (me?.role === 'ADMIN') { router.replace('/dashboard/admin/plans'); return; }
+          // COACH goes straight to dashboard — no subscription required
+          if (BYPASS_SUBSCRIPTION_ROLES.includes(me?.role)) { router.replace('/dashboard'); return; }
           return api.get('/subscriptions/current')
             .then(({ data }) => router.replace(getSubscriptionRoute(data?.status)))
             .catch((err) => {
@@ -79,6 +84,8 @@ function LoginContent() {
         const role = meRes.data?.role;
         if (role === 'SUPER_ADMIN') { router.replace('/super-admin'); return; }
         if (role === 'ADMIN') { router.replace('/dashboard/admin/plans'); return; }
+        // COACH and other bypass roles go straight to dashboard — no subscription required
+        if (BYPASS_SUBSCRIPTION_ROLES.includes(role)) { router.replace('/dashboard'); return; }
         const { data } = await api.get('/subscriptions/current');
         router.replace(getSubscriptionRoute(data?.status));
       } catch (err: any) {
