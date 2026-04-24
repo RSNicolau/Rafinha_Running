@@ -111,6 +111,7 @@ export default function IntegrationsPage() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState<string | null>(null);
+  const [connectErrors, setConnectErrors] = useState<Record<string, string>>({});
   const [syncing, setSyncing] = useState(false);
   const [settingUpWebhook, setSettingUpWebhook] = useState(false);
   const [webhookMsg, setWebhookMsg] = useState<string | null>(null);
@@ -154,23 +155,26 @@ export default function IntegrationsPage() {
 
   const handleConnect = async (provider: string) => {
     setConnecting(provider);
+    // Clear previous error for this provider
+    setConnectErrors((prev) => { const n = { ...prev }; delete n[provider]; return n; });
     try {
       const { data } = await api.post(`/integrations/${provider}/connect`);
       if (data?.url) window.open(data.url, '_blank');
     } catch (e: any) {
-      alert(e?.response?.data?.message || `Erro ao conectar ${provider}`);
+      const msg = e?.response?.data?.message || `Erro ao conectar ${provider}`;
+      setConnectErrors((prev) => ({ ...prev, [provider]: msg }));
     } finally {
       setConnecting(null);
     }
   };
 
-  const handleDisconnect = async (id: string) => {
-    if (!confirm('Desconectar esta integração?')) return;
+  const handleDisconnect = async (id: string, provider: string) => {
+    setConnectErrors((prev) => { const n = { ...prev }; delete n[provider]; return n; });
     try {
       await api.delete(`/integrations/${id}`);
       setIntegrations((prev) => prev.filter((i) => i.id !== id));
     } catch {
-      alert('Erro ao desconectar');
+      setConnectErrors((prev) => ({ ...prev, [provider]: 'Erro ao desconectar' }));
     }
   };
 
@@ -179,9 +183,9 @@ export default function IntegrationsPage() {
     try {
       const { data } = await api.post('/integrations/sync');
       const total = data?.synced?.reduce((a: number, s: any) => a + (s.synced || 0), 0) || 0;
-      alert(`${total} atividade(s) sincronizada(s)!`);
+      setOauthMsg({ type: 'success', text: `${total} atividade(s) sincronizada(s)!` });
     } catch {
-      alert('Erro ao sincronizar');
+      setOauthMsg({ type: 'error', text: 'Erro ao sincronizar atividades' });
     } finally {
       setSyncing(false);
     }
@@ -316,21 +320,28 @@ export default function IntegrationsPage() {
                         Último sync: {formatLastSync(connected.lastSyncAt)}
                       </div>
                       <button
-                        onClick={() => handleDisconnect(connected.id)}
+                        onClick={() => handleDisconnect(connected.id, provider.key)}
                         className="text-xs text-red-500 hover:text-red-700 font-medium cursor-pointer"
                       >
                         Desconectar
                       </button>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => handleConnect(provider.key)}
-                      disabled={connecting === provider.key || loading}
-                      className="w-full py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer disabled:opacity-50"
-                      style={{ backgroundColor: provider.color + '12', color: provider.color }}
-                    >
-                      {connecting === provider.key ? 'Conectando...' : `Conectar ${provider.name}`}
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleConnect(provider.key)}
+                        disabled={connecting === provider.key || loading}
+                        className="w-full py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer disabled:opacity-50"
+                        style={{ backgroundColor: provider.color + '12', color: provider.color }}
+                      >
+                        {connecting === provider.key ? 'Conectando...' : `Conectar ${provider.name}`}
+                      </button>
+                      {connectErrors[provider.key] && (
+                        <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 leading-relaxed">
+                          ⚠ {connectErrors[provider.key]}
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
               </div>

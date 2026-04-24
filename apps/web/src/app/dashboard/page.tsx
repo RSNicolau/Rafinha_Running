@@ -260,19 +260,19 @@ export default function DashboardPage() {
             ) : (
               athletes.slice(0, 6).map((athlete) => {
                 const levelInfo = LEVEL_STYLES[athlete.level] ?? LEVEL_STYLES.BEGINNER;
-                const color = avatarColor(athlete.user.name || 'A');
+                const color = avatarColor(athlete.user?.name || 'A');
                 return (
                   <Link
                     key={athlete.id}
-                    href={`/dashboard/athletes/${athlete.user.id}`}
+                    href={`/dashboard/athletes/${athlete.user?.id ?? athlete.id}`}
                     className="flex items-center gap-3 p-3 sm:p-4 hover:bg-gray-50/50 transition"
                   >
                     <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-white text-sm font-bold" style={{ backgroundColor: color }}>
-                      {athlete.user.name?.charAt(0)?.toUpperCase()}
+                      {athlete.user?.name?.charAt(0)?.toUpperCase() ?? '?'}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{athlete.user.name}</p>
-                      <p className="text-xs text-gray-400 truncate">{athlete.user.email}</p>
+                      <p className="text-sm font-medium text-gray-900 truncate">{athlete.user?.name ?? '—'}</p>
+                      <p className="text-xs text-gray-400 truncate">{athlete.user?.email ?? ''}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${levelInfo.className}`}>

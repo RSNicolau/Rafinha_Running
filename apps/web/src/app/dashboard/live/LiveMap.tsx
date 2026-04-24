@@ -49,60 +49,64 @@ function formatElapsed(secs: number) {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-// ─── Mapbox token ─────────────────────────────────────────────────────────────
+// ─── Map Component (MapLibre GL — free, no token required) ───────────────────
 
-const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '';
-
-// ─── Map Component ────────────────────────────────────────────────────────────
-
-interface MapboxMapProps {
+interface LiveMapProps {
   positions: Map<string, LivePosition>;
   athletes: LiveAthleteInfo[];
   selectedAthleteId: string | null;
 }
 
-function MapboxMap({ positions, athletes, selectedAthleteId }: MapboxMapProps) {
+function LiveMap({ positions, athletes, selectedAthleteId }: LiveMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  // Use unknown so we don't need @types/mapbox-gl at import time
   const mapRef = useRef<any>(null);
   const markersRef = useRef<Map<string, any>>(new Map());
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
 
-  // Initialize map once
+  // Initialize map once (MapLibre GL — open-source, no API token needed)
   useEffect(() => {
-    if (!MAPBOX_TOKEN) {
-      setMapError('Configure NEXT_PUBLIC_MAPBOX_TOKEN para ver o mapa');
-      return;
-    }
     if (!mapContainerRef.current || mapRef.current) return;
 
-    let mapboxgl: any;
+    let maplibregl: any;
     try {
-      // Dynamic require — works after npm install mapbox-gl
-      mapboxgl = require('mapbox-gl');
-      require('mapbox-gl/dist/mapbox-gl.css');
+      maplibregl = require('maplibre-gl');
+      require('maplibre-gl/dist/maplibre-gl.css');
     } catch {
-      setMapError('Instale o pacote mapbox-gl: npm install mapbox-gl @types/mapbox-gl');
+      setMapError('Erro ao carregar biblioteca de mapas. Recarregue a página.');
       return;
     }
 
-    mapboxgl.accessToken = MAPBOX_TOKEN;
-
-    const map = new mapboxgl.Map({
+    const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: 'mapbox://styles/mapbox/light-v11',
-      center: [-51.925, -14.235], // Brazil center [lng, lat]
+      // Free OpenStreetMap style via MapTiler (no token needed for basic tiles)
+      style: {
+        version: 8,
+        sources: {
+          osm: {
+            type: 'raster',
+            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+            tileSize: 256,
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+            maxzoom: 19,
+          },
+        },
+        layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
+      },
+      center: [-47.9, -15.78], // Brazil center [lng, lat]
       zoom: 4,
     });
 
     map.on('load', () => setMapReady(true));
-    map.on('error', () => setMapError('Erro ao carregar mapa Mapbox'));
+    map.on('error', (e: any) => {
+      // Tile errors are non-fatal (network issues)
+      if (e?.error?.status) return;
+      setMapError('Erro ao inicializar o mapa');
+    });
 
     mapRef.current = map;
 
     return () => {
-      // Clean up all markers
       markersRef.current.forEach((m) => m.remove());
       markersRef.current.clear();
       map.remove();
@@ -112,11 +116,11 @@ function MapboxMap({ positions, athletes, selectedAthleteId }: MapboxMapProps) {
 
   // Update markers whenever positions change
   useEffect(() => {
-    if (!mapReady || !mapRef.current || !MAPBOX_TOKEN) return;
+    if (!mapReady || !mapRef.current) return;
 
-    let mapboxgl: any;
+    let maplibregl: any;
     try {
-      mapboxgl = require('mapbox-gl');
+      maplibregl = require('maplibre-gl');
     } catch {
       return;
     }
@@ -132,48 +136,31 @@ function MapboxMap({ positions, athletes, selectedAthleteId }: MapboxMapProps) {
       const lngLat: [number, number] = [pos.longitude, pos.latitude];
 
       if (markersRef.current.has(athleteId)) {
-        // Update existing marker position
         markersRef.current.get(athleteId).setLngLat(lngLat);
       } else {
-        // Create new marker
         const el = document.createElement('div');
         el.style.cssText = [
-          'width:32px',
-          'height:32px',
-          'border-radius:50%',
-          'background:#DC2626',
-          'border:3px solid white',
-          'box-shadow:0 2px 8px rgba(220,38,38,0.5)',
-          'display:flex',
-          'align-items:center',
-          'justify-content:center',
-          'cursor:pointer',
-          'font-size:11px',
-          'font-weight:700',
-          'color:white',
-          'font-family:system-ui,sans-serif',
+          'width:36px', 'height:36px', 'border-radius:50%',
+          'background:#DC2626', 'border:3px solid white',
+          'box-shadow:0 2px 10px rgba(220,38,38,0.5)',
+          'display:flex', 'align-items:center', 'justify-content:center',
+          'cursor:pointer', 'font-size:12px', 'font-weight:700',
+          'color:white', 'font-family:system-ui,sans-serif',
         ].join(';');
         el.textContent = displayName.charAt(0).toUpperCase();
 
         const popupHtml = `
-          <div style="font-family:system-ui,sans-serif;padding:4px 2px;min-width:140px">
+          <div style="font-family:system-ui,sans-serif;padding:6px 4px;min-width:140px">
             <p style="font-weight:700;font-size:13px;margin:0 0 6px;color:#111">${displayName}</p>
             <p style="font-size:11px;color:#6b7280;margin:2px 0">
               <span style="font-weight:600;color:#DC2626">${formatPace(pos.pace)}</span> /km
             </p>
-            <p style="font-size:11px;color:#6b7280;margin:2px 0">
-              ${formatDistance(pos.distance)}
-            </p>
+            <p style="font-size:11px;color:#6b7280;margin:2px 0">${formatDistance(pos.distance)}</p>
           </div>
         `;
 
-        const popup = new mapboxgl.Popup({ offset: 20, closeButton: false })
-          .setHTML(popupHtml);
-
-        const marker = new mapboxgl.Marker(el)
-          .setLngLat(lngLat)
-          .setPopup(popup)
-          .addTo(mapRef.current);
+        const popup = new maplibregl.Popup({ offset: 20, closeButton: false }).setHTML(popupHtml);
+        const marker = new maplibregl.Marker(el).setLngLat(lngLat).setPopup(popup).addTo(mapRef.current);
 
         el.addEventListener('mouseenter', () => popup.addTo(mapRef.current));
         el.addEventListener('mouseleave', () => popup.remove());
@@ -184,13 +171,10 @@ function MapboxMap({ positions, athletes, selectedAthleteId }: MapboxMapProps) {
 
     // Remove stale markers
     markersRef.current.forEach((marker, id) => {
-      if (!activeIds.has(id)) {
-        marker.remove();
-        markersRef.current.delete(id);
-      }
+      if (!activeIds.has(id)) { marker.remove(); markersRef.current.delete(id); }
     });
 
-    // Pan to show all active athletes
+    // Pan to athletes
     if (activeIds.size > 0 && mapRef.current) {
       const coords = Array.from(activeIds)
         .map((id) => positions.get(id))
@@ -200,17 +184,13 @@ function MapboxMap({ positions, athletes, selectedAthleteId }: MapboxMapProps) {
         mapRef.current.flyTo({ center: [coords[0].longitude, coords[0].latitude], zoom: 14, duration: 1200 });
       } else if (coords.length > 1) {
         try {
+          const { LngLatBounds } = require('maplibre-gl');
           const bounds = coords.reduce(
-            (acc, p) => acc.extend([p.longitude, p.latitude]),
-            new mapboxgl.LngLatBounds(
-              [coords[0].longitude, coords[0].latitude],
-              [coords[0].longitude, coords[0].latitude],
-            ),
+            (acc: any, p) => acc.extend([p.longitude, p.latitude]),
+            new LngLatBounds([coords[0].longitude, coords[0].latitude], [coords[0].longitude, coords[0].latitude]),
           );
           mapRef.current.fitBounds(bounds, { padding: 80, duration: 1200 });
-        } catch {
-          // ignore bounds errors
-        }
+        } catch { /* ignore */ }
       }
     }
   }, [positions, athletes, mapReady]);
@@ -458,12 +438,8 @@ export default function LiveTrackingPage() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-500">Mapa</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                  MAPBOX_TOKEN
-                    ? 'bg-emerald-50 text-emerald-600'
-                    : 'bg-amber-50 text-amber-600'
-                }`}>
-                  {MAPBOX_TOKEN ? 'Ativo' : 'Sem token'}
+                <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-50 text-emerald-600">
+                  OpenStreetMap
                 </span>
               </div>
             </div>
@@ -493,7 +469,7 @@ export default function LiveTrackingPage() {
 
         {/* Map — takes remaining space */}
         <div className="flex-1 min-w-0 glass-card overflow-hidden relative">
-          {liveAthletes.length === 0 && !MAPBOX_TOKEN ? (
+          {liveAthletes.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center bg-gray-50/30 text-center p-8">
               <div className="relative mb-6">
                 <div className="w-16 h-16 rounded-full bg-primary/8 flex items-center justify-center">
@@ -509,7 +485,7 @@ export default function LiveTrackingPage() {
               </p>
             </div>
           ) : (
-            <MapboxMap
+            <LiveMap
               positions={watchedPositions}
               athletes={liveAthletes}
               selectedAthleteId={selectedAthleteId}

@@ -20,7 +20,7 @@ export default function AthleteReportsPage() {
     setLoading(true);
     setError('');
     try {
-      const token = localStorage.getItem('accessToken');
+      const token = localStorage.getItem('rr_access_token') || localStorage.getItem('accessToken');
       const res = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/reports/monthly/me?month=${month}`,
         { headers: { Authorization: `Bearer ${token}` } },
