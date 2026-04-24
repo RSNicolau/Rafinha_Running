@@ -31,6 +31,7 @@ import { CoachBrainModule } from './modules/coach-brain/coach-brain.module';
 import { StoreModule } from './modules/store/store.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { BadgesModule } from './modules/badges/badges.module';
+import { ReportsModule } from './modules/reports/reports.module';
 import { NicheModule } from './modules/niche/niche.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { HealthModule as HealthCheckModule } from './health/health.module';
@@ -80,6 +81,7 @@ import { MetricsModule } from './metrics/metrics.module';
     StoreModule,
     PlatformModule,
     BadgesModule,
+    ReportsModule,
     NicheModule,
     AppointmentsModule,
     HealthCheckModule,

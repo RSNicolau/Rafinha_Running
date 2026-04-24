@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { BadgesService } from '../badges/badges.service';
 import { CreateWorkoutDto, SubmitResultDto, SubmitFeedbackDto } from './dto/workout.dto';
 import { WorkoutStatus, NotificationType } from '@prisma/client';
 
@@ -9,6 +10,7 @@ export class WorkoutsService {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
+    private badges: BadgesService,
   ) {}
 
   async create(coachId: string, dto: CreateWorkoutDto) {
@@ -125,6 +127,19 @@ export class WorkoutsService {
         { workoutId, athleteId, resultId: result.id },
       ).catch(() => {});
     }
+
+    // Fire-and-forget: check and award badges after workout completion
+    this.badges.checkAndAwardBadges(athleteId).then((awarded) => {
+      if (awarded.length > 0) {
+        this.notifications.createNotification(
+          athleteId,
+          NotificationType.SYSTEM,
+          '🏅 Nova conquista desbloqueada!',
+          `Você ganhou ${awarded.length} badge${awarded.length > 1 ? 's' : ''}: ${awarded.join(', ')}`,
+          { badges: awarded },
+        ).catch(() => {});
+      }
+    }).catch(() => {});
 
     return result;
   }
