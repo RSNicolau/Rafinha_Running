@@ -182,6 +182,11 @@ model User {
   aiModel      String?   @map("ai_model")      // override default model per provider
   aiByok       Boolean   @default(false) @map("ai_byok") // true = coach uses own API key
   aiApiKey     String?   @map("ai_api_key")    // encrypted, only used when aiByok=true
+
+  // 2FA TOTP (coaches)
+  totpSecret   String?   @map("totp_secret")   // encrypted base32 secret
+  totpEnabled  Boolean   @default(false) @map("totp_enabled")
+
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 

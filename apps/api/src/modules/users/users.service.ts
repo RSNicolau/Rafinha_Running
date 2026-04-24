@@ -152,6 +152,49 @@ export class UsersService {
     return { message: 'Senha alterada com sucesso' };
   }
 
+  async deleteAccount(userId: string): Promise<{ deleted: true }> {
+    // Soft-delete: anonimiza dados pessoais, mantém registros históricos
+    const anonymizedEmail = `deleted_${userId}@anonymized.local`;
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        email: anonymizedEmail,
+        name: 'Conta Excluída',
+        phone: null,
+        avatarUrl: null,
+        passwordHash: 'DELETED',
+        deletedAt: new Date(),
+        isActive: false,
+      },
+    });
+    // Invalidar cache
+    await this.cache.del(`user:${userId}`);
+    return { deleted: true };
+  }
+
+  async exportMyData(userId: string): Promise<Record<string, any>> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        athleteProfile: true,
+        coachProfile: true,
+        integrations: { select: { provider: true, isActive: true, createdAt: true } },
+        subscriptions: { select: { status: true, planType: true, currentPeriodEnd: true, createdAt: true } },
+        notifications: { take: 50, orderBy: { createdAt: 'desc' }, select: { title: true, body: true, createdAt: true } },
+      },
+    });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+
+    // Remove sensitive fields
+    const { passwordHash, aiApiKey, appleId, ...safeUser } = user as any;
+
+    return {
+      exportedAt: new Date().toISOString(),
+      requestedBy: userId,
+      data: safeUser,
+    };
+  }
+
   async getCoachStats(coachId: string) {
     const cacheKey = `coach_stats:${coachId}`;
     const cached = await this.cache.get<{ totalAthletes: number; alertCount: number; adherencePercent: number }>(cacheKey);

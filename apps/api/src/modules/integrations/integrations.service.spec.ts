@@ -11,6 +11,7 @@ import { GarminService } from './garmin/garmin.service';
 import { StravaService } from './strava/strava.service';
 import { CorosService } from './coros/coros.service';
 import { PolarService } from './polar/polar.service';
+import { GoogleFitService } from './google-fit/google-fit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { IntegrationProvider } from '@prisma/client';
 
@@ -75,6 +76,7 @@ describe('IntegrationsService', () => {
         { provide: StravaService, useValue: mockStrava },
         { provide: CorosService,  useValue: mockCoros  },
         { provide: PolarService,  useValue: mockPolar  },
+        { provide: GoogleFitService, useValue: { getAuthUrl: jest.fn().mockResolvedValue({ url: 'https://accounts.google.com/auth', provider: 'GOOGLE_FIT' }), handleCallback: jest.fn().mockResolvedValue({ success: true }), syncActivities: jest.fn().mockResolvedValue({ provider: 'GOOGLE_FIT', synced: 0 }) } },
         { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();
@@ -175,15 +177,18 @@ describe('IntegrationsService', () => {
       expect(result.synced).toHaveLength(0);
     });
 
-    it('skips APPLE_HEALTH and GOOGLE_FIT providers (no sync handler)', async () => {
+    it('skips APPLE_HEALTH but syncs GOOGLE_FIT via GoogleFitService', async () => {
       mockPrisma.fitnessIntegration.findMany.mockResolvedValue([
         { id: 'i1', provider: IntegrationProvider.APPLE_HEALTH, userId: 'u1', isActive: true },
         { id: 'i2', provider: IntegrationProvider.GOOGLE_FIT,   userId: 'u1', isActive: true },
       ]);
 
       const result = await service.syncActivities('u1');
-      // No service syncs were called, result array is empty (switch falls through)
-      expect(result.synced).toHaveLength(0);
+      // APPLE_HEALTH is skipped (no handler), GOOGLE_FIT is handled by GoogleFitService
+      const appleResult = result.synced.find((r: any) => r.provider === 'APPLE_HEALTH');
+      expect(appleResult).toBeUndefined();
+      const googleFitResult = result.synced.find((r: any) => r.provider === 'GOOGLE_FIT');
+      expect(googleFitResult).toBeDefined();
     });
   });
 

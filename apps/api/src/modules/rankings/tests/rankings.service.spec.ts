@@ -23,6 +23,7 @@ const mockPrisma = {
     groupBy: jest.fn().mockResolvedValue([]),
   },
   $queryRaw: jest.fn(),
+  $queryRawUnsafe: jest.fn(),
 };
 
 describe('RankingsService', () => {
@@ -43,7 +44,7 @@ describe('RankingsService', () => {
 
   describe('getTopByKm', () => {
     it('should return ranked entries with positions', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue(mockRawKmResult);
+      mockPrisma.$queryRawUnsafe.mockResolvedValue(mockRawKmResult);
 
       const result = await service.getTopByKm('all', 20);
 
@@ -56,16 +57,16 @@ describe('RankingsService', () => {
     });
 
     it('should cap limit at 100', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue([]);
+      mockPrisma.$queryRawUnsafe.mockResolvedValue([]);
 
       await service.getTopByKm('all', 500);
 
-      const call = mockPrisma.$queryRaw.mock.calls[0];
+      const call = mockPrisma.$queryRawUnsafe.mock.calls[0];
       expect(call).toBeDefined();
     });
 
     it('should return empty array when no results', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue([]);
+      mockPrisma.$queryRawUnsafe.mockResolvedValue([]);
 
       const result = await service.getTopByKm('all', 20);
 
@@ -75,7 +76,7 @@ describe('RankingsService', () => {
 
   describe('getTopByWorkouts', () => {
     it('should return workout count rankings', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue(mockRawWorkoutsResult);
+      mockPrisma.$queryRawUnsafe.mockResolvedValue(mockRawWorkoutsResult);
 
       const result = await service.getTopByWorkouts('all', 20);
 

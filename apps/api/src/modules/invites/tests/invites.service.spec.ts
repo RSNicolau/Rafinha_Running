@@ -13,6 +13,7 @@ import { NotFoundException, BadRequestException, ConflictException } from '@nest
 import { InvitesService } from '../invites.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { EmailService } from '../../email/email.service';
 
 jest.mock('bcrypt', () => ({
   hash:    jest.fn().mockResolvedValue('$2b$10$hashed'),
@@ -53,8 +54,9 @@ describe('InvitesService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InvitesService,
-        { provide: PrismaService,       useValue: mockPrisma        },
+        { provide: PrismaService,        useValue: mockPrisma        },
         { provide: NotificationsService, useValue: mockNotifications },
+        { provide: EmailService, useValue: { sendAthleteInvite: jest.fn().mockResolvedValue(undefined), sendInviteEmail: jest.fn().mockResolvedValue(undefined), sendWelcome: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 

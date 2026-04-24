@@ -33,6 +33,8 @@ import { PlatformModule } from './modules/platform/platform.module';
 import { BadgesModule } from './modules/badges/badges.module';
 import { NicheModule } from './modules/niche/niche.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
+import { HealthModule as HealthCheckModule } from './health/health.module';
+import { MetricsModule } from './metrics/metrics.module';
 
 @Module({
   imports: [
@@ -80,6 +82,8 @@ import { AppointmentsModule } from './modules/appointments/appointments.module';
     BadgesModule,
     NicheModule,
     AppointmentsModule,
+    HealthCheckModule,
+    MetricsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: CustomThrottlerGuard },

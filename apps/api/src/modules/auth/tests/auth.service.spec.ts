@@ -10,6 +10,7 @@ jest.mock('bcrypt', () => ({
 
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { EmailService } from '../../email/email.service';
 
 const mockUser = {
   id: 'user-1',
@@ -50,6 +51,7 @@ describe('AuthService', () => {
         AuthService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: JwtService, useValue: mockJwt },
+        { provide: EmailService, useValue: { sendPasswordReset: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 

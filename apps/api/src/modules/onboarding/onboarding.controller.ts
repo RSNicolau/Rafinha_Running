@@ -3,11 +3,13 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { UserRole, QuestionType } from '@prisma/client';
 import { OnboardingService } from './onboarding.service';
+import { SubmitOnboardingDto, CreateCheckoutDto } from './dto/onboarding.dto';
 
 @ApiTags('Onboarding')
 @Controller('onboarding')
@@ -23,15 +25,11 @@ export class OnboardingController {
   }
 
   @Post('public/:slug/submit')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({ summary: 'Submeter respostas do formulário de onboarding' })
   async submitForm(
     @Param('slug') slug: string,
-    @Body() body: {
-      athleteName: string;
-      athleteEmail: string;
-      athletePhone?: string;
-      answers: Record<string, any>;
-    },
+    @Body() body: SubmitOnboardingDto,
   ) {
     // coachId resolved from slug on server side — never trusted from body
     return this.onboardingService.submitFormBySlug(slug, {
@@ -43,10 +41,11 @@ export class OnboardingController {
   }
 
   @Post('public/:slug/checkout')
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
   @ApiOperation({ summary: 'Criar checkout de pagamento para atleta após onboarding' })
   async createCheckout(
     @Param('slug') slug: string,
-    @Body() body: { athleteId: string; planType?: string },
+    @Body() body: CreateCheckoutDto,
   ) {
     return this.onboardingService.createAthleteCheckout(body.athleteId, body.planType);
   }
