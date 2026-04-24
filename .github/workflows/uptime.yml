@@ -1,0 +1,127 @@
+name: Uptime Monitor
+
+on:
+  schedule:
+    # A cada 15 minutos (mínimo confiável do GitHub Actions)
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  check-api:
+    name: API Health Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check API health
+        id: api_check
+        run: |
+          HTTP_CODE=$(curl -s -o /tmp/health_body.json -w "%{http_code}" \
+            --max-time 15 \
+            https://rrapi-production.up.railway.app/health)
+
+          echo "http_code=$HTTP_CODE" >> $GITHUB_OUTPUT
+          echo "body=$(cat /tmp/health_body.json)" >> $GITHUB_OUTPUT
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ API DOWN — HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          STATUS=$(cat /tmp/health_body.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))")
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+
+          if [ "$STATUS" != "ok" ]; then
+            echo "❌ API DEGRADED — status=$STATUS"
+            exit 1
+          fi
+
+          echo "✅ API OK — HTTP $HTTP_CODE, status=$STATUS"
+
+      - name: Check detailed health (DB)
+        id: detailed_check
+        run: |
+          HTTP_CODE=$(curl -s -o /tmp/detailed_body.json -w "%{http_code}" \
+            --max-time 15 \
+            https://rrapi-production.up.railway.app/api/v1/health/detailed)
+
+          echo "http_code=$HTTP_CODE" >> $GITHUB_OUTPUT
+          echo "body=$(cat /tmp/detailed_body.json 2>/dev/null || echo '{}')" >> $GITHUB_OUTPUT
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            DB_STATUS=$(cat /tmp/detailed_body.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('checks',{}).get('database',{}).get('status','unknown'))" 2>/dev/null || echo "unknown")
+            MEM_MB=$(cat /tmp/detailed_body.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('checks',{}).get('memory',{}).get('heapUsedMb','?'))" 2>/dev/null || echo "?")
+            echo "✅ Detailed: DB=$DB_STATUS, heap=${MEM_MB}MB"
+          else
+            echo "⚠️ Detailed health endpoint returned HTTP $HTTP_CODE (non-critical)"
+          fi
+        continue-on-error: true
+
+      - name: Create GitHub Issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `🚨 [Uptime] API DOWN — ${new Date().toISOString()}`;
+            const body = `## API Health Check Failed
+
+            **Timestamp:** ${new Date().toISOString()}
+            **Endpoint:** https://rrapi-production.up.railway.app/health
+            **HTTP Code:** ${{ steps.api_check.outputs.http_code || 'timeout' }}
+            **Status:** ${{ steps.api_check.outputs.status || 'unreachable' }}
+
+            ## Response Body
+            \`\`\`json
+            ${{ steps.api_check.outputs.body || '(sem resposta)' }}
+            \`\`\`
+
+            ## Próximos passos
+            1. Verificar logs no Railway: https://railway.app
+            2. Verificar status do banco de dados
+            3. Executar rollback se necessário: ver \`docs/runbooks/deployment-rollback.md\`
+
+            ---
+            *Criado automaticamente pelo workflow de Uptime Monitor*`;
+
+            // Verificar se já existe issue aberta para não criar duplicatas
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'uptime,incident',
+            });
+
+            const alreadyOpen = existingIssues.data.some(i => i.title.includes('[Uptime] API DOWN'));
+            if (alreadyOpen) {
+              console.log('Issue de uptime já aberta, pulando criação de duplicata');
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['uptime', 'incident'],
+            });
+
+  check-web:
+    name: Web Frontend Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check Vercel deployment
+        run: |
+          # Tenta as URLs conhecidas do Vercel
+          URLS=(
+            "https://rr-rafinha-running.vercel.app"
+          )
+
+          for URL in "${URLS[@]}"; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$URL" 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "307" ] || [ "$HTTP_CODE" = "308" ]; then
+              echo "✅ Web OK — $URL HTTP $HTTP_CODE"
+            else
+              echo "⚠️ Web — $URL HTTP $HTTP_CODE"
+            fi
+          done
+        continue-on-error: true
