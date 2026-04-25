@@ -45,6 +45,36 @@ export class WorkoutsController {
     return this.workoutsService.getHistory(athleteId, page, limit);
   }
 
+  // ── Training Load routes must come BEFORE :id to avoid shadowing ───────────
+
+  @Get('training-load')
+  @ApiOperation({ summary: 'Carga de treino do atleta logado (ATL/CTL/TSB)' })
+  @ApiQuery({ name: 'days', required: false, example: 60 })
+  async getMyTrainingLoad(
+    @CurrentUser('id') athleteId: string,
+    @Query('days') days?: number,
+  ) {
+    return this.trainingLoadService.getTrainingLoad(athleteId, days ? Number(days) : 60);
+  }
+
+  @Get('training-load/:athleteId')
+  @Roles(UserRole.COACH)
+  @ApiOperation({ summary: 'Carga de treino de um atleta (coach)' })
+  @ApiQuery({ name: 'days', required: false, example: 60 })
+  async getAthleteTrainingLoad(
+    @Param('athleteId') athleteId: string,
+    @Query('days') days?: number,
+  ) {
+    return this.trainingLoadService.getTrainingLoad(athleteId, days ? Number(days) : 60);
+  }
+
+  @Get('group-comparison')
+  @Roles(UserRole.ATHLETE)
+  @ApiOperation({ summary: 'Comparacao anonima do atleta com grupo (mesmo coach)' })
+  async getGroupComparison(@CurrentUser('id') athleteId: string) {
+    return this.workoutsService.getGroupComparison(athleteId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Detalhe do treino' })
   async findOne(@Param('id') id: string) {
@@ -82,31 +112,15 @@ export class WorkoutsController {
     return this.workoutsService.syncFromAppleHealth(athleteId, body);
   }
 
-  @Get('training-load')
-  @ApiOperation({ summary: 'Carga de treino do atleta logado (ATL/CTL/TSB)' })
-  @ApiQuery({ name: 'days', required: false, example: 60 })
-  async getMyTrainingLoad(
-    @CurrentUser('id') athleteId: string,
-    @Query('days') days?: number,
+  @Patch(':id/type')
+  @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Coach muda o tipo do treino (ex: de INTERVAL para RECOVERY após alerta de HRV)' })
+  async changeType(
+    @Param('id') workoutId: string,
+    @CurrentUser('id') coachId: string,
+    @Body('type') type: string,
   ) {
-    return this.trainingLoadService.getTrainingLoad(athleteId, days ? Number(days) : 60);
+    return this.workoutsService.changeWorkoutType(workoutId, coachId, type);
   }
 
-  @Get('training-load/:athleteId')
-  @Roles(UserRole.COACH)
-  @ApiOperation({ summary: 'Carga de treino de um atleta (coach)' })
-  @ApiQuery({ name: 'days', required: false, example: 60 })
-  async getAthleteTrainingLoad(
-    @Param('athleteId') athleteId: string,
-    @Query('days') days?: number,
-  ) {
-    return this.trainingLoadService.getTrainingLoad(athleteId, days ? Number(days) : 60);
-  }
-
-  @Get('group-comparison')
-  @Roles(UserRole.ATHLETE)
-  @ApiOperation({ summary: 'Comparacao anonima do atleta com grupo (mesmo coach)' })
-  async getGroupComparison(@CurrentUser('id') athleteId: string) {
-    return this.workoutsService.getGroupComparison(athleteId);
-  }
 }

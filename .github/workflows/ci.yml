@@ -151,6 +151,38 @@ jobs:
       - name: Run tests
         run: pnpm test --passWithNoTests
 
+  # ── E2E Tests (optional — does not block ci-success) ──────────────────────────
+  e2e:
+    name: E2E Tests (optional)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: cd ../.. && pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E auth tests
+        run: npx playwright test e2e/auth-flow.spec.ts
+        env:
+          E2E_BASE_URL: http://localhost:3001
+
   # ── Status gate ───────────────────────────────────────────────────────────────
   ci-success:
     name: CI Success

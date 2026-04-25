@@ -220,8 +220,12 @@ export default function SettingsPage() {
   const [profileBannerUrl, setProfileBannerUrl] = useState<string>('');
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [uploadingBanner, setUploadingBanner] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const profileBannerInputRef = useRef<HTMLInputElement>(null);
+
+  // Whether AI config has been loaded (for skeleton)
+  const [loadingAiConfig, setLoadingAiConfig] = useState(true);
 
   // Load user on mount
   useEffect(() => {
@@ -252,7 +256,7 @@ export default function SettingsPage() {
     if (storeUser?.role === 'COACH' || storeUser?.role === 'ADMIN' || storeUser?.role === 'SUPER_ADMIN') {
       api.get('/ai-assistant/config').then(({ data }) => {
         setAiConfig({ assistantName: data.assistantName ?? 'Rafinha', tone: data.tone ?? 'FRIENDLY', personaPrompt: data.personaPrompt ?? '', voiceEnabled: data.voiceEnabled ?? false });
-      }).catch(() => {});
+      }).catch(() => {}).finally(() => setLoadingAiConfig(false));
 
       api.get('/config/branding').then(({ data }) => {
         setBrandingForm({
@@ -364,16 +368,22 @@ export default function SettingsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadingAvatar(true);
+    setUploadProgress(0);
     try {
-      // Resize to 400x400 center-crop, 92% quality
+      // Simulate progress during resize (heavy computation)
+      setUploadProgress(20);
       const resized = await resizeImageCanvas(file, 400, 400, 0.92);
+      setUploadProgress(60);
       setAvatarUrl(resized);
+      setUploadProgress(80);
       await api.put('/users/me', { avatarUrl: resized });
+      setUploadProgress(100);
       setProfileFeedback({ type: 'success', message: 'Foto de perfil atualizada.' });
     } catch {
       setProfileFeedback({ type: 'error', message: 'Erro ao fazer upload da foto.' });
     } finally {
       setUploadingAvatar(false);
+      setUploadProgress(0);
       e.target.value = '';
     }
   };
@@ -382,16 +392,22 @@ export default function SettingsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadingBanner(true);
+    setUploadProgress(0);
     try {
+      setUploadProgress(20);
       // Resize to 1200x400 center-crop, 90% quality
       const resized = await resizeImageCanvas(file, 1200, 400, 0.90);
+      setUploadProgress(65);
       setProfileBannerUrl(resized);
+      setUploadProgress(85);
       await api.put('/users/me', { profileBannerUrl: resized });
+      setUploadProgress(100);
       setProfileFeedback({ type: 'success', message: 'Banner de perfil atualizado.' });
     } catch {
       setProfileFeedback({ type: 'error', message: 'Erro ao fazer upload do banner.' });
     } finally {
       setUploadingBanner(false);
+      setUploadProgress(0);
       e.target.value = '';
     }
   };
@@ -564,7 +580,12 @@ export default function SettingsPage() {
                 )}
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
                   {uploadingBanner ? (
-                    <div className="w-8 h-8 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="w-8 h-8 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                      {uploadProgress > 0 && (
+                        <span className="text-white text-xs font-medium bg-black/50 px-2 py-0.5 rounded-full">{uploadProgress}%</span>
+                      )}
+                    </div>
                   ) : (
                     <div className="bg-black/50 backdrop-blur-sm rounded-full px-3 py-1.5 flex items-center gap-1.5">
                       <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -574,6 +595,14 @@ export default function SettingsPage() {
                     </div>
                   )}
                 </div>
+                {uploadingBanner && uploadProgress > 0 && (
+                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+                    <div
+                      className="h-full bg-white transition-all duration-300"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                )}
                 <input ref={profileBannerInputRef} type="file" accept="image/*" className="hidden" onChange={handleProfileBannerUpload} />
               </div>
 
@@ -594,7 +623,12 @@ export default function SettingsPage() {
                       )}
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100">
                         {uploadingAvatar ? (
-                          <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                          <div className="flex flex-col items-center gap-0.5">
+                            <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                            {uploadProgress > 0 && (
+                              <span className="text-white text-[9px] font-semibold">{uploadProgress}%</span>
+                            )}
+                          </div>
                         ) : (
                           <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
@@ -963,58 +997,85 @@ export default function SettingsPage() {
         {isAdmin && (
           <div className="glass-card p-6">
             <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">IA Assistente</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1.5">Nome da IA</label>
-                <input
-                  type="text"
-                  value={aiConfig.assistantName}
-                  onChange={e => setAiConfig(c => ({ ...c, assistantName: e.target.value }))}
-                  className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
-                  placeholder="Ex: Rafinha"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1.5">Tom de comunicação</label>
-                <select
-                  value={aiConfig.tone}
-                  onChange={e => setAiConfig(c => ({ ...c, tone: e.target.value }))}
-                  className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
-                >
-                  <option value="FRIENDLY">Amigável e próximo</option>
-                  <option value="PROFESSIONAL">Profissional e técnico</option>
-                  <option value="MOTIVATIONAL">Motivador e energético</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1.5">Prompt de persona (opcional)</label>
-                <textarea
-                  value={aiConfig.personaPrompt}
-                  onChange={e => setAiConfig(c => ({ ...c, personaPrompt: e.target.value }))}
-                  rows={3}
-                  className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition resize-none"
-                  placeholder="Ex: Fale sempre com energia, use gírias do esporte e encoraje muito os atletas."
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-900">Resposta por voz</p>
-                  <p className="text-xs text-gray-400 mt-0.5">A IA lê as respostas em voz alta (Chrome/Safari)</p>
+            {loadingAiConfig ? (
+              <div className="animate-pulse space-y-4">
+                <div className="space-y-1.5">
+                  <div className="h-3 w-20 bg-gray-100 rounded" />
+                  <div className="h-10 bg-gray-100 rounded-xl" />
                 </div>
-                <Toggle checked={aiConfig.voiceEnabled} onChange={v => setAiConfig(c => ({ ...c, voiceEnabled: v }))} />
+                <div className="space-y-1.5">
+                  <div className="h-3 w-28 bg-gray-100 rounded" />
+                  <div className="h-10 bg-gray-100 rounded-xl" />
+                </div>
+                <div className="space-y-1.5">
+                  <div className="h-3 w-36 bg-gray-100 rounded" />
+                  <div className="h-20 bg-gray-100 rounded-xl" />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <div className="h-3.5 w-28 bg-gray-100 rounded" />
+                    <div className="h-3 w-44 bg-gray-100 rounded" />
+                  </div>
+                  <div className="w-10 h-6 bg-gray-100 rounded-full" />
+                </div>
+                <div className="h-10 w-40 bg-gray-100 rounded-xl" />
               </div>
-            </div>
-            <div className="mt-5">
-              <button
-                onClick={handleSaveAiConfig}
-                disabled={savingAi}
-                className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-60 text-white text-sm font-medium rounded-xl transition cursor-pointer flex items-center gap-2"
-              >
-                {savingAi && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                Salvar Configuração IA
-              </button>
-            </div>
-            <Feedback state={aiFeedback} />
+            ) : (
+              <>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">Nome da IA</label>
+                    <input
+                      type="text"
+                      value={aiConfig.assistantName}
+                      onChange={e => setAiConfig(c => ({ ...c, assistantName: e.target.value }))}
+                      className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
+                      placeholder="Ex: Rafinha"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">Tom de comunicação</label>
+                    <select
+                      value={aiConfig.tone}
+                      onChange={e => setAiConfig(c => ({ ...c, tone: e.target.value }))}
+                      className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
+                    >
+                      <option value="FRIENDLY">Amigável e próximo</option>
+                      <option value="PROFESSIONAL">Profissional e técnico</option>
+                      <option value="MOTIVATIONAL">Motivador e energético</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1.5">Prompt de persona (opcional)</label>
+                    <textarea
+                      value={aiConfig.personaPrompt}
+                      onChange={e => setAiConfig(c => ({ ...c, personaPrompt: e.target.value }))}
+                      rows={3}
+                      className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition resize-none"
+                      placeholder="Ex: Fale sempre com energia, use gírias do esporte e encoraje muito os atletas."
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">Resposta por voz</p>
+                      <p className="text-xs text-gray-400 mt-0.5">A IA lê as respostas em voz alta (Chrome/Safari)</p>
+                    </div>
+                    <Toggle checked={aiConfig.voiceEnabled} onChange={v => setAiConfig(c => ({ ...c, voiceEnabled: v }))} />
+                  </div>
+                </div>
+                <div className="mt-5">
+                  <button
+                    onClick={handleSaveAiConfig}
+                    disabled={savingAi}
+                    className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-60 text-white text-sm font-medium rounded-xl transition cursor-pointer flex items-center gap-2"
+                  >
+                    {savingAi && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                    Salvar Configuração IA
+                  </button>
+                </div>
+                <Feedback state={aiFeedback} />
+              </>
+            )}
           </div>
         )}
 

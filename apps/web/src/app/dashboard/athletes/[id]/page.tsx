@@ -8,6 +8,7 @@ import dynamic from 'next/dynamic';
 
 const GarminRecoveryCard = dynamic(() => import('../_components/GarminRecoveryCard'), { ssr: false });
 const TrainingLoadChart = dynamic(() => import('./TrainingLoadChart'), { ssr: false });
+const DocumentsTab = dynamic(() => import('./DocumentsTab'), { ssr: false });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -632,7 +633,7 @@ export default function AthleteDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [pushingGarmin, setPushingGarmin] = useState(false);
   const [garminPushMsg, setGarminPushMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'nutrition'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'nutrition' | 'documents'>('overview');
 
   useEffect(() => {
     if (!id) return;
@@ -828,6 +829,7 @@ export default function AthleteDetailPage() {
         {[
           { key: 'overview' as const, label: 'Visão Geral' },
           { key: 'nutrition' as const, label: 'Nutrição' },
+          { key: 'documents' as const, label: 'Documentos' },
         ].map((tab) => (
           <button
             key={tab.key}
@@ -850,6 +852,16 @@ export default function AthleteDetailPage() {
             Nutrição — Últimos 7 dias
           </h2>
           <AthleteNutritionTab athleteId={id} />
+        </div>
+      )}
+
+      {/* Documents Tab */}
+      {activeTab === 'documents' && (
+        <div className="glass-card p-6">
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">
+            Documentos do Atleta
+          </h2>
+          <DocumentsTab athleteId={id} />
         </div>
       )}
 

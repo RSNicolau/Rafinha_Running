@@ -19,6 +19,7 @@ export class MercadoPagoService {
     email: string,
     name: string,
     planType: SubscriptionPlanType,
+    idempotencyKey?: string,
   ) {
     // Plan amounts in BRL
     const PLAN_AMOUNTS: Record<string, number> = {
@@ -50,6 +51,7 @@ export class MercadoPagoService {
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json',
+        ...(idempotencyKey ? { 'X-Idempotency-Key': idempotencyKey } : {}),
       },
       body: JSON.stringify({
         reason: `RR Rafinha Running - Plano ${planType}`,

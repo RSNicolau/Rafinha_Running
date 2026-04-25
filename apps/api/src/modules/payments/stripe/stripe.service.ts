@@ -28,6 +28,7 @@ export class StripeService {
     email: string,
     name: string,
     planType: SubscriptionPlanType,
+    idempotencyKey?: string,
   ) {
     const customerId = await this.createCustomer(userId, email, name);
 
@@ -35,15 +36,18 @@ export class StripeService {
       ? process.env.STRIPE_ANNUAL_PRICE_ID
       : process.env.STRIPE_MONTHLY_PRICE_ID;
 
-    const subscription = await this.stripe.subscriptions.create({
-      customer: customerId,
-      items: [{ price: priceId }],
-      payment_behavior: 'default_incomplete',
-      payment_settings: { save_default_payment_method: 'on_subscription' },
-      trial_period_days: 7,
-      expand: ['latest_invoice.payment_intent'],
-      metadata: { userId },
-    });
+    const subscription = await this.stripe.subscriptions.create(
+      {
+        customer: customerId,
+        items: [{ price: priceId }],
+        payment_behavior: 'default_incomplete',
+        payment_settings: { save_default_payment_method: 'on_subscription' },
+        trial_period_days: 7,
+        expand: ['latest_invoice.payment_intent'],
+        metadata: { userId },
+      },
+      idempotencyKey ? { idempotencyKey } : undefined,
+    );
 
     await this.prisma.subscription.create({
       data: {

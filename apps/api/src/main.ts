@@ -20,15 +20,25 @@ function validateEnv(): void {
     throw new Error(`Missing required env variables: ${missing.join(', ')}`);
   }
 
-  // Warn (not crash) for optional-but-important vars
-  const recommended = [
-    'PAGARME_API_KEY',
-    'PAGARME_WEBHOOK_SECRET',
-    'SENTRY_DSN',
-  ];
-  const absent = recommended.filter((k) => !process.env[k]);
-  if (absent.length) {
-    console.warn(`[startup] WARNING — optional env vars not set: ${absent.join(', ')}`);
+  // ITEM 2 — Encryption key must be set and strong
+  if (!process.env.API_KEY_ENCRYPTION_SECRET || process.env.API_KEY_ENCRYPTION_SECRET.length < 32) {
+    throw new Error('API_KEY_ENCRYPTION_SECRET must be set and at least 32 chars long');
+  }
+
+  // ITEM 3 — Warn (not crash) for optional-but-important vars
+  const warnings: string[] = [];
+  if (!process.env.RESEND_API_KEY) warnings.push('RESEND_API_KEY not set — emails disabled');
+  if (!process.env.EXPO_ACCESS_TOKEN) warnings.push('EXPO_ACCESS_TOKEN not set — push notifications disabled');
+  if (!process.env.MERCADO_PAGO_ACCESS_TOKEN && !process.env.STRIPE_SECRET_KEY && !process.env.PAGARME_API_KEY) {
+    warnings.push('No payment provider configured — payments will fail');
+  }
+  if (!process.env.ANTHROPIC_API_KEY) warnings.push('ANTHROPIC_API_KEY not set — AI features disabled');
+  if (!process.env.PAGARME_WEBHOOK_SECRET) warnings.push('PAGARME_WEBHOOK_SECRET not set');
+  if (!process.env.SENTRY_DSN) warnings.push('SENTRY_DSN not set — error tracking disabled');
+  if (warnings.length > 0) {
+    const { Logger } = require('@nestjs/common');
+    const startupLogger = new Logger('Bootstrap');
+    warnings.forEach(w => startupLogger.warn(`ENV WARNING: ${w}`));
   }
 }
 
@@ -44,19 +54,19 @@ async function bootstrap() {
   // Response compression
   app.use(compression());
 
-  // Security headers with explicit CSP
+  // Security headers with strict CSP — ITEM 8: no unsafe-inline
   app.use(helmet({
     crossOriginEmbedderPolicy: false,
     contentSecurityPolicy: process.env.NODE_ENV === 'production'
       ? {
           directives: {
             defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'", 'js.stripe.com'],
-            styleSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", 'data:', 'blob:', '*.supabase.co', '*.mapbox.com'],
-            connectSrc: ["'self'", '*.sentry.io', '*.stripe.com', 'api.mapbox.com', '*.tiles.mapbox.com'],
-            fontSrc: ["'self'", 'data:'],
-            frameSrc: ["'self'", 'js.stripe.com'],
+            scriptSrc: ["'self'", 'https://js.stripe.com', 'https://sdk.mercadopago.com'],
+            styleSrc: ["'self'", 'https://fonts.googleapis.com'],
+            fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+            imgSrc: ["'self'", 'data:', 'https:'],
+            connectSrc: ["'self'", 'https://api.anthropic.com', 'https://api.resend.com', '*.sentry.io', '*.stripe.com', 'api.mapbox.com'],
+            frameSrc: ["'self'", 'https://js.stripe.com'],
             objectSrc: ["'none'"],
             upgradeInsecureRequests: [],
           },
@@ -132,8 +142,9 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  console.log(`🏃 RR API rodando na porta ${port} | health: /api/health`);
-  console.log(`📚 Docs: http://localhost:${port}/api/docs`);
+  const bootstrapLogger = app.get(Logger);
+  bootstrapLogger.log(`RR API rodando na porta ${port} | health: /api/health`, 'Bootstrap');
+  bootstrapLogger.log(`Docs: http://localhost:${port}/api/docs`, 'Bootstrap');
 }
 
 bootstrap();

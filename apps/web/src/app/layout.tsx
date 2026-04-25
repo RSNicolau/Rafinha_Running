@@ -41,9 +41,14 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: '/logo.png',
-    apple: '/logo.png',
+    apple: '/icons/icon-192.png',
   },
-  manifest: '/manifest.webmanifest',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'RR Running',
+  },
 };
 
 export const viewport: Viewport = {

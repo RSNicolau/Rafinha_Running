@@ -10,7 +10,7 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Post('register')
-  @Throttle({ default: { limit: 5, ttl: 60000 } }) // 5 registrations per minute
+  @Throttle({ short: { ttl: 60000, limit: 5 } }) // 5 tentativas/min
   @ApiOperation({ summary: 'Criar nova conta' })
   async register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
@@ -18,7 +18,7 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 login attempts per minute
+  @Throttle({ short: { ttl: 60000, limit: 5 } }) // 5 tentativas/min
   @ApiOperation({ summary: 'Fazer login' })
   async login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
@@ -40,7 +40,7 @@ export class AuthController {
 
   @Post('apple')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ short: { ttl: 60000, limit: 5 } }) // 5 tentativas/min
   @ApiOperation({ summary: 'Login com Apple (Sign in with Apple)' })
   async appleLogin(@Body() dto: AppleAuthDto) {
     return this.authService.appleLogin(dto.identityToken, dto.fullName);
@@ -48,7 +48,7 @@ export class AuthController {
 
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 3, ttl: 60000 } }) // 3 requests per minute
+  @Throttle({ short: { ttl: 60000, limit: 3 } }) // 3 tentativas/min
   @ApiOperation({ summary: 'Solicitar redefinição de senha' })
   async forgotPassword(@Body('email') email: string) {
     return this.authService.forgotPassword(email);
@@ -56,7 +56,7 @@ export class AuthController {
 
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ short: { ttl: 60000, limit: 5 } }) // 5 tentativas/min
   @ApiOperation({ summary: 'Redefinir senha com token' })
   async resetPassword(
     @Body('email') email: string,

@@ -8,13 +8,37 @@ export class HealthController {
   constructor(private prisma: PrismaService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Health check básico (sem auth)' })
+  @ApiOperation({ summary: 'Health check com dependências reais (sem auth)' })
   async health() {
-    return { status: 'ok', timestamp: new Date().toISOString() };
+    const checks: Record<string, string> = {};
+
+    // DB check
+    try {
+      await this.prisma.$queryRaw`SELECT 1`;
+      checks.database = 'ok';
+    } catch {
+      checks.database = 'error';
+    }
+
+    // External service config checks
+    checks.anthropic = process.env.ANTHROPIC_API_KEY ? 'configured' : 'missing';
+    checks.email = process.env.RESEND_API_KEY ? 'configured' : 'missing';
+    checks.push = process.env.EXPO_ACCESS_TOKEN ? 'configured' : 'missing';
+
+    const hasPayment = !!(
+      process.env.MERCADO_PAGO_ACCESS_TOKEN ||
+      process.env.STRIPE_SECRET_KEY ||
+      process.env.PAGARME_API_KEY
+    );
+    checks.payments = hasPayment ? 'configured' : 'missing';
+
+    const status = checks.database === 'ok' ? 'ok' : 'degraded';
+
+    return { status, checks, timestamp: new Date().toISOString() };
   }
 
   @Get('detailed')
-  @ApiOperation({ summary: 'Health check detalhado (DB + memória)' })
+  @ApiOperation({ summary: 'Health check detalhado (DB + memória + dependências)' })
   async detailed() {
     const start = Date.now();
     const checks: Record<string, any> = {};
@@ -26,6 +50,18 @@ export class HealthController {
     } catch (err: any) {
       checks.database = { status: 'error', error: err.message };
     }
+
+    // External service config checks
+    checks.anthropic = { status: process.env.ANTHROPIC_API_KEY ? 'configured' : 'missing' };
+    checks.email = { status: process.env.RESEND_API_KEY ? 'configured' : 'missing' };
+    checks.push = { status: process.env.EXPO_ACCESS_TOKEN ? 'configured' : 'missing' };
+
+    const hasPayment = !!(
+      process.env.MERCADO_PAGO_ACCESS_TOKEN ||
+      process.env.STRIPE_SECRET_KEY ||
+      process.env.PAGARME_API_KEY
+    );
+    checks.payments = { status: hasPayment ? 'configured' : 'missing' };
 
     // Memory check
     const mem = process.memoryUsage();
@@ -46,10 +82,10 @@ export class HealthController {
       env: process.env.NODE_ENV ?? 'development',
     };
 
-    const allOk = Object.values(checks).every((c: any) => c.status === 'ok');
+    const status = checks.database.status === 'ok' ? 'ok' : 'degraded';
 
     return {
-      status: allOk ? 'ok' : 'degraded',
+      status,
       timestamp: new Date().toISOString(),
       checks,
     };

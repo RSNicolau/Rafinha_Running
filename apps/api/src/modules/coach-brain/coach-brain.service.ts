@@ -8,7 +8,7 @@ import * as crypto from 'crypto';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type BrainMessage = { role: 'user' | 'assistant'; content: string };
+type BrainMessage = { role: 'user' | 'assistant'; content: string | any[] };
 
 export type AIProvider = 'anthropic' | 'openai' | 'gemini' | 'grok';
 
@@ -160,7 +160,7 @@ ${pendingOnboardings.map(o => `- ${o.athlete.name}`).join('\n')}
       model,
       max_tokens: 4000,
       system: systemPrompt,
-      messages,
+      messages: messages as any,
     });
 
     for await (const event of stream) {
@@ -217,12 +217,15 @@ ${pendingOnboardings.map(o => `- ${o.athlete.name}`).join('\n')}
       systemInstruction: systemPrompt,
     });
 
-    // Convert to Gemini history format
+    // Convert to Gemini history format — ensure content is a string
     const history = messages.slice(0, -1).map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
+      parts: [{ text: Array.isArray(m.content) ? m.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n') : m.content }],
     }));
-    const lastMessage = messages[messages.length - 1].content;
+    const rawLastContent = messages[messages.length - 1].content;
+    const lastMessage = Array.isArray(rawLastContent)
+      ? rawLastContent.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n')
+      : rawLastContent;
 
     const chat = geminiModel.startChat({ history });
     const result = await chat.sendMessageStream(lastMessage);
@@ -337,13 +340,254 @@ Quando gerar planilhas de treino, use formato estruturado (dia, tipo, distância
         where: { id: session.id },
         data: {
           messages: finalHistory,
-          title: finalHistory[0]?.content?.slice(0, 80) ?? 'Nova conversa',
+          title: typeof finalHistory[0]?.content === 'string'
+            ? finalHistory[0].content.slice(0, 80)
+            : 'Nova conversa',
         },
       });
 
       res.write(`data: ${JSON.stringify({ done: true, sessionId: session.id, provider, model })}\n\n`);
     } catch (err: any) {
       this.logger.error(`CoachBrain [${provider}] stream error: ${err.message}`);
+      res.write(`data: ${JSON.stringify({ error: `Erro ao processar resposta (${providerInfo.label}): ${err.message?.slice(0, 120)}` })}\n\n`);
+    } finally {
+      res.end();
+    }
+  }
+
+  // ─── File type helper ────────────────────────────────────────────────────
+
+  private categorizeFile(mimeType: string): 'image' | 'pdf' | 'excel' | 'audio' | 'video' | 'other' {
+    if (mimeType.startsWith('image/')) return 'image';
+    if (mimeType === 'application/pdf') return 'pdf';
+    if (mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType === 'text/csv') return 'excel';
+    if (mimeType.startsWith('audio/')) return 'audio';
+    if (mimeType.startsWith('video/')) return 'video';
+    return 'other';
+  }
+
+  // ─── File pre-processor ───────────────────────────────────────────────────
+
+  async preprocessFiles(files: Express.Multer.File[]): Promise<{
+    textAdditions: string[];
+    imageBlocks: any[];
+    documentBlocks: any[];
+  }> {
+    const textAdditions: string[] = [];
+    const imageBlocks: any[] = [];
+    const documentBlocks: any[] = [];
+
+    for (const file of files) {
+      const type = this.categorizeFile(file.mimetype);
+
+      if (type === 'image') {
+        const base64 = file.buffer.toString('base64');
+        imageBlocks.push({
+          type: 'image',
+          source: { type: 'base64', media_type: file.mimetype, data: base64 },
+        });
+      } else if (type === 'pdf') {
+        const base64 = file.buffer.toString('base64');
+        documentBlocks.push({
+          type: 'document',
+          source: { type: 'base64', media_type: 'application/pdf', data: base64 },
+        });
+      } else if (type === 'excel') {
+        const XLSX = require('xlsx');
+        const wb = XLSX.read(file.buffer, { type: 'buffer' });
+        const sheets = wb.SheetNames.map((name: string) => {
+          const ws = wb.Sheets[name];
+          return `=== ${name} ===\n${XLSX.utils.sheet_to_csv(ws)}`;
+        }).join('\n\n');
+        textAdditions.push(`[Planilha Excel: ${file.originalname}]\n${sheets.slice(0, 8000)}`);
+      } else if (type === 'audio') {
+        try {
+          const openaiKey = process.env.OPENAI_API_KEY;
+          if (!openaiKey) throw new Error('OPENAI_API_KEY not set');
+          const openai = new OpenAI({ apiKey: openaiKey });
+          const { File } = await import('node:buffer');
+          const audioFile = new File([file.buffer], file.originalname, { type: file.mimetype });
+          const transcription = await openai.audio.transcriptions.create({
+            file: audioFile as any,
+            model: 'whisper-1',
+            language: 'pt',
+          });
+          textAdditions.push(`[Áudio transcrito: ${file.originalname}]\n${transcription.text}`);
+        } catch (err: any) {
+          textAdditions.push(`[Áudio: ${file.originalname} — transcrição falhou: ${err.message}]`);
+        }
+      } else if (type === 'video') {
+        textAdditions.push(
+          `[Vídeo recebido: ${file.originalname} — ${Math.round(file.size / 1024)}KB. Análise de vídeo não disponível automaticamente; descreva o que deseja analisar.]`,
+        );
+      }
+    }
+
+    return { textAdditions, imageBlocks, documentBlocks };
+  }
+
+  // ─── Multimodal chat (streaming) ──────────────────────────────────────────
+
+  async chatStreamMultimodal(
+    coachId: string,
+    sessionId: string | null,
+    message: string,
+    files: Express.Multer.File[],
+    res: Response,
+  ): Promise<void> {
+    const coach = await this.prisma.user.findUnique({
+      where: { id: coachId },
+      select: { name: true, aiProvider: true, aiModel: true, aiByok: true, aiApiKey: true },
+    });
+    if (!coach) throw new NotFoundException('Coach não encontrado');
+
+    const provider = (coach.aiProvider ?? 'anthropic') as AIProvider;
+    const providerInfo = PROVIDER_DEFAULTS[provider] ?? PROVIDER_DEFAULTS.openai;
+    const model = coach.aiModel ?? providerInfo.model;
+
+    let apiKey: string;
+    try {
+      apiKey = this.resolveApiKey(provider, coach);
+    } catch (err: any) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.flushHeaders();
+      res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // Load or create session
+    let session = sessionId
+      ? await this.prisma.coachBrainSession.findFirst({ where: { id: sessionId, coachId } })
+      : null;
+
+    if (!session) {
+      session = await this.prisma.coachBrainSession.create({
+        data: { coachId, messages: [] },
+      });
+    }
+
+    const history = (session.messages as BrainMessage[]) ?? [];
+    const context = await this.buildContext(coachId);
+
+    const systemPrompt = `Você é o assistente inteligente de ${coach.name}, especialista em treinamento de corrida.
+
+Você tem acesso completo aos dados de todos os atletas e pode:
+- Analisar performance, recuperação e evolução de cada atleta
+- Identificar atletas em risco (sobrecarga, lesão, abandono)
+- Gerar sugestões de ajuste de treino baseado em HRV/sono
+- Criar planilhas de treino em formato estruturado quando solicitado
+- Comparar avaliações físicas e mostrar evolução
+- Responder qualquer dúvida técnica sobre treinamento de corrida
+- Analisar imagens, PDFs, planilhas e áudios enviados
+
+DADOS DISPONÍVEIS AGORA:
+${context}
+
+Data atual: ${new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+
+Responda em português. Seja objetivo, prático e específico com nomes dos atletas quando relevante.
+Quando gerar planilhas de treino, use formato estruturado (dia, tipo, distância/tempo, ritmo).`;
+
+    // Pre-process files
+    const { textAdditions, imageBlocks, documentBlocks } = files.length > 0
+      ? await this.preprocessFiles(files)
+      : { textAdditions: [], imageBlocks: [], documentBlocks: [] };
+
+    // Build user content — multimodal if files present
+    let userContent: string | any[];
+    if (imageBlocks.length > 0 || documentBlocks.length > 0 || textAdditions.length > 0) {
+      userContent = [
+        ...imageBlocks,
+        ...documentBlocks,
+        ...textAdditions.map((t) => ({ type: 'text', text: t })),
+        { type: 'text', text: message },
+      ];
+    } else {
+      userContent = message;
+    }
+
+    const updatedHistory: BrainMessage[] = [
+      ...history.slice(-19),
+      { role: 'user', content: userContent },
+    ];
+
+    // SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Session-Id', session.id);
+    res.setHeader('X-AI-Provider', provider);
+    res.setHeader('X-AI-Model', model);
+    res.flushHeaders();
+
+    let fullResponse = '';
+
+    try {
+      // For multimodal content (images/PDFs), only Anthropic supports natively
+      // For OpenAI, images are supported via image_url
+      // For Gemini/Grok, fallback to text only
+      if (provider === 'anthropic') {
+        fullResponse = await this.streamAnthropic(apiKey, model, systemPrompt, updatedHistory, res);
+      } else if (provider === 'openai') {
+        // Convert history: for OpenAI, image blocks need image_url format
+        // Simple fallback: send text only for non-text messages
+        const openaiHistory: BrainMessage[] = updatedHistory.map((m) => ({
+          role: m.role,
+          content: Array.isArray(m.content)
+            ? m.content
+                .filter((b: any) => b.type === 'text')
+                .map((b: any) => b.text)
+                .join('\n')
+            : m.content,
+        }));
+        fullResponse = await this.streamOpenAI(apiKey, model, systemPrompt, openaiHistory, res);
+      } else if (provider === 'gemini') {
+        const geminiHistory: BrainMessage[] = updatedHistory.map((m) => ({
+          role: m.role,
+          content: Array.isArray(m.content)
+            ? m.content
+                .filter((b: any) => b.type === 'text')
+                .map((b: any) => b.text)
+                .join('\n')
+            : m.content,
+        }));
+        fullResponse = await this.streamGemini(apiKey, model, systemPrompt, geminiHistory, res);
+      } else if (provider === 'grok') {
+        const grokHistory: BrainMessage[] = updatedHistory.map((m) => ({
+          role: m.role,
+          content: Array.isArray(m.content)
+            ? m.content
+                .filter((b: any) => b.type === 'text')
+                .map((b: any) => b.text)
+                .join('\n')
+            : m.content,
+        }));
+        fullResponse = await this.streamOpenAI(apiKey, model, systemPrompt, grokHistory, res, 'https://api.x.ai/v1');
+      } else {
+        fullResponse = await this.streamAnthropic(apiKey, model, systemPrompt, updatedHistory, res);
+      }
+
+      // Store assistant response as plain text in history
+      const finalHistory: BrainMessage[] = [
+        ...updatedHistory,
+        { role: 'assistant', content: fullResponse },
+      ];
+
+      await this.prisma.coachBrainSession.update({
+        where: { id: session.id },
+        data: {
+          messages: finalHistory,
+          title: typeof finalHistory[0]?.content === 'string'
+            ? finalHistory[0].content.slice(0, 80)
+            : 'Nova conversa',
+        },
+      });
+
+      res.write(`data: ${JSON.stringify({ done: true, sessionId: session.id, provider, model })}\n\n`);
+    } catch (err: any) {
+      this.logger.error(`CoachBrain multimodal [${provider}] error: ${err.message}`);
       res.write(`data: ${JSON.stringify({ error: `Erro ao processar resposta (${providerInfo.label}): ${err.message?.slice(0, 120)}` })}\n\n`);
     } finally {
       res.end();
@@ -500,6 +744,91 @@ Quando gerar planilhas de treino, use formato estruturado (dia, tipo, distância
     const job = await this.prisma.aIJob.findFirst({ where: { id: jobId, coachId } });
     if (!job) throw new NotFoundException('Job não encontrado');
     return this.prisma.aIJob.update({ where: { id: jobId }, data: { status: 'PENDING', error: null } });
+  }
+
+  // ─── Apply Plan from Chat ──────────────────────────────────────────────────
+
+  async applyPlanFromChat(coachId: string, athleteId: string, planText: string): Promise<{ created: number }> {
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+    const parseResponse = await client.messages.create({
+      model: 'claude-opus-4-6',
+      max_tokens: 2000,
+      messages: [{
+        role: 'user',
+        content: `Extraia do seguinte texto de planilha de treino um array JSON de treinos.
+
+Cada treino deve ter:
+- date: "YYYY-MM-DD" (a partir de amanhã)
+- type: string (ex: "Corrida Leve", "Intervalado", "Longão", "Descanso")
+- distanceMeters: number | null (em metros)
+- durationMinutes: number | null
+- description: string (detalhes do treino)
+- targetPace: string | null (ex: "5:30/km")
+
+Responda APENAS com o JSON array, sem markdown, sem explicação.
+
+Texto da planilha:
+${planText}`
+      }]
+    });
+
+    const jsonText = (parseResponse.content[0] as any).text.trim();
+    const workouts = JSON.parse(jsonText);
+
+    // Find or create a plan for this athlete
+    let plan = await this.prisma.trainingPlan.findFirst({
+      where: { coachId, athleteId, status: 'ACTIVE' },
+    });
+
+    if (!plan) {
+      const now = new Date();
+      const endDate = new Date(now);
+      endDate.setDate(endDate.getDate() + 30);
+      plan = await this.prisma.trainingPlan.create({
+        data: {
+          coachId,
+          athleteId,
+          name: `Plano IA — ${now.toLocaleDateString('pt-BR')}`,
+          status: 'ACTIVE',
+          startDate: now,
+          endDate,
+        },
+      });
+    }
+
+    let created = 0;
+    for (const w of workouts) {
+      if (!w.date || w.type === 'Descanso') continue;
+      await this.prisma.workout.create({
+        data: {
+          planId: plan.id,
+          athleteId,
+          type: 'EASY_RUN',
+          title: w.type,
+          description: w.description ?? null,
+          scheduledDate: new Date(w.date),
+          targetDistanceMeters: w.distanceMeters ?? null,
+          targetDurationSeconds: w.durationMinutes ? w.durationMinutes * 60 : null,
+          targetPace: w.targetPace ?? null,
+          status: 'SCHEDULED',
+        },
+      });
+      created++;
+    }
+
+    // Notify athlete
+    await this.prisma.notification.create({
+      data: {
+        userId: athleteId,
+        type: 'SYSTEM',
+        title: '📋 Nova planilha criada',
+        body: `Seu coach criou ${created} treinos para você via IA.`,
+        data: { planId: plan.id },
+      },
+    }).catch(() => {});
+
+    return { created };
   }
 
   async processFailedJobs(): Promise<void> {

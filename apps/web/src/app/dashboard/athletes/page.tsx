@@ -33,6 +33,9 @@ export default function AthletesPage() {
   const [sentInviteLink, setSentInviteLink] = useState('');
   const [pendingInvites, setPendingInvites] = useState<Invite[]>([]);
   const [copied, setCopied] = useState('');
+  const [cancellingInviteId, setCancellingInviteId] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState('');
+  const [cancelSuccess, setCancelSuccess] = useState('');
   const [pendingOnboardingCount, setPendingOnboardingCount] = useState(0);
 
   const loadAthletes = () => {
@@ -78,6 +81,11 @@ export default function AthletesPage() {
   const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteEmail.trim()) return;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(inviteEmail.trim())) {
+      setInviteError('Email inválido. Verifique o formato e tente novamente.');
+      return;
+    }
     setInviteError('');
     setInviteLoading(true);
     try {
@@ -93,10 +101,20 @@ export default function AthletesPage() {
   };
 
   const handleCancelInvite = async (id: string) => {
+    setCancellingInviteId(id);
+    setCancelError('');
+    setCancelSuccess('');
     try {
       await api.delete(`/invites/${id}`);
+      setCancelSuccess('Convite cancelado com sucesso.');
+      setTimeout(() => setCancelSuccess(''), 3000);
       loadInvites();
-    } catch {}
+    } catch (err: any) {
+      setCancelError(err.response?.data?.message || 'Erro ao cancelar convite. Tente novamente.');
+      setTimeout(() => setCancelError(''), 4000);
+    } finally {
+      setCancellingInviteId(null);
+    }
   };
 
   const copyLink = (text: string, key: string) => {
@@ -214,9 +232,28 @@ export default function AthletesPage() {
       {!isDemoMode && pendingInvites.length > 0 && (
         <div className="mt-8">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Convites pendentes</h2>
+
+          {/* Cancel feedback banners */}
+          {cancelSuccess && (
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-green-50 border border-green-100 mb-3">
+              <svg className="w-4 h-4 text-green-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-sm text-green-800">{cancelSuccess}</span>
+            </div>
+          )}
+          {cancelError && (
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-red-50 border border-red-100 mb-3">
+              <svg className="w-4 h-4 text-red-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
+              </svg>
+              <span className="text-sm text-red-800">{cancelError}</span>
+            </div>
+          )}
+
           <div className="glass-card divide-y divide-gray-50">
             {pendingInvites.map((inv) => {
-              const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/join?token=${inv.id}`;
+              const isCancelling = cancellingInviteId === inv.id;
               return (
                 <div key={inv.id} className="flex items-center justify-between px-5 py-3 gap-4">
                   <div className="flex-1 min-w-0">
@@ -234,9 +271,13 @@ export default function AthletesPage() {
                     </button>
                     <button
                       onClick={() => handleCancelInvite(inv.id)}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-600 transition"
+                      disabled={isCancelling}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-1.5"
                     >
-                      Cancelar
+                      {isCancelling && (
+                        <span className="w-3 h-3 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                      )}
+                      {isCancelling ? 'Cancelando...' : 'Cancelar'}
                     </button>
                   </div>
                 </div>

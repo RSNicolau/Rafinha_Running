@@ -178,6 +178,102 @@ export class EmailService {
     );
   }
 
+  async sendAthleteWeeklySummary(
+    to: string,
+    name: string,
+    data: { weekKm: number; workouts: number; bestPace?: string; streak: number },
+  ): Promise<void> {
+    const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h1 style="color: #4f46e5;">Resumo da Semana — ${name} 🏃</h1>
+      <div style="background: #f8fafc; border-radius: 12px; padding: 20px; margin: 20px 0;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div style="text-align: center; padding: 16px; background: white; border-radius: 8px;">
+            <p style="font-size: 32px; font-weight: bold; color: #4f46e5; margin: 0;">${data.weekKm.toFixed(1)}</p>
+            <p style="color: #6b7280; font-size: 14px; margin: 4px 0 0 0;">km esta semana</p>
+          </div>
+          <div style="text-align: center; padding: 16px; background: white; border-radius: 8px;">
+            <p style="font-size: 32px; font-weight: bold; color: #4f46e5; margin: 0;">${data.workouts}</p>
+            <p style="color: #6b7280; font-size: 14px; margin: 4px 0 0 0;">treinos concluídos</p>
+          </div>
+          ${data.bestPace ? `
+          <div style="text-align: center; padding: 16px; background: white; border-radius: 8px;">
+            <p style="font-size: 24px; font-weight: bold; color: #059669; margin: 0;">${data.bestPace}</p>
+            <p style="color: #6b7280; font-size: 14px; margin: 4px 0 0 0;">melhor pace /km</p>
+          </div>` : ''}
+          <div style="text-align: center; padding: 16px; background: white; border-radius: 8px;">
+            <p style="font-size: 32px; font-weight: bold; color: #f59e0b; margin: 0;">${data.streak}</p>
+            <p style="color: #6b7280; font-size: 14px; margin: 4px 0 0 0;">dias de sequência</p>
+          </div>
+        </div>
+      </div>
+      <p style="text-align: center; margin-top: 24px;">
+        <a href="${this.appUrl}/dashboard"
+           style="background: #4f46e5; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold;">
+          Ver meu dashboard
+        </a>
+      </p>
+      <p style="color: #9ca3af; font-size: 12px; text-align: center; margin-top: 24px;">
+        Continue treinando! — Rafinha Running Team
+      </p>
+    </div>
+  `;
+
+    await this.send(to, `Seu resumo da semana 🏃 — ${data.weekKm.toFixed(1)}km!`, html);
+  }
+
+  async sendCoachWeeklySummary(
+    to: string,
+    name: string,
+    data: {
+      totalAthletes: number;
+      activeCount: number;
+      inactiveCount: number;
+      totalKm: number;
+      totalWorkouts: number;
+      inactiveAthletes: string[];
+    },
+  ): Promise<void> {
+    const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h1 style="color: #4f46e5;">Resumo Semanal do Grupo — ${name} 📊</h1>
+      <div style="background: #f8fafc; border-radius: 12px; padding: 20px; margin: 20px 0;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+          <div style="text-align: center; padding: 16px; background: white; border-radius: 8px;">
+            <p style="font-size: 28px; font-weight: bold; color: #4f46e5; margin: 0;">${data.totalKm.toFixed(0)}</p>
+            <p style="color: #6b7280; font-size: 12px; margin: 4px 0 0 0;">km totais do grupo</p>
+          </div>
+          <div style="text-align: center; padding: 16px; background: white; border-radius: 8px;">
+            <p style="font-size: 28px; font-weight: bold; color: #059669; margin: 0;">${data.activeCount}</p>
+            <p style="color: #6b7280; font-size: 12px; margin: 4px 0 0 0;">atletas ativos</p>
+          </div>
+          <div style="text-align: center; padding: 16px; background: ${data.inactiveCount > 0 ? '#fef3c7' : 'white'}; border-radius: 8px;">
+            <p style="font-size: 28px; font-weight: bold; color: ${data.inactiveCount > 0 ? '#d97706' : '#6b7280'}; margin: 0;">${data.inactiveCount}</p>
+            <p style="color: #6b7280; font-size: 12px; margin: 4px 0 0 0;">sem treino</p>
+          </div>
+        </div>
+        ${data.inactiveCount > 0 ? `
+        <div style="margin-top: 16px; padding: 12px; background: #fef3c7; border-radius: 8px;">
+          <p style="font-weight: bold; color: #92400e; margin: 0 0 8px 0;">⚠️ Atletas sem treino essa semana:</p>
+          <p style="color: #78350f; margin: 0;">${data.inactiveAthletes.join(', ')}${data.inactiveCount > 5 ? ` e mais ${data.inactiveCount - 5}` : ''}</p>
+        </div>` : ''}
+      </div>
+      <p style="text-align: center; margin-top: 24px;">
+        <a href="${this.appUrl}/dashboard/athletes"
+           style="background: #4f46e5; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold;">
+          Ver painel de atletas
+        </a>
+      </p>
+    </div>
+  `;
+
+    await this.send(
+      to,
+      `Resumo do grupo 📊 — ${data.activeCount}/${data.totalAthletes} atletas ativos`,
+      html,
+    );
+  }
+
   async sendWelcome(to: string, name: string): Promise<void> {
     const platformName = process.env.PLATFORM_NAME || 'Rafinha Running';
     const loginUrl = `${process.env.FRONTEND_URL || this.appUrl}/athlete-login`;

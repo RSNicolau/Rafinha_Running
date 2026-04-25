@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
 import { PrismaService } from '../../prisma/prisma.service';
+import { generatePredictions } from './riegel';
 
 type HRZones = Record<string, { min: number; max: number; label: string }>;
 type PaceZones = Record<string, string>;
@@ -102,9 +103,18 @@ export class PhysicalAssessmentsService {
       if (requesterId !== athleteId) throw new NotFoundException('Acesso negado');
     }
 
-    return this.prisma.physicalAssessment.findMany({
+    const assessments = await this.prisma.physicalAssessment.findMany({
       where: { athleteId },
       orderBy: { assessedAt: 'desc' },
+    });
+
+    return assessments.map(a => {
+      if (a.best5kTime) {
+        (a as any).riegelPredictions = generatePredictions(a.best5kTime, 5);
+      } else if (a.best10kTime) {
+        (a as any).riegelPredictions = generatePredictions(a.best10kTime, 10);
+      }
+      return a;
     });
   }
 
@@ -120,6 +130,13 @@ export class PhysicalAssessmentsService {
       if (assessment.coachId !== requesterId) throw new NotFoundException('Avaliação não encontrada');
     } else {
       if (assessment.athleteId !== requesterId) throw new NotFoundException('Acesso negado');
+    }
+
+    // Append Riegel race-time predictions when best time data is available
+    if (assessment.best5kTime) {
+      (assessment as any).riegelPredictions = generatePredictions(assessment.best5kTime, 5);
+    } else if (assessment.best10kTime) {
+      (assessment as any).riegelPredictions = generatePredictions(assessment.best10kTime, 10);
     }
 
     return assessment;

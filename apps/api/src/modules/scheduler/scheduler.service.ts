@@ -272,6 +272,146 @@ export class SchedulerService {
     }
   }
 
+  /** Sunday 18h BRT — athlete weekly summary email (new template with bestPace & streak) */
+  @Cron('0 21 * * 0', { name: 'athlete-weekly-summary-v2' })
+  async sendAthleteWeeklySummaries() {
+    this.logger.log('Sending athlete weekly summary emails...');
+    try {
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+
+      const athletes = await this.prisma.user.findMany({
+        where: { role: 'ATHLETE', deletedAt: null },
+        select: { id: true, name: true, email: true },
+      });
+
+      for (const athlete of athletes) {
+        try {
+          const workouts = await this.prisma.workout.findMany({
+            where: {
+              athleteId: athlete.id,
+              status: WorkoutStatus.COMPLETED,
+              completedAt: { gte: weekAgo },
+            },
+            include: { result: true },
+          });
+
+          if (workouts.length === 0) continue;
+
+          const weekKm = workouts.reduce((sum, w) => sum + (w.result ? w.result.distanceMeters / 1000 : 0), 0);
+          const workoutCount = workouts.length;
+
+          // Consecutive training-day streak (up to 30 days back)
+          const workoutDaySet = new Set(
+            workouts
+              .map(w => w.completedAt?.toISOString().slice(0, 10))
+              .filter(Boolean),
+          );
+          let streak = 0;
+          const today = new Date();
+          for (let i = 0; i < 30; i++) {
+            const d = new Date(today);
+            d.setDate(d.getDate() - i);
+            if (workoutDaySet.has(d.toISOString().slice(0, 10))) streak++;
+            else if (i > 0) break;
+          }
+
+          // Best pace from results with valid distance and duration
+          const paces = workouts
+            .filter(w => w.result && w.result.distanceMeters > 0 && w.result.durationSeconds > 0)
+            .map(w => (w.result!.durationSeconds / w.result!.distanceMeters) * 1000); // sec/km
+          const bestPaceSecKm = paces.length > 0 ? Math.min(...paces) : null;
+          const bestPace = bestPaceSecKm
+            ? `${Math.floor(bestPaceSecKm / 60)}:${String(Math.round(bestPaceSecKm % 60)).padStart(2, '0')}`
+            : undefined;
+
+          await this.email.sendAthleteWeeklySummary(athlete.email ?? '', athlete.name, {
+            weekKm: Math.round(weekKm * 10) / 10,
+            workouts: workoutCount,
+            bestPace,
+            streak,
+          });
+        } catch (err) {
+          this.logger.error(`Failed to send athlete weekly summary to ${athlete.email}`, err);
+        }
+      }
+
+      this.logger.log(`Athlete weekly summaries dispatched to ${athletes.length} athletes`);
+    } catch (err) {
+      this.logger.error(`Athlete weekly summary cron failed: ${err}`);
+    }
+  }
+
+  /** Sunday 18h BRT — weekly summary for each coach about their group */
+  @Cron('0 21 * * 0', { name: 'coach-weekly-summary' })
+  async sendCoachWeeklySummaries() {
+    this.logger.log('Sending coach weekly summary emails...');
+    try {
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+
+      const coaches = await this.prisma.user.findMany({
+        where: { role: 'COACH', deletedAt: null },
+        select: { id: true, name: true, email: true },
+      });
+
+      for (const coach of coaches) {
+        try {
+          // Athletes assigned to this coach
+          const athleteProfiles = await this.prisma.athleteProfile.findMany({
+            where: { coachId: coach.id, user: { deletedAt: null } },
+            select: { userId: true, user: { select: { name: true } } },
+          });
+
+          const totalAthletes = athleteProfiles.length;
+          if (totalAthletes === 0) continue;
+
+          const allAthleteIds = athleteProfiles.map(p => p.userId);
+
+          // Athletes who trained this week
+          const activeResults = await this.prisma.workout.findMany({
+            where: {
+              athleteId: { in: allAthleteIds },
+              status: WorkoutStatus.COMPLETED,
+              completedAt: { gte: weekAgo },
+            },
+            select: {
+              athleteId: true,
+              result: { select: { distanceMeters: true } },
+            },
+          });
+
+          const activeAthleteIds = new Set(activeResults.map(w => w.athleteId));
+          const activeCount = activeAthleteIds.size;
+          const inactiveCount = totalAthletes - activeCount;
+
+          const totalKm = activeResults.reduce((sum, w) => sum + (w.result ? w.result.distanceMeters / 1000 : 0), 0);
+          const totalWorkouts = activeResults.length;
+
+          const inactiveAthletes = athleteProfiles
+            .filter(p => !activeAthleteIds.has(p.userId))
+            .slice(0, 5)
+            .map(p => p.user.name);
+
+          await this.email.sendCoachWeeklySummary(coach.email ?? '', coach.name, {
+            totalAthletes,
+            activeCount,
+            inactiveCount,
+            totalKm: Math.round(totalKm * 10) / 10,
+            totalWorkouts,
+            inactiveAthletes,
+          });
+        } catch (err) {
+          this.logger.error(`Failed to send coach weekly summary to ${coach.email}`, err);
+        }
+      }
+
+      this.logger.log(`Coach weekly summaries dispatched to ${coaches.length} coaches`);
+    } catch (err) {
+      this.logger.error(`Coach weekly summary cron failed: ${err}`);
+    }
+  }
+
   /** Daily 9h — alert coach about inactive athletes (no workout in 7+ days) */
   @Cron('0 9 * * *', { name: 'check-inactive-athletes' })
   async checkInactiveAthletes() {

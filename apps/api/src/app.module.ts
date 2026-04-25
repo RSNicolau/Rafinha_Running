@@ -36,6 +36,8 @@ import { NicheModule } from './modules/niche/niche.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { HealthModule as HealthCheckModule } from './health/health.module';
 import { MetricsModule } from './metrics/metrics.module';
+import { UploadsModule } from './modules/uploads/uploads.module';
+import { AthleteDocumentsModule } from './modules/athlete-documents/athlete-documents.module';
 
 @Module({
   imports: [
@@ -49,10 +51,10 @@ import { MetricsModule } from './metrics/metrics.module';
         redact: ['req.headers.authorization'],
       },
     }),
-    ThrottlerModule.forRoot([{
-      ttl: 60000,
-      limit: 100,
-    }]),
+    ThrottlerModule.forRoot([
+      { name: 'short', ttl: 1000, limit: 20 },    // 20 req/s
+      { name: 'medium', ttl: 60000, limit: 100 },  // 100 req/min
+    ]),
     PrismaModule,
     CacheModule,
     AuthModule,
@@ -86,6 +88,8 @@ import { MetricsModule } from './metrics/metrics.module';
     AppointmentsModule,
     HealthCheckModule,
     MetricsModule,
+    UploadsModule,
+    AthleteDocumentsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: CustomThrottlerGuard },

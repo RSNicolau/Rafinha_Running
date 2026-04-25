@@ -6,6 +6,77 @@ import remarkGfm from 'remark-gfm';
 import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/lib/api';
 
+// ─── Training plan detection ──────────────────────────────────────────────────
+
+function isTrainingPlan(text: string): boolean {
+  const lines = text.split('\n').filter(l => l.trim());
+  const planKeywords = ['segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'domingo', 'seg:', 'ter:', 'qui:', 'sex:', 'sáb:'];
+  const matchCount = lines.filter(l => planKeywords.some(k => l.toLowerCase().includes(k))).length;
+  return matchCount >= 3;
+}
+
+// ─── Apply Plan Button ────────────────────────────────────────────────────────
+
+function ApplyPlanButton({ planText }: { planText: string }) {
+  const [athleteId, setAthleteId] = useState('');
+  const [applying, setApplying] = useState(false);
+  const [result, setResult] = useState<{ created: number } | null>(null);
+  const [athletes, setAthletes] = useState<{ id: string; name: string }[]>([]);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      api.get('/users/athletes').then(r => setAthletes(r.data?.data ?? r.data ?? [])).catch(() => {});
+    }
+  }, [open]);
+
+  const handleApply = async () => {
+    if (!athleteId) return;
+    setApplying(true);
+    try {
+      const { data } = await api.post('/coach-brain/apply-plan', { athleteId, planText });
+      setResult(data);
+    } catch (e: any) {
+      alert(e?.response?.data?.message || 'Erro ao aplicar plano');
+    } finally { setApplying(false); }
+  };
+
+  if (result) return (
+    <div className="mt-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">
+      ✅ {result.created} treinos criados com sucesso!
+    </div>
+  );
+
+  return (
+    <div className="mt-2">
+      {!open ? (
+        <button onClick={() => setOpen(true)} className="text-xs font-medium px-3 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition">
+          📋 Aplicar este plano
+        </button>
+      ) : (
+        <div className="flex gap-2 items-center mt-1">
+          <select
+            value={athleteId}
+            onChange={e => setAthleteId(e.target.value)}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 flex-1 focus:outline-none focus:border-emerald-500"
+          >
+            <option value="">Selecionar atleta...</option>
+            {athletes.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <button
+            onClick={handleApply}
+            disabled={!athleteId || applying}
+            className="text-xs font-medium px-3 py-1.5 bg-emerald-600 text-white rounded-lg disabled:opacity-40 hover:bg-emerald-700 transition"
+          >
+            {applying ? '...' : 'Aplicar'}
+          </button>
+          <button onClick={() => setOpen(false)} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
 interface BrainMessage {
@@ -82,6 +153,7 @@ const PROVIDER_LABELS: Record<string, { label: string; color: string }> = {
 // ─── CoachBrain Panel ─────────────────────────────────────────────────────────────
 
 function CoachBrainPanel() {
+  const { user } = useAuthStore();
   const [messages, setMessages] = useState<BrainMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -90,9 +162,14 @@ function CoachBrainPanel() {
   const [currentProvider, setCurrentProvider] = useState<string>('anthropic');
   const [currentModel, setCurrentModel] = useState<string>('claude-opus-4-6');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [recording, setRecording] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const streamingRef = useRef<string>('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
     api.get('/coach-brain/sessions').then(r => setSessions(r.data ?? [])).catch(() => {});
@@ -132,12 +209,51 @@ function CoachBrainPanel() {
     textareaRef.current?.focus();
   };
 
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      mr.ondataavailable = (e) => audioChunksRef.current.push(e.data);
+      mr.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const file = new File([blob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
+        setAttachedFiles(prev => {
+          if (prev.length >= 5) return prev;
+          return [...prev, file];
+        });
+        stream.getTracks().forEach(t => t.stop());
+      };
+      mr.start();
+      mediaRecorderRef.current = mr;
+      setRecording(true);
+    } catch {
+      alert('Não foi possível acessar o microfone');
+    }
+  };
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    setRecording(false);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    setAttachedFiles(prev => {
+      const combined = [...prev, ...files];
+      return combined.slice(0, 5);
+    });
+    e.target.value = '';
+  };
+
   const sendMessage = useCallback(async (text: string) => {
-    if (!text.trim() || streaming) return;
+    if ((!text.trim() && attachedFiles.length === 0) || streaming) return;
+    const filesToSend = [...attachedFiles];
     setInput('');
+    setAttachedFiles([]);
     setStreaming(true);
 
-    const userMsg: BrainMessage = { role: 'user', content: text };
+    const userMsg: BrainMessage = { role: 'user', content: text || '[Arquivo(s) anexado(s)]' };
     setMessages(prev => [...prev, userMsg, { role: 'assistant', content: '' }]);
     streamingRef.current = '';
 
@@ -145,15 +261,29 @@ function CoachBrainPanel() {
     let finalModel = currentModel;
 
     try {
-      const token = localStorage.getItem('rr_access_token') || '';
-      const res = await fetch(`/api/v1/coach-brain/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ message: text, sessionId }),
-      });
+      const token = localStorage.getItem('rr_access_token') || localStorage.getItem('accessToken') || '';
+      let res: Response;
+
+      if (filesToSend.length > 0) {
+        const fd = new FormData();
+        fd.append('message', text);
+        if (sessionId) fd.append('sessionId', sessionId);
+        filesToSend.forEach(f => fd.append('files', f));
+        res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/coach-brain/chat`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: fd,
+        });
+      } else {
+        res = await fetch(`/api/v1/coach-brain/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({ message: text, sessionId }),
+        });
+      }
 
       if (!res.ok) {
         const err = await res.text();
@@ -232,7 +362,7 @@ function CoachBrainPanel() {
     } finally {
       setStreaming(false);
     }
-  }, [sessionId, streaming, currentProvider, currentModel]);
+  }, [sessionId, streaming, currentProvider, currentModel, attachedFiles]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -391,6 +521,11 @@ function CoachBrainPanel() {
                     ) : null}
                   </div>
 
+                  {/* Apply plan button for training plan messages */}
+                  {!isUser && msg.content && !isStreamingThis && isTrainingPlan(msg.content) && (user?.role === 'COACH' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
+                    <ApplyPlanButton planText={msg.content} />
+                  )}
+
                   {/* Provider badge below AI message */}
                   {!isUser && msg.content && msgProviderInfo && (
                     <span className={`text-[10px] font-medium mt-1 px-2 py-0.5 rounded-full ${msgProviderInfo.color}`}>
@@ -406,45 +541,98 @@ function CoachBrainPanel() {
         </div>
 
         {/* Input */}
-        <div className="px-4 py-3 border-t border-gray-100 bg-white/80">
-          {streaming && (
-            <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
-              <div className="w-3 h-3 border border-gray-300 border-t-gray-500 rounded-full animate-spin" />
-              Gerando resposta...
+        <div className="border-t border-gray-100 bg-white/80">
+          {/* File previews */}
+          {attachedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-2 px-4 py-2 border-b border-gray-100">
+              {attachedFiles.map((file, i) => (
+                <div key={i} className="flex items-center gap-1.5 bg-gray-100 rounded-lg px-2.5 py-1.5 text-xs">
+                  {file.type.startsWith('image/') ? (
+                    <img src={URL.createObjectURL(file)} className="w-6 h-6 rounded object-cover" alt="" />
+                  ) : (
+                    <span>{file.type.includes('pdf') ? '📄' : file.type.includes('audio') ? '🎵' : file.type.includes('sheet') || file.name.match(/\.xlsx?|\.csv$/) ? '📊' : '📎'}</span>
+                  )}
+                  <span className="max-w-[100px] truncate text-gray-700">{file.name}</span>
+                  <button onClick={() => setAttachedFiles(prev => prev.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-500">×</button>
+                </div>
+              ))}
             </div>
           )}
-          <div className="flex items-end gap-2">
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={e => {
-                setInput(e.target.value);
-                // auto-resize
-                e.target.style.height = 'auto';
-                e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder="Pergunte sobre seus atletas, peça análise, planilha de treino..."
-              rows={1}
-              disabled={streaming}
-              className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#DC2626]/20 focus:border-[#DC2626]/40 disabled:opacity-50 overflow-y-hidden"
-              style={{ minHeight: 44, maxHeight: 120 }}
-            />
-            <button
-              onClick={() => sendMessage(input)}
-              disabled={!input.trim() || streaming}
-              className="w-10 h-10 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white flex items-center justify-center shrink-0 transition disabled:opacity-40 cursor-pointer shadow-[0_2px_8px_rgba(220,38,38,0.3)]"
-            >
-              {streaming ? (
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-                </svg>
-              )}
-            </button>
+
+          <div className="px-4 py-3">
+            {streaming && (
+              <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
+                <div className="w-3 h-3 border border-gray-300 border-t-gray-500 rounded-full animate-spin" />
+                Gerando resposta...
+              </div>
+            )}
+            <div className="flex items-end gap-2">
+              {/* File upload button */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={streaming || attachedFiles.length >= 5}
+                className="w-9 h-9 rounded-xl border border-gray-200 hover:border-gray-300 hover:bg-gray-50 flex items-center justify-center shrink-0 transition disabled:opacity-40 cursor-pointer text-gray-400"
+                title="Anexar arquivo"
+              >
+                📎
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                multiple
+                accept="image/*,application/pdf,.xlsx,.xls,.csv,audio/*,video/*"
+                onChange={handleFileSelect}
+              />
+
+              {/* Voice recording button */}
+              <button
+                type="button"
+                onClick={recording ? stopRecording : startRecording}
+                disabled={streaming || attachedFiles.length >= 5}
+                className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 transition disabled:opacity-40 cursor-pointer ${
+                  recording
+                    ? 'border-red-300 bg-red-50 text-red-500 animate-pulse'
+                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-400'
+                }`}
+                title={recording ? 'Parar gravação' : 'Gravar áudio'}
+              >
+                🎤
+              </button>
+
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={e => {
+                  setInput(e.target.value);
+                  // auto-resize
+                  e.target.style.height = 'auto';
+                  e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                }}
+                onKeyDown={handleKeyDown}
+                placeholder="Pergunte sobre seus atletas, peça análise, planilha de treino..."
+                rows={1}
+                disabled={streaming}
+                className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#DC2626]/20 focus:border-[#DC2626]/40 disabled:opacity-50 overflow-y-hidden"
+                style={{ minHeight: 44, maxHeight: 120 }}
+              />
+              <button
+                onClick={() => sendMessage(input)}
+                disabled={(!input.trim() && attachedFiles.length === 0) || streaming}
+                className="w-10 h-10 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white flex items-center justify-center shrink-0 transition disabled:opacity-40 cursor-pointer shadow-[0_2px_8px_rgba(220,38,38,0.3)]"
+              >
+                {streaming ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                  </svg>
+                )}
+              </button>
+            </div>
+            <p className="text-[10px] text-gray-300 mt-1.5 text-center">Enter para enviar · Shift+Enter para nova linha</p>
           </div>
-          <p className="text-[10px] text-gray-300 mt-1.5 text-center">Enter para enviar · Shift+Enter para nova linha</p>
         </div>
       </div>
     </div>

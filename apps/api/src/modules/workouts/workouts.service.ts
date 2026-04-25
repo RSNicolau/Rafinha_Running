@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import Anthropic from '@anthropic-ai/sdk';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { BadgesService } from '../badges/badges.service';
@@ -7,6 +8,8 @@ import { WorkoutStatus, NotificationType } from '@prisma/client';
 
 @Injectable()
 export class WorkoutsService {
+  private readonly logger = new Logger(WorkoutsService.name);
+
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
@@ -140,6 +143,21 @@ export class WorkoutsService {
         ).catch(() => {});
       }
     }).catch(() => {});
+
+    // Fire-and-forget: generate AI feedback for the completed workout
+    this.generateWorkoutFeedback(workout, result.id, athleteId).catch((err) =>
+      this.logger.error(`AI feedback error for workout ${workoutId}: ${err.message}`),
+    );
+
+    // Fire-and-forget: detect personal record
+    this.detectAndCelebratePR(athleteId, result).catch(err =>
+      this.logger.error('PR detection failed', err)
+    );
+
+    // Fire-and-forget: check overload risk
+    this.checkOverloadRisk(athleteId).catch(err =>
+      this.logger.error('Overload check failed', err)
+    );
 
     return result;
   }
@@ -469,5 +487,254 @@ export class WorkoutsService {
       total: ranked.length,
       groupAvgKm,
     };
+  }
+
+  // ─── Change Workout Type (Coach — HRV auto-adjust) ────────────────────────
+
+  async changeWorkoutType(workoutId: string, coachId: string, newType: string) {
+    const workout = await this.prisma.workout.findUnique({
+      where: { id: workoutId },
+      include: { plan: { select: { coachId: true } } },
+    });
+    if (!workout) throw new NotFoundException('Treino não encontrado');
+    if (workout.plan?.coachId !== coachId) throw new ForbiddenException('Acesso negado');
+
+    const updated = await this.prisma.workout.update({
+      where: { id: workoutId },
+      data: { type: newType as any },
+    });
+
+    // Notify athlete of type change
+    this.notifications.createNotification(
+      workout.athleteId,
+      NotificationType.SYSTEM,
+      'Treino atualizado pelo coach',
+      `O tipo do seu treino de hoje foi alterado para ${newType}`,
+      { workoutId, newType },
+    ).catch(() => {});
+
+    return updated;
+  }
+
+  // ─── PR Detection ────────────────────────────────────────────────────────
+
+  private async detectAndCelebratePR(athleteId: string, result: any): Promise<void> {
+    if (!result.distanceMeters || !result.durationSeconds) return;
+
+    // pace in seconds per meter, then convert to seconds per km for comparison
+    const paceSecPerKm = (result.durationSeconds / result.distanceMeters) * 1000;
+
+    // Match workouts with distance ±15%
+    const minDist = Math.round(result.distanceMeters * 0.85);
+    const maxDist = Math.round(result.distanceMeters * 1.15);
+
+    const previous = await this.prisma.workoutResult.findMany({
+      where: {
+        workout: { athleteId },
+        distanceMeters: { gte: minDist, lte: maxDist },
+        ...(result.id != null ? { id: { not: result.id as string } } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: { distanceMeters: true, durationSeconds: true },
+    });
+
+    if (previous.length === 0) return; // first workout — no comparison
+
+    const bestPreviousPaceSecPerKm = Math.min(
+      ...previous
+        .filter(r => r.distanceMeters && r.durationSeconds)
+        .map(r => (r.durationSeconds! / r.distanceMeters!) * 1000)
+    );
+
+    if (paceSecPerKm < bestPreviousPaceSecPerKm) {
+      const improvement = ((bestPreviousPaceSecPerKm - paceSecPerKm) / bestPreviousPaceSecPerKm * 100).toFixed(1);
+      const paceStr = `${Math.floor(paceSecPerKm / 60)}:${String(Math.round(paceSecPerKm % 60)).padStart(2, '0')}`;
+
+      // Notify athlete
+      await this.prisma.notification.create({
+        data: {
+          userId: athleteId,
+          title: '🏆 Novo Recorde Pessoal!',
+          body: `Você bateu seu PR! Pace: ${paceStr}/km — ${improvement}% mais rápido que antes. Continue assim!`,
+          type: NotificationType.SYSTEM,
+        },
+      });
+
+      // Notify coach
+      const athlete = await this.prisma.user.findUnique({
+        where: { id: athleteId },
+        include: { athleteProfile: { select: { coachId: true } } },
+      });
+
+      if (athlete?.athleteProfile?.coachId) {
+        await this.prisma.notification.create({
+          data: {
+            userId: athlete.athleteProfile.coachId,
+            title: `🏆 PR do atleta ${athlete.name}!`,
+            body: `${athlete.name} bateu o recorde pessoal com pace ${paceStr}/km (${improvement}% melhoria)`,
+            type: NotificationType.SYSTEM,
+          },
+        });
+      }
+
+      this.logger.log(`PR detected for athlete ${athleteId}: ${paceStr}/km`);
+    }
+  }
+
+  // ─── Overload Risk Check ──────────────────────────────────────────────────
+
+  private async checkOverloadRisk(athleteId: string): Promise<void> {
+    const last3 = await this.prisma.workoutResult.findMany({
+      where: { workout: { athleteId } },
+      orderBy: { createdAt: 'desc' },
+      take: 3,
+      select: { rpe: true, createdAt: true },
+    });
+
+    if (last3.length < 3) return;
+
+    const allHighRpe = last3.every(r => r.rpe !== null && r.rpe >= 8);
+    if (!allHighRpe) return;
+
+    // Avoid spam: check if already notified today
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const recentAlert = await this.prisma.notification.findFirst({
+      where: {
+        userId: athleteId,
+        title: { contains: 'sobrecarga' },
+        createdAt: { gte: today },
+      },
+    });
+
+    if (recentAlert) return;
+
+    // Notify athlete
+    await this.prisma.notification.create({
+      data: {
+        userId: athleteId,
+        title: '⚠️ Atenção: Carga alta detectada',
+        body: 'Seus últimos 3 treinos tiveram RPE ≥ 8. Considere um dia de recuperação ou treino leve.',
+        type: NotificationType.SYSTEM,
+      },
+    });
+
+    // Notify coach
+    const athlete = await this.prisma.user.findUnique({
+      where: { id: athleteId },
+      select: { name: true, athleteProfile: { select: { coachId: true } } },
+    });
+
+    if (athlete?.athleteProfile?.coachId) {
+      await this.prisma.notification.create({
+        data: {
+          userId: athlete.athleteProfile.coachId,
+          title: `⚠️ Risco de sobrecarga — ${athlete.name}`,
+          body: `${athlete.name} teve RPE ≥ 8 nos últimos 3 treinos consecutivos. Avalie a carga de treino.`,
+          type: NotificationType.SYSTEM,
+        },
+      });
+    }
+  }
+
+  // ─── AI Workout Feedback ──────────────────────────────────────────────────
+
+  private async generateWorkoutFeedback(
+    workout: any,
+    resultId: string,
+    athleteId: string,
+  ): Promise<void> {
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    if (!anthropicKey) return;
+
+    try {
+      // Get current result
+      const currentResult = await this.prisma.workoutResult.findUnique({
+        where: { id: resultId },
+        select: {
+          distanceMeters: true,
+          durationSeconds: true,
+          avgPace: true,
+          avgHeartRate: true,
+          maxHeartRate: true,
+          rpe: true,
+          sensationScore: true,
+          athleteFeedback: true,
+        },
+      });
+      if (!currentResult) return;
+
+      // Get last 5 completed workouts for history
+      const recentWorkouts = await this.prisma.workout.findMany({
+        where: {
+          athleteId,
+          status: WorkoutStatus.COMPLETED,
+          id: { not: workout.id },
+        },
+        include: { result: true },
+        orderBy: { completedAt: 'desc' },
+        take: 5,
+      });
+
+      const historySummary = recentWorkouts
+        .filter((w) => w.result)
+        .map((w) => {
+          const r = w.result!;
+          return `- ${w.type} em ${new Date(w.scheduledDate).toLocaleDateString('pt-BR')}: ${(r.distanceMeters / 1000).toFixed(1)}km, pace ${r.avgPace ?? '--'}, FC ${r.avgHeartRate ?? '--'}bpm, RPE ${r.rpe ?? '--'}`;
+        })
+        .join('\n');
+
+      const currentSummary = `Treino atual: ${workout.type}
+Distância: ${(currentResult.distanceMeters / 1000).toFixed(1)}km
+Pace médio: ${currentResult.avgPace ?? 'N/A'}
+FC média: ${currentResult.avgHeartRate ?? 'N/A'}bpm
+FC máx: ${currentResult.maxHeartRate ?? 'N/A'}bpm
+RPE: ${currentResult.rpe ?? 'N/A'}/10
+Sensação: ${currentResult.sensationScore ?? 'N/A'}/10
+Comentário do atleta: ${currentResult.athleteFeedback ?? 'Nenhum'}`;
+
+      const prompt = `Você é um treinador de corrida especialista. Analise este treino e forneça feedback personalizado.
+
+${currentSummary}
+
+HISTÓRICO DOS ÚLTIMOS 5 TREINOS:
+${historySummary || 'Sem histórico disponível'}
+
+Forneça um feedback conciso (máximo 3 parágrafos) com:
+1. Avaliação do desempenho no treino atual vs histórico
+2. Pontos positivos e áreas de atenção
+3. Recomendação para o próximo treino
+
+Seja encorajador e técnico. Responda em português.`;
+
+      const client = new Anthropic({ apiKey: anthropicKey });
+      const response = await client.messages.create({
+        model: 'claude-opus-4-6',
+        max_tokens: 500,
+        messages: [{ role: 'user', content: prompt }],
+      });
+
+      const aiAnalysis = response.content[0].type === 'text' ? response.content[0].text : null;
+      if (!aiAnalysis) return;
+
+      // Save aiAnalysis to WorkoutResult
+      await this.prisma.workoutResult.update({
+        where: { id: resultId },
+        data: { aiAnalysis },
+      });
+
+      // Notify athlete
+      await this.notifications.createNotification(
+        athleteId,
+        NotificationType.COACH_FEEDBACK,
+        '✨ Rafinha analisou seu treino',
+        `Feedback de IA disponível para "${workout.title}"`,
+        { workoutId: workout.id, resultId },
+      );
+    } catch (err: any) {
+      this.logger.error(`generateWorkoutFeedback failed: ${err.message}`);
+    }
   }
 }

@@ -1,7 +1,9 @@
 import {
   Controller, Post, Get, Put, Delete, Param, Body, UseGuards, Res,
+  UseInterceptors, UploadedFiles,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -21,13 +23,19 @@ export class CoachBrainController {
   // ─── Chat ────────────────────────────────────────────────────────────────
 
   @Post('chat')
-  @ApiOperation({ summary: 'Chat com a IA do coach (SSE streaming)' })
+  @ApiOperation({ summary: 'Chat com a IA do coach (SSE streaming, suporta multipart/form-data com arquivos)' })
+  @UseInterceptors(FilesInterceptor('files', 5, {
+    limits: { fileSize: 20 * 1024 * 1024 }, // 20MB por arquivo
+  }))
   async chat(
     @CurrentUser('id') coachId: string,
     @Body() body: { message: string; sessionId?: string },
+    @UploadedFiles() files: Express.Multer.File[],
     @Res() res: Response,
   ) {
-    await this.coachBrainService.chatStream(coachId, body.sessionId ?? null, body.message, res);
+    await this.coachBrainService.chatStreamMultimodal(
+      coachId, body.sessionId ?? null, body.message, files ?? [], res,
+    );
   }
 
   // ─── Sessions ────────────────────────────────────────────────────────────
@@ -85,5 +93,16 @@ export class CoachBrainController {
   @ApiOperation({ summary: 'Re-tentar um AI job manualmente' })
   async retryJob(@CurrentUser('id') coachId: string, @Param('id') jobId: string) {
     return this.coachBrainService.retryJob(coachId, jobId);
+  }
+
+  // ─── Apply Plan ───────────────────────────────────────────────────────────
+
+  @Post('apply-plan')
+  @ApiOperation({ summary: 'Aplicar planilha gerada pela IA como treinos reais' })
+  async applyPlan(
+    @CurrentUser('id') coachId: string,
+    @Body() body: { athleteId: string; planText: string },
+  ) {
+    return this.coachBrainService.applyPlanFromChat(coachId, body.athleteId, body.planText);
   }
 }

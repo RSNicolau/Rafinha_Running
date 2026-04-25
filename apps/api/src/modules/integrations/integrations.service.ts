@@ -325,21 +325,64 @@ export class IntegrationsService {
       if (recentSnapshots.length >= 3) {
         const avgHrv = recentSnapshots.reduce((sum, s) => sum + (s.hrv || 0), 0) / recentSnapshots.length;
         if (data.hrv < avgHrv * 0.7) {
-          // Low HRV alert — create notification for coach
+          // Low HRV alert — check for today's workout
           const athlete = await this.prisma.user.findUnique({
             where: { id: integration.userId },
             include: { athleteProfile: { include: { coach: true } } },
           });
           if (athlete?.athleteProfile?.coachId) {
-            await this.prisma.notification.create({
-              data: {
-                userId: athlete.athleteProfile.coachId,
-                type: 'SYSTEM',
-                title: `⚠️ HRV Baixo — ${athlete.name}`,
-                body: `HRV de ${data.hrv}ms (média 7d: ${Math.round(avgHrv)}ms). Considere ajustar o treino de hoje para recuperação.`,
-                data: { athleteId: integration.userId, hrv: data.hrv, avgHrv: Math.round(avgHrv) },
+            const coachId = athlete.athleteProfile.coachId;
+
+            // Find today's scheduled workout
+            const today = new Date();
+            const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+            const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+
+            const todayWorkout = await this.prisma.workout.findFirst({
+              where: {
+                athleteId: integration.userId,
+                scheduledDate: { gte: startOfDay, lt: endOfDay },
+                status: 'SCHEDULED',
               },
             });
+
+            const highIntensityTypes = ['interval', 'tempo', 'veloc', 'fartlek', 'INTERVAL', 'TEMPO'];
+            const isHighIntensity = todayWorkout && (
+              highIntensityTypes.some((t) =>
+                todayWorkout.type?.toLowerCase().includes(t.toLowerCase()) ||
+                todayWorkout.title?.toLowerCase().includes(t.toLowerCase()),
+              )
+            );
+
+            if (isHighIntensity && todayWorkout) {
+              // Specific alert with workout details
+              await this.prisma.notification.create({
+                data: {
+                  userId: coachId,
+                  type: 'SYSTEM',
+                  title: `⚠️ HRV baixo — ${athlete.name}`,
+                  body: `HRV: ${data.hrv}ms (média: ${Math.round(avgHrv)}ms). Treino de ${todayWorkout.type} agendado hoje. Sugestão: mudar para Recovery.`,
+                  data: {
+                    workoutId: todayWorkout.id,
+                    athleteId: integration.userId,
+                    suggestedType: 'RECOVERY',
+                    currentHrv: data.hrv,
+                    avgHrv: Math.round(avgHrv),
+                  } as any,
+                },
+              });
+            } else {
+              // Generic HRV alert
+              await this.prisma.notification.create({
+                data: {
+                  userId: coachId,
+                  type: 'SYSTEM',
+                  title: `⚠️ HRV Baixo — ${athlete.name}`,
+                  body: `HRV de ${data.hrv}ms (média 7d: ${Math.round(avgHrv)}ms). Considere ajustar o treino de hoje para recuperação.`,
+                  data: { athleteId: integration.userId, hrv: data.hrv, avgHrv: Math.round(avgHrv) } as any,
+                },
+              });
+            }
           }
         }
       }
