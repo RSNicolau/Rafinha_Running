@@ -239,6 +239,10 @@ model User {
   // Badges
   athleteBadges         AthleteBadge[]         @relation("AthleteBadges")
 
+  // Athlete Documents
+  athleteDocuments      AthleteDocument[]      @relation("AthleteDocuments")
+  coachDocuments        AthleteDocument[]      @relation("CoachDocuments")
+
   @@map("users")
 }
 
@@ -364,6 +368,7 @@ model WorkoutResult {
   rpe              Int?
   sensationScore   Int?          @map("sensation_score")
   athleteFeedback  String?       @map("athlete_feedback")
+  aiAnalysis       String?       @map("ai_analysis")
   createdAt        DateTime      @default(now()) @map("created_at")
   updatedAt        DateTime      @updatedAt @map("updated_at")
 
@@ -1183,4 +1188,30 @@ model AthleteBadge {
   @@unique([athleteId, badgeId])
   @@index([athleteId])
   @@map("athlete_badges")
+}
+
+// ============================================
+// ATHLETE DOCUMENTS
+// ============================================
+
+model AthleteDocument {
+  id          String   @id @default(uuid())
+  athleteId   String   @map("athlete_id")
+  coachId     String   @map("coach_id")
+  fileName    String   @map("file_name")
+  fileUrl     String   @map("file_url")
+  fileType    String   @map("file_type")  // 'image' | 'pdf' | 'excel' | 'other'
+  fileSizeKb  Int?     @map("file_size_kb")
+  category    String   @default("general") // 'exam' | 'assessment' | 'photo' | 'general'
+  description String?
+  aiAnalysis  String?  @map("ai_analysis")
+  aiStatus    String   @default("PENDING") @map("ai_status") // PENDING | PROCESSING | DONE | FAILED
+  uploadedBy  String   @map("uploaded_by") // athleteId or coachId
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  athlete     User     @relation("AthleteDocuments", fields: [athleteId], references: [id], onDelete: Cascade)
+  coach       User     @relation("CoachDocuments", fields: [coachId], references: [id])
+  @@index([athleteId])
+  @@index([coachId])
+  @@map("athlete_documents")
 }
