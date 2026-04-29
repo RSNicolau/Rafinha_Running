@@ -3,10 +3,15 @@ import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { WorkoutsService } from '../workouts.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { BadgesService } from '../../badges/badges.service';
 import { WorkoutStatus } from '@prisma/client';
 
 const mockNotifications = {
   createNotification: jest.fn().mockResolvedValue(undefined),
+};
+
+const mockBadges = {
+  checkAndAwardBadges: jest.fn().mockResolvedValue([]),
 };
 
 const mockPrisma = {
@@ -60,6 +65,7 @@ describe('WorkoutsService', () => {
         WorkoutsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotificationsService, useValue: mockNotifications },
+        { provide: BadgesService, useValue: mockBadges },
       ],
     }).compile();
 

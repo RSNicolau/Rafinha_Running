@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { clearAuthCookie } from './auth-cookie';
 
 export const api = axios.create({
   baseURL: '/api',
@@ -63,6 +64,7 @@ api.interceptors.response.use(
           localStorage.removeItem('rr_access_token');
           localStorage.removeItem('rr_refresh_token');
           localStorage.removeItem('rr_user');
+          clearAuthCookie();
           // Detect which portal to redirect to
           const path = window.location.pathname;
           window.location.href = path.startsWith('/athlete') ? '/athlete-login' : '/login';
@@ -80,6 +82,7 @@ api.interceptors.response.use(
         localStorage.removeItem('rr_access_token');
         localStorage.removeItem('rr_refresh_token');
         localStorage.removeItem('rr_user');
+        clearAuthCookie();
         const path = window.location.pathname;
         window.location.href = path.startsWith('/athlete') ? '/athlete-login' : '/login';
       }

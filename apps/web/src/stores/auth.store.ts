@@ -72,9 +72,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       if (stored && token) {
         set({ user: JSON.parse(stored), isAuthenticated: true, isLoading: false });
       } else {
+        // No token in localStorage — ensure cookie is also cleared to avoid middleware loop
+        clearAuthCookie();
         set({ isLoading: false });
       }
     } catch {
+      clearAuthCookie();
       set({ isLoading: false });
     }
   },
