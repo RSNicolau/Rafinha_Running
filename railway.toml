@@ -1,6 +1,6 @@
 [build]
 builder = "nixpacks"
-buildCommand = "NODE_ENV=development pnpm install --no-frozen-lockfile && cd apps/api && npx prisma generate && npx nest build"
+buildCommand = "pnpm install --no-frozen-lockfile && cd apps/api && npx prisma generate && npx nest build"
 
 [deploy]
 startCommand = "cd /app/apps/api && npx prisma db push --skip-generate --accept-data-loss && node /app/apps/api/dist/main"
