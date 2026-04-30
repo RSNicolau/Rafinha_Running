@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Iniciando seed do banco de dados...');
 
-  // ── MASTER SUPER_ADMIN (criador do sistema) ──
+  // ── MASTER SUPER_ADMIN (criador do sistema — nova conta limpa) ──
   const masterPassword = await bcrypt.hash('masteradmin123@', 12);
   const master = await prisma.user.upsert({
     where: { email: 'master@rafinharunning.com' },
@@ -20,13 +20,14 @@ async function main() {
   });
   console.log(`✅ Master SUPER_ADMIN criado: ${master.email}`);
 
-  // ── RAFINHA (ADMIN — gerencia a assessoria) ──
+  // ── RAFINHA (ADMIN — gerencia a assessoria via rafinha@rafinharunning.com.br existente) ──
+  // Atualiza a conta existente .com.br para ADMIN (mantém coach profile + slug + dados vinculados)
   const coachPassword = await bcrypt.hash('Rafinhaadmin123@', 12);
   const coach = await prisma.user.upsert({
-    where: { email: 'rafinha@rafinharunning.com' },
+    where: { email: 'rafinha@rafinharunning.com.br' },
     update: { passwordHash: coachPassword, role: UserRole.ADMIN },
     create: {
-      email: 'rafinha@rafinharunning.com',
+      email: 'rafinha@rafinharunning.com.br',
       passwordHash: coachPassword,
       name: 'Rafinha Silva',
       role: UserRole.ADMIN,
@@ -42,24 +43,13 @@ async function main() {
     },
   });
 
-  // Ensure coachProfile exists with correct slug (if user was created without it)
-  const existingProfile = await prisma.coachProfile.findUnique({ where: { userId: coach.id } });
-  if (!existingProfile) {
-    await prisma.coachProfile.create({
-      data: {
-        userId: coach.id,
-        slug: 'rafinha',
-        bio: 'Treinador de corrida com 10 anos de experiência. Especialista em maratonas.',
-        specializations: ['Maratona', 'Meia Maratona', '10km'],
-        certifications: ['CREF', 'USATF Level 2'],
-        maxAthletes: 50,
-      },
-    });
-  } else if (!existingProfile.slug) {
-    await prisma.coachProfile.update({ where: { userId: coach.id }, data: { slug: 'rafinha' } });
-  }
+  // Ensure slug is set if coachProfile already exists
+  await prisma.coachProfile.updateMany({
+    where: { userId: coach.id, slug: null },
+    data: { slug: 'rafinha' },
+  });
 
-  console.log(`✅ Rafinha ADMIN criado: ${coach.email}`);
+  console.log(`✅ Rafinha ADMIN atualizado: ${coach.email}`);
 
   // ── ADMIN legado (manter compatibilidade) ──
   const adminPassword = await bcrypt.hash('admin123', 12);

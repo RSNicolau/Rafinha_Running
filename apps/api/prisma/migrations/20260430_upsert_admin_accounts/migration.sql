@@ -1,6 +1,6 @@
 -- Upsert system accounts with correct roles
 -- master@rafinharunning.com → SUPER_ADMIN (platform owner)
--- rafinha@rafinharunning.com → ADMIN (coach/manager of the assessoria)
+-- rafinha@rafinharunning.com.br → ADMIN (coach/manager, existing account updated)
 -- Passwords are bcrypt hashed (cost 12). Safe to re-run.
 
 DO $$
@@ -8,7 +8,7 @@ DECLARE
   v_master_id TEXT;
   v_rafinha_id TEXT;
 BEGIN
-  -- ── Master SUPER_ADMIN ──
+  -- ── Master SUPER_ADMIN (new clean account, no coach profile needed) ──
   INSERT INTO users (id, email, password_hash, name, role, is_active, created_at, updated_at)
   VALUES (
     gen_random_uuid(),
@@ -27,40 +27,23 @@ BEGIN
   SELECT id INTO v_master_id FROM users WHERE email = 'master@rafinharunning.com';
   RAISE NOTICE 'Master SUPER_ADMIN id: %', v_master_id;
 
-  -- ── Rafinha ADMIN ──
-  INSERT INTO users (id, email, password_hash, name, role, is_active, created_at, updated_at)
-  VALUES (
-    gen_random_uuid(),
-    'rafinha@rafinharunning.com',
-    '$2b$12$llAd98SqAm6E3UoivTwvuOeDa4ocydjSgHwQnQCHThsNP84gbKsMe', -- Rafinhaadmin123@
-    'Rafinha Silva',
-    'ADMIN',
-    true,
-    NOW(), NOW()
-  )
-  ON CONFLICT (email) DO UPDATE SET
+  -- ── Rafinha ADMIN (update existing .com.br account, keep coach profile + slug intact) ──
+  -- This preserves all athletes, products, and data linked to this user
+  UPDATE users SET
     role = 'ADMIN',
+    password_hash = '$2b$12$llAd98SqAm6E3UoivTwvuOeDa4ocydjSgHwQnQCHThsNP84gbKsMe', -- Rafinhaadmin123@
     is_active = true,
-    updated_at = NOW();
+    updated_at = NOW()
+  WHERE email = 'rafinha@rafinharunning.com.br';
 
-  SELECT id INTO v_rafinha_id FROM users WHERE email = 'rafinha@rafinharunning.com';
-  RAISE NOTICE 'Rafinha ADMIN id: %', v_rafinha_id;
+  SELECT id INTO v_rafinha_id FROM users WHERE email = 'rafinha@rafinharunning.com.br';
+  RAISE NOTICE 'Rafinha ADMIN id: % (role updated to ADMIN)', v_rafinha_id;
 
-  -- ── Ensure CoachProfile for Rafinha ──
-  INSERT INTO coach_profiles (id, user_id, slug, bio, specializations, certifications, max_athletes, created_at, updated_at)
-  VALUES (
-    gen_random_uuid(),
-    v_rafinha_id,
-    'rafinha',
-    'Treinador de corrida com 10 anos de experiência. Especialista em maratonas.',
-    ARRAY['Maratona', 'Meia Maratona', '10km'],
-    ARRAY['CREF', 'USATF Level 2'],
-    50,
-    NOW(), NOW()
-  )
-  ON CONFLICT (user_id) DO UPDATE SET
-    slug = COALESCE(coach_profiles.slug, 'rafinha'),
-    updated_at = NOW();
+  -- Ensure coach profile has slug (in case it was null)
+  UPDATE coach_profiles SET
+    slug = 'rafinha',
+    updated_at = NOW()
+  WHERE user_id = v_rafinha_id AND (slug IS NULL OR slug = '');
 
   RAISE NOTICE 'Contas de sistema atualizadas com sucesso.';
 END $$;

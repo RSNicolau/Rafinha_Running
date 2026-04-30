@@ -3,7 +3,7 @@ builder = "nixpacks"
 buildCommand = "pnpm install --no-frozen-lockfile && cd apps/api && npx prisma generate && cd ../.. && pnpm --filter @rr/api build"
 
 [deploy]
-startCommand = "cd /app/apps/api && npx prisma db push --skip-generate --accept-data-loss && npx prisma db seed && node /app/apps/api/dist/main"
+startCommand = "cd /app/apps/api && npx prisma db push --skip-generate --accept-data-loss && node /app/apps/api/dist/main"
 healthcheckPath = "/health"
 healthcheckTimeout = 120
 restartPolicyType = "on_failure"
