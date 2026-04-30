@@ -182,6 +182,93 @@ async function main() {
   });
   console.log('✅ Conversa criada com mensagens de exemplo');
 
+  // ── LOJA VIRTUAL — Produtos RR 2026 ──
+  const storeProducts = [
+    {
+      name: 'Camisa RR 2026',
+      description: 'Camisa oficial da coleção Rafinha Running 2026. Tecido dry-fit de alta performance, ideal para treinos e provas.',
+      category: 'CAMISA' as const,
+      priceInCents: 12990,
+      images: ['/produtos/camisa_rr_26.jpg'],
+      sizes: ['PP', 'P', 'M', 'G', 'GG', 'XG'],
+      colors: ['Vermelho', 'Branco'],
+      totalStock: 100,
+      featured: true,
+    },
+    {
+      name: 'Casaco RR 2026',
+      description: 'Casaco oficial RR 2026. Conforto e estilo para o dia a dia e treinos em dias mais frios.',
+      category: 'CASACO' as const,
+      priceInCents: 18990,
+      images: ['/produtos/casaco_rr_26.jpg'],
+      sizes: ['PP', 'P', 'M', 'G', 'GG', 'XG'],
+      colors: ['Preto', 'Vermelho'],
+      totalStock: 60,
+      featured: true,
+    },
+    {
+      name: 'Corta-vento RR 2026',
+      description: 'Corta-vento leve e impermeável da coleção RR 2026. Perfeito para treinos em dias de vento e garoa.',
+      category: 'CORTA_VENTO' as const,
+      priceInCents: 15990,
+      images: ['/produtos/corta_vento_rr_26.jpg'],
+      sizes: ['PP', 'P', 'M', 'G', 'GG', 'XG'],
+      colors: ['Preto'],
+      totalStock: 50,
+      featured: false,
+    },
+    {
+      name: 'Viseira RR 2026',
+      description: 'Viseira RR 2026 com proteção UV. Leve, regulável e ideal para corridas ao sol.',
+      category: 'VISEIRA' as const,
+      priceInCents: 6990,
+      images: ['/produtos/viseira_rr_26.jpg'],
+      sizes: ['Único'],
+      colors: ['Vermelho', 'Preto'],
+      totalStock: 80,
+      featured: false,
+    },
+    {
+      name: 'Camisa São Garrafa',
+      description: 'Camisa especial edição São Garrafa. Exclusiva e limitada para os atletas RR.',
+      category: 'CAMISA' as const,
+      priceInCents: 12990,
+      images: ['/produtos/camisa_sao_garrafa_v3.jpg', '/produtos/camisa_sao_garrafa_v2.jpg'],
+      sizes: ['PP', 'P', 'M', 'G', 'GG', 'XG'],
+      colors: ['Branco'],
+      totalStock: 40,
+      featured: false,
+    },
+  ];
+
+  for (const p of storeProducts) {
+    const exists = await prisma.product.findFirst({
+      where: { coachId: coach.id, name: p.name },
+    });
+    if (!exists) {
+      await prisma.product.create({
+        data: { ...p, coachId: coach.id, active: true },
+      });
+      console.log(`✅ Produto criado: ${p.name}`);
+    } else {
+      await prisma.product.update({
+        where: { id: exists.id },
+        data: {
+          images: p.images,
+          priceInCents: p.priceInCents,
+          description: p.description,
+          sizes: p.sizes,
+          colors: p.colors,
+          totalStock: p.totalStock,
+          featured: p.featured,
+          active: true,
+        },
+      });
+      console.log(`🔄 Produto atualizado: ${p.name}`);
+    }
+  }
+  console.log('✅ Loja virtual configurada com 5 produtos RR 2026');
+
   // Create App Config (theme)
   await prisma.appConfig.upsert({
     where: { key: 'theme' },
