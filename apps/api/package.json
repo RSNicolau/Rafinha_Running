@@ -16,6 +16,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
+    "@swc/cli": "^0.6.0",
+    "@swc/core": "^1.10.0",
     "@google/generative-ai": "^0.24.1",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
