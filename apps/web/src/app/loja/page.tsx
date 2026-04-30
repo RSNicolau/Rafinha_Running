@@ -63,6 +63,11 @@ export default function LojaPage() {
   const [submitting, setSubmitting] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [couponCode, setCouponCode] = useState('');
+  const [coupon, setCoupon] = useState<{ id: string; code: string; type: string; value: number; discountInCents: number; finalInCents: number } | null>(null);
+  const [couponError, setCouponError] = useState('');
+  const [validatingCoupon, setValidatingCoupon] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState('');
 
   const API = process.env.NEXT_PUBLIC_API_URL ?? '/api/v1';
 
@@ -81,6 +86,31 @@ export default function LojaPage() {
     setForm({ productId: p.id, quantity: 1 });
     setOrderId(null);
     setError('');
+    setCoupon(null);
+    setCouponCode('');
+    setCouponError('');
+  }
+
+  async function validateCoupon() {
+    if (!couponCode.trim() || !selected) return;
+    setValidatingCoupon(true);
+    setCouponError('');
+    try {
+      const priceInCents = selected.priceInCents * (form.quantity ?? 1);
+      const res = await fetch(`${API}/store/public/validate-coupon`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coachId: COACH_ID, code: couponCode.trim(), priceInCents }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? 'Cupom inválido');
+      setCoupon(data);
+    } catch (e: unknown) {
+      setCouponError(e instanceof Error ? e.message : 'Cupom inválido');
+      setCoupon(null);
+    } finally {
+      setValidatingCoupon(false);
+    }
   }
 
   async function submitOrder() {
@@ -94,7 +124,7 @@ export default function LojaPage() {
       const res = await fetch(`${API}/store/public/orders`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, couponCode: coupon?.code }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message ?? 'Erro ao criar pedido');
@@ -155,8 +185,26 @@ export default function LojaPage() {
           </div>
         )}
 
+        {/* Category filter */}
+        {!loading && products.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
+            <button onClick={() => setCategoryFilter('')}
+              className="shrink-0 px-3 py-1.5 rounded-xl border text-xs font-bold transition"
+              style={{ borderColor: !categoryFilter ? RED : LIGHT, background: !categoryFilter ? '#FEF2F2' : WHITE, color: !categoryFilter ? RED : GRAY }}>
+              Todos
+            </button>
+            {Array.from(new Set(products.map(p => p.category))).map(cat => (
+              <button key={cat} onClick={() => setCategoryFilter(cat)}
+                className="shrink-0 px-3 py-1.5 rounded-xl border text-xs font-bold transition"
+                style={{ borderColor: categoryFilter === cat ? RED : LIGHT, background: categoryFilter === cat ? '#FEF2F2' : WHITE, color: categoryFilter === cat ? RED : GRAY }}>
+                {CATEGORY_LABEL[cat] ?? cat}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {products.map(p => {
+          {products.filter(p => !categoryFilter || p.category === categoryFilter).map(p => {
             const qty = available(p);
             return (
               <div
@@ -370,9 +418,52 @@ export default function LojaPage() {
                       onChange={e => setForm(f => ({ ...f, shippingAddress: e.target.value }))}
                     />
 
+                    {/* Coupon */}
+                    <div className="rounded-xl border p-3" style={{ borderColor: LIGHT }}>
+                      <p className="text-xs font-bold mb-2" style={{ color: GRAY }}>🎟️ Cupom de desconto</p>
+                      {coupon ? (
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-bold" style={{ color: '#16A34A' }}>✅ {coupon.code}</p>
+                            <p className="text-xs" style={{ color: GRAY }}>
+                              Desconto: {fmtPrice(coupon.discountInCents)} → Total: {fmtPrice(coupon.finalInCents)}
+                            </p>
+                          </div>
+                          <button onClick={() => { setCoupon(null); setCouponCode(''); }}
+                            className="text-xs px-2 py-1 rounded border" style={{ color: RED, borderColor: RED }}>
+                            Remover
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          <input type="text" value={couponCode}
+                            onChange={e => { setCouponCode(e.target.value.toUpperCase()); setCouponError(''); }}
+                            onKeyDown={e => e.key === 'Enter' && validateCoupon()}
+                            placeholder="Código de desconto"
+                            className="flex-1 border rounded-lg px-3 py-1.5 text-sm outline-none uppercase"
+                            style={{ borderColor: couponError ? RED : LIGHT }} />
+                          <button onClick={validateCoupon} disabled={validatingCoupon || !couponCode.trim()}
+                            className="px-3 py-1.5 rounded-lg text-sm font-bold"
+                            style={{ background: couponCode.trim() ? RED : LIGHT, color: couponCode.trim() ? WHITE : GRAY }}>
+                            {validatingCoupon ? '...' : 'OK'}
+                          </button>
+                        </div>
+                      )}
+                      {couponError && <p className="text-xs mt-1" style={{ color: RED }}>{couponError}</p>}
+                    </div>
+
                     <div className="rounded-xl p-3 text-xs" style={{ background: '#F4F4F5', color: GRAY }}>
                       <p className="font-bold mb-0.5" style={{ color: DARK }}>
-                        Total: {fmtPrice(selected.priceInCents * (form.quantity ?? 1))}
+                        {coupon ? (
+                          <>
+                            <span style={{ textDecoration: 'line-through', marginRight: 4 }}>
+                              {fmtPrice(selected.priceInCents * (form.quantity ?? 1))}
+                            </span>
+                            <span style={{ color: '#16A34A' }}>{fmtPrice(coupon.finalInCents)}</span>
+                          </>
+                        ) : (
+                          <>Total: {fmtPrice(selected.priceInCents * (form.quantity ?? 1))}</>
+                        )}
                       </p>
                       <p>Você receberá um email com link de pagamento após a reserva.</p>
                     </div>

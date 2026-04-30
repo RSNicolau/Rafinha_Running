@@ -81,7 +81,19 @@ function fmtPrice(cents: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100);
 }
 
-type Tab = 'produtos' | 'pedidos';
+type Tab = 'produtos' | 'pedidos' | 'cupons';
+
+type StoreCoupon = {
+  id: string;
+  code: string;
+  type: 'PERCENT' | 'FIXED' | 'COURTESY';
+  value: number;
+  maxUses?: number;
+  usedCount: number;
+  expiresAt?: string;
+  isActive: boolean;
+  createdAt: string;
+};
 type FormData = Partial<{
   name: string; description: string; category: string; priceInCents: number;
   totalStock: number; sizes: string; colors: string; featured: boolean;
@@ -98,6 +110,10 @@ export default function DashboardLojaPage() {
   const [formData, setFormData] = useState<FormData>({});
   const [saving, setSaving] = useState(false);
   const [orderFilter, setOrderFilter] = useState('');
+  const [coupons, setCoupons] = useState<StoreCoupon[]>([]);
+  const [couponForm, setCouponForm] = useState({ code: '', type: 'PERCENT' as StoreCoupon['type'], value: '', maxUses: '', expiresAt: '' });
+  const [showCouponForm, setShowCouponForm] = useState(false);
+  const [savingCoupon, setSavingCoupon] = useState(false);
 
   const API = '/api/v1';
   const headers = () => {
@@ -107,15 +123,48 @@ export default function DashboardLojaPage() {
 
   async function load() {
     setLoading(true);
-    const [pRes, oRes, sRes] = await Promise.all([
+    const [pRes, oRes, sRes, cRes] = await Promise.all([
       fetch(`${API}/store/products`, { headers: headers() }),
       fetch(`${API}/store/orders`, { headers: headers() }),
       fetch(`${API}/store/stats`, { headers: headers() }),
+      fetch(`${API}/store/coupons`, { headers: headers() }),
     ]);
     if (pRes.ok) setProducts(await pRes.json());
     if (oRes.ok) setOrders(await oRes.json());
     if (sRes.ok) setStats(await sRes.json());
+    if (cRes.ok) setCoupons(await cRes.json());
     setLoading(false);
+  }
+
+  async function createCoupon(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingCoupon(true);
+    try {
+      const res = await fetch(`${API}/store/coupons`, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({
+          code: couponForm.code,
+          type: couponForm.type,
+          value: couponForm.type !== 'COURTESY' ? parseFloat(couponForm.value) : 0,
+          maxUses: couponForm.maxUses ? parseInt(couponForm.maxUses) : undefined,
+          expiresAt: couponForm.expiresAt || undefined,
+        }),
+      });
+      if (!res.ok) { const d = await res.json(); alert(d.message ?? 'Erro ao criar cupom'); return; }
+      setCouponForm({ code: '', type: 'PERCENT', value: '', maxUses: '', expiresAt: '' });
+      setShowCouponForm(false);
+      const cRes = await fetch(`${API}/store/coupons`, { headers: headers() });
+      if (cRes.ok) setCoupons(await cRes.json());
+    } finally {
+      setSavingCoupon(false);
+    }
+  }
+
+  function formatCouponDiscount(c: StoreCoupon) {
+    if (c.type === 'COURTESY') return '100% (cortesia)';
+    if (c.type === 'PERCENT') return `${c.value}%`;
+    return `R$ ${(c.value / 100).toFixed(2)}`;
   }
 
   useEffect(() => { load(); }, []);
@@ -218,14 +267,14 @@ export default function DashboardLojaPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 rounded-2xl mb-6" style={{ background: LIGHT }}>
-        {(['produtos', 'pedidos'] as Tab[]).map(t => (
+        {(['produtos', 'pedidos', 'cupons'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className="flex-1 py-2 rounded-xl text-sm font-black uppercase tracking-widest capitalize transition"
             style={{
               background: tab === t ? WHITE : 'transparent',
               color: tab === t ? RED : GRAY,
             }}>
-            {t}
+            {t === 'cupons' ? '🎟️' : ''}{t}
           </button>
         ))}
       </div>
@@ -372,6 +421,123 @@ export default function DashboardLojaPage() {
                 </div>
               );
             })}
+          </div>
+        </>
+      )}
+
+      {/* Cupons tab */}
+      {tab === 'cupons' && (
+        <>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm font-black" style={{ color: DARK }}>Cupons de Desconto da Loja</p>
+            <button onClick={() => setShowCouponForm(!showCouponForm)}
+              className="text-xs px-3 py-1.5 rounded-lg text-white font-bold"
+              style={{ background: RED }}>
+              + Novo Cupom
+            </button>
+          </div>
+
+          {showCouponForm && (
+            <form onSubmit={createCoupon} className="rounded-2xl border p-4 mb-4 space-y-3"
+              style={{ background: WHITE, borderColor: LIGHT }}>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold mb-1" style={{ color: GRAY }}>Código *</label>
+                  <input type="text" required value={couponForm.code}
+                    onChange={e => setCouponForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
+                    placeholder="EX: DESCONTO10"
+                    className="w-full border rounded-xl px-3 py-2 text-sm outline-none"
+                    style={{ borderColor: LIGHT }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold mb-1" style={{ color: GRAY }}>Tipo *</label>
+                  <select value={couponForm.type}
+                    onChange={e => setCouponForm(f => ({ ...f, type: e.target.value as StoreCoupon['type'] }))}
+                    className="w-full border rounded-xl px-3 py-2 text-sm outline-none"
+                    style={{ borderColor: LIGHT }}>
+                    <option value="PERCENT">Percentual (%)</option>
+                    <option value="FIXED">Fixo (centavos)</option>
+                    <option value="COURTESY">Cortesia (100%)</option>
+                  </select>
+                </div>
+              </div>
+              {couponForm.type !== 'COURTESY' && (
+                <div>
+                  <label className="block text-xs font-bold mb-1" style={{ color: GRAY }}>
+                    {couponForm.type === 'PERCENT' ? 'Desconto (%)' : 'Desconto (centavos, ex: 1000 = R$10)'} *
+                  </label>
+                  <input type="number" required min={0} value={couponForm.value}
+                    onChange={e => setCouponForm(f => ({ ...f, value: e.target.value }))}
+                    className="w-full border rounded-xl px-3 py-2 text-sm outline-none"
+                    style={{ borderColor: LIGHT }} />
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold mb-1" style={{ color: GRAY }}>Limite de usos</label>
+                  <input type="number" min={1} value={couponForm.maxUses}
+                    onChange={e => setCouponForm(f => ({ ...f, maxUses: e.target.value }))}
+                    placeholder="Ilimitado"
+                    className="w-full border rounded-xl px-3 py-2 text-sm outline-none"
+                    style={{ borderColor: LIGHT }} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold mb-1" style={{ color: GRAY }}>Expira em</label>
+                  <input type="datetime-local" value={couponForm.expiresAt}
+                    onChange={e => setCouponForm(f => ({ ...f, expiresAt: e.target.value }))}
+                    className="w-full border rounded-xl px-3 py-2 text-sm outline-none"
+                    style={{ borderColor: LIGHT }} />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button type="submit" disabled={savingCoupon}
+                  className="flex-1 py-2 rounded-xl text-white text-sm font-bold"
+                  style={{ background: RED, opacity: savingCoupon ? 0.7 : 1 }}>
+                  {savingCoupon ? 'Criando...' : 'Criar Cupom'}
+                </button>
+                <button type="button" onClick={() => setShowCouponForm(false)}
+                  className="px-4 py-2 rounded-xl border text-sm font-bold"
+                  style={{ borderColor: LIGHT, color: GRAY }}>
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          )}
+
+          {coupons.length === 0 && !showCouponForm && (
+            <div className="text-center py-12 rounded-2xl border" style={{ background: WHITE, borderColor: LIGHT }}>
+              <p className="text-4xl mb-2">🎟️</p>
+              <p className="font-semibold" style={{ color: DARK }}>Nenhum cupom criado</p>
+              <p className="text-sm" style={{ color: GRAY }}>Crie cupons de desconto para os seus produtos</p>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {coupons.map(c => (
+              <div key={c.id} className="rounded-xl border p-4 flex items-center justify-between"
+                style={{ background: WHITE, borderColor: LIGHT }}>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-black text-sm" style={{ color: RED }}>{c.code}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold`}
+                      style={{
+                        background: c.type === 'COURTESY' ? '#F3E8FF' : c.type === 'PERCENT' ? '#DBEAFE' : '#DCFCE7',
+                        color: c.type === 'COURTESY' ? '#7C3AED' : c.type === 'PERCENT' ? '#1D4ED8' : '#166534',
+                      }}>
+                      {formatCouponDiscount(c)}
+                    </span>
+                  </div>
+                  <p className="text-xs mt-0.5" style={{ color: GRAY }}>
+                    {c.usedCount} uso{c.usedCount !== 1 ? 's' : ''}
+                    {c.maxUses ? ` / ${c.maxUses} limite` : ' (ilimitado)'}
+                    {c.expiresAt ? ` · expira ${new Date(c.expiresAt).toLocaleDateString('pt-BR')}` : ''}
+                  </p>
+                </div>
+                <button onClick={() => navigator.clipboard.writeText(c.code)}
+                  className="text-sm px-2 py-1 rounded" style={{ color: GRAY }}
+                  title="Copiar código">📋</button>
+              </div>
+            ))}
           </div>
         </>
       )}

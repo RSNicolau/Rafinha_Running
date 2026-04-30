@@ -242,6 +242,7 @@ model User {
   // Athlete Documents
   athleteDocuments      AthleteDocument[]      @relation("AthleteDocuments")
   coachDocuments        AthleteDocument[]      @relation("CoachDocuments")
+  storeCoupons          StoreCoupon[]          @relation("CoachStoreCoupons")
 
   @@map("users")
 }
@@ -1007,6 +1008,9 @@ model StoreOrder {
   color           String?
   quantity        Int              @default(1)
   totalInCents    Int              @map("total_in_cents")
+  discountInCents Int              @default(0) @map("discount_in_cents")
+  finalInCents    Int?             @map("final_in_cents")             // totalInCents - discountInCents
+  couponId        String?          @map("coupon_id")
   status          StoreOrderStatus @default(PENDING_PAYMENT)
   paymentId       String?          @map("payment_id")
   paymentUrl      String?          @map("payment_url")
@@ -1015,12 +1019,37 @@ model StoreOrder {
   createdAt       DateTime         @default(now()) @map("created_at")
   updatedAt       DateTime         @updatedAt @map("updated_at")
 
-  product Product @relation(fields: [productId], references: [id])
+  product Product       @relation(fields: [productId], references: [id])
+  coupon  StoreCoupon?  @relation(fields: [couponId], references: [id])
 
   @@index([productId])
   @@index([status])
   @@index([customerEmail])
   @@map("store_orders")
+}
+
+// ============================================
+// STORE COUPONS
+// ============================================
+
+model StoreCoupon {
+  id          String   @id @default(uuid())
+  coachId     String   @map("coach_id")
+  code        String
+  type        String   // 'PERCENT' | 'FIXED' | 'COURTESY'
+  value       Float    @default(0)   // % ou centavos (0 = cortesia)
+  maxUses     Int?     @map("max_uses")
+  usedCount   Int      @default(0) @map("used_count")
+  expiresAt   DateTime? @map("expires_at")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  coach  User         @relation("CoachStoreCoupons", fields: [coachId], references: [id], onDelete: Cascade)
+  orders StoreOrder[]
+
+  @@unique([coachId, code])
+  @@index([coachId])
+  @@map("store_coupons")
 }
 
 // ============================================

@@ -42,6 +42,7 @@ export class StoreController {
     quantity: number;
     shippingAddress?: string;
     notes?: string;
+    couponCode?: string;
   }) {
     return this.storeService.createOrder(body);
   }
@@ -151,5 +152,34 @@ export class StoreController {
   @ApiOperation({ summary: 'Estatísticas da loja' })
   getStats(@CurrentUser('id') coachId: string) {
     return this.storeService.getStoreStats(coachId);
+  }
+
+  // ── COUPONS ──
+
+  @Post('coupons')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Criar cupom de desconto para a loja' })
+  createCoupon(
+    @CurrentUser('id') coachId: string,
+    @Body() body: { code: string; type: 'PERCENT' | 'FIXED' | 'COURTESY'; value?: number; maxUses?: number; expiresAt?: string },
+  ) {
+    return this.storeService.createStoreCoupon(coachId, body);
+  }
+
+  @Get('coupons')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Listar cupons da loja' })
+  listCoupons(@CurrentUser('id') coachId: string) {
+    return this.storeService.listStoreCoupons(coachId);
+  }
+
+  @Post('public/validate-coupon')
+  @ApiOperation({ summary: 'Validar cupom da loja (público)' })
+  validateCoupon(@Body() body: { coachId: string; code: string; priceInCents: number }) {
+    return this.storeService.validateStoreCoupon(body.coachId, body.code, body.priceInCents);
   }
 }
