@@ -23,8 +23,10 @@ const navItems = [
   { href: '/dashboard/billing', label: 'Assinatura', icon: 'billing', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/settings', label: 'Configurações', icon: 'settings', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/onboarding-guide', label: 'Primeiros Passos', icon: 'guide', roles: ['COACH'] },
+  { href: '/dashboard/testimonials', label: 'Depoimentos', icon: 'star', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/admin/plans', label: 'Planos & Preços', icon: 'plans', roles: ['ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/admin/branding', label: 'White-label', icon: 'brand', roles: ['ADMIN', 'SUPER_ADMIN'] },
+  { href: '/dashboard/admin/platform', label: 'Plataforma', icon: 'platform', roles: ['SUPER_ADMIN'] },
   // Athlete
   { href: '/dashboard', label: 'Visão Geral', icon: 'grid', roles: ['ATHLETE'] },
   { href: '/dashboard/athlete/training-load', label: 'Carga de Treino', icon: 'chart', roles: ['ATHLETE'] },
@@ -36,6 +38,7 @@ const navItems = [
   { href: '/dashboard/athlete/reports', label: 'Relatório PDF', icon: 'reports', roles: ['ATHLETE'] },
   { href: '/dashboard/athlete/schedule', label: 'Agendar Sessão', icon: 'calendar', roles: ['ATHLETE'] },
   { href: '/dashboard/athlete/documents', label: 'Meus Documentos', icon: 'documents', roles: ['ATHLETE'] },
+  { href: '/dashboard/athlete/testimonial', label: 'Meu Depoimento', icon: 'star', roles: ['ATHLETE'] },
   { href: '/dashboard/chat', label: 'Chat', icon: 'chat', roles: ['ATHLETE'] },
   { href: '/dashboard/integrations', label: 'Integrações', icon: 'integrations', roles: ['ATHLETE'] },
 ];
@@ -86,6 +89,16 @@ function NavIcon({ name, className }: { name: string; className?: string }) {
     brand: (
       <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" />
+      </svg>
+    ),
+    star: (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
+      </svg>
+    ),
+    platform: (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 7.125C2.25 6.504 2.754 6 3.375 6h6c.621 0 1.125.504 1.125 1.125v3.75c0 .621-.504 1.125-1.125 1.125h-6a1.125 1.125 0 01-1.125-1.125v-3.75zM14.25 8.625c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v8.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 01-1.125-1.125v-8.25zM3.75 16.125c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v2.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 01-1.125-1.125v-2.25z" />
       </svg>
     ),
     trophy: (

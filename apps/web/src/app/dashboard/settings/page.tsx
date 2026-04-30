@@ -1377,6 +1377,42 @@ export default function SettingsPage() {
         )}
 
         {/* Nicho do Esporte — COACH only */}
+        {/* Profile Photo & Banner */}
+        <div className="glass-card p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Foto & Banner</h2>
+              <p className="text-sm text-gray-600">Atualize sua foto de perfil e imagem de capa</p>
+              <p className="text-xs text-gray-400 mt-0.5">A foto aparece nos depoimentos e no chat</p>
+            </div>
+            <a
+              href="/dashboard/settings/profile"
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary/90 transition shrink-0"
+            >
+              📸 Editar →
+            </a>
+          </div>
+        </div>
+
+        {/* AI Provider Settings */}
+        {isCoach && (
+          <div className="glass-card p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Provedor de IA</h2>
+                <p className="text-sm text-gray-600">Escolha entre Anthropic Claude, OpenAI GPT ou Gemini</p>
+                <p className="text-xs text-gray-400 mt-0.5">Troque o modelo sem mudar nada no código — plug & play</p>
+              </div>
+              <a
+                href="/dashboard/settings/ai"
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary/90 transition shrink-0"
+              >
+                🤖 Configurar →
+              </a>
+            </div>
+          </div>
+        )}
+
         {isCoach && (
           <div className="glass-card p-6">
             <div className="flex items-center justify-between">
