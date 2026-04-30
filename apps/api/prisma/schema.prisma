@@ -553,8 +553,10 @@ model Event {
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
 
-  createdBy     User                @relation("EventCreator", fields: [createdById], references: [id])
-  registrations EventRegistration[]
+  createdBy          User                 @relation("EventCreator", fields: [createdById], references: [id])
+  registrations      EventRegistration[]
+  coupons            EventCoupon[]
+  kitDeliverySessions KitDeliverySession[]
 
   @@index([eventDate])
   @@index([status])
@@ -575,6 +577,10 @@ model EventRegistration {
   kitType                KitType?  @map("kit_type")                          // COMPLETO | PREMIUM
   kitPickupScheduledAt   DateTime? @map("kit_pickup_scheduled_at")           // agendamento retirada
   kitPickupConfirmed     Boolean   @default(false) @map("kit_pickup_confirmed")
+  kitDeliveredAt         DateTime? @map("kit_delivered_at")                  // entrega kit QR scanner
+  kitDeliveredBy         String?   @map("kit_delivered_by")                  // label do voluntário
+  couponId               String?   @map("coupon_id")                         // cupom aplicado
+  finalPrice             Int?      @map("final_price")                       // preço final em centavos
   emergencyContact       String?   @map("emergency_contact")
   medicalInfo            String?   @map("medical_info")
   registeredAt           DateTime  @default(now()) @map("registered_at")
@@ -582,14 +588,72 @@ model EventRegistration {
   checkinAt              DateTime? @map("checkin_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
 
-  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  user  User  @relation("EventRegistrations", fields: [userId], references: [id])
+  event  Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user   User         @relation("EventRegistrations", fields: [userId], references: [id])
+  coupon EventCoupon? @relation(fields: [couponId], references: [id])
+  couponUse EventCouponUse?
 
   @@unique([eventId, userId])
   @@index([userId])
   @@index([status])
   @@index([paymentStatus])
   @@map("event_registrations")
+}
+
+// ============================================
+// EVENT COUPONS
+// ============================================
+
+model EventCoupon {
+  id          String   @id @default(uuid())
+  eventId     String   @map("event_id")
+  code        String
+  type        String   // 'PERCENT' | 'FIXED' | 'COURTESY'
+  value       Float    @default(0)    // % ou centavos (0 = cortesia)
+  maxUses     Int?     @map("max_uses")
+  usedCount   Int      @default(0) @map("used_count")
+  expiresAt   DateTime? @map("expires_at")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  event         Event               @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  registrations EventRegistration[]
+  uses          EventCouponUse[]
+
+  @@unique([eventId, code])
+  @@index([eventId])
+  @@map("event_coupons")
+}
+
+model EventCouponUse {
+  id             String   @id @default(uuid())
+  couponId       String   @map("coupon_id")
+  registrationId String   @unique @map("registration_id")
+  usedAt         DateTime @default(now()) @map("used_at")
+
+  coupon       EventCoupon       @relation(fields: [couponId], references: [id])
+  registration EventRegistration @relation(fields: [registrationId], references: [id])
+
+  @@index([couponId])
+  @@map("event_coupon_uses")
+}
+
+// ============================================
+// KIT DELIVERY SESSIONS (volunteer access)
+// ============================================
+
+model KitDeliverySession {
+  id        String   @id @default(uuid())
+  eventId   String   @map("event_id")
+  token     String   @unique
+  label     String   // ex: "Voluntário João"
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@map("kit_delivery_sessions")
 }
 
 // ============================================

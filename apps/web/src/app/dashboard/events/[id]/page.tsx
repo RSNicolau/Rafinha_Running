@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { api } from '@/lib/api';
+import CouponManager from './CouponManager';
 
 const EventMap = dynamic(() => import('@/components/maps/EventMap'), { ssr: false });
 
@@ -141,6 +142,11 @@ export default function EventDetailPage() {
           )}
         </div>
       )}
+
+      {/* Coupon Manager + Kit Delivery */}
+      <div className="mt-4">
+        <CouponManager eventId={event.id} eventPrice={event.price} />
+      </div>
     </div>
   );
 }

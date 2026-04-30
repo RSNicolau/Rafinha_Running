@@ -66,6 +66,10 @@ export default function EventoPage() {
   const [submitting, setSubmitting] = useState(false);
   const [registration, setRegistration] = useState<{ bibNumber?: string; kitPickupScheduledAt?: string } | null>(null);
   const [error, setError] = useState('');
+  const [couponCode, setCouponCode] = useState('');
+  const [coupon, setCoupon] = useState<{ id: string; code: string; type: string; value: number } | null>(null);
+  const [couponError, setCouponError] = useState('');
+  const [validatingCoupon, setValidatingCoupon] = useState(false);
 
   const API = '/api/v1';
 
@@ -81,9 +85,38 @@ export default function EventoPage() {
       .finally(() => setLoading(false));
   }, [eventId]);
 
-  const kitPrice = kitType === 'PREMIUM'
+  const baseKitPrice = kitType === 'PREMIUM'
     ? (event?.kitPremiumPrice ?? 0)
     : (event?.kitCompletePrice ?? event?.price ?? 0);
+
+  const discountAmount = coupon
+    ? coupon.type === 'COURTESY' ? baseKitPrice
+    : coupon.type === 'PERCENT' ? Math.round(baseKitPrice * coupon.value / 100)
+    : coupon.value
+    : 0;
+
+  const kitPrice = Math.max(0, baseKitPrice - discountAmount);
+
+  async function validateCoupon() {
+    if (!couponCode.trim() || !event) return;
+    setValidatingCoupon(true);
+    setCouponError('');
+    try {
+      const res = await fetch(`${API}/events/validate-coupon`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: event.id, code: couponCode.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? 'Cupom inválido');
+      setCoupon(data);
+    } catch (e: unknown) {
+      setCouponError(e instanceof Error ? e.message : 'Cupom inválido');
+      setCoupon(null);
+    } finally {
+      setValidatingCoupon(false);
+    }
+  }
 
   async function submitRegistration() {
     if (!shirtSize) { setError('Selecione o tamanho da camiseta.'); return; }
@@ -106,6 +139,7 @@ export default function EventoPage() {
           customerName: form.name,
           customerEmail: form.email,
           customerPhone: form.phone,
+          couponId: coupon?.id,
         }),
       });
       const data = await res.json();
@@ -395,7 +429,12 @@ export default function EventoPage() {
           <>
             <h2 className="text-lg font-black mb-1" style={{ color: DARK }}>Seus dados</h2>
             <p className="text-sm mb-4" style={{ color: GRAY }}>
-              Kit {kitType === 'PREMIUM' ? 'Premium' : 'Completo'} · {fmtPrice(kitPrice)} · Camiseta {shirtSize}
+              Kit {kitType === 'PREMIUM' ? 'Premium' : 'Completo'} ·{' '}
+              {coupon && discountAmount > 0 && (
+                <span style={{ textDecoration: 'line-through', marginRight: 4 }}>{fmtPrice(baseKitPrice)}</span>
+              )}
+              <span style={{ color: coupon ? GREEN : GRAY, fontWeight: coupon ? 700 : 400 }}>{fmtPrice(kitPrice)}</span>
+              {' · '}Camiseta {shirtSize}
             </p>
 
             {error && (
@@ -432,6 +471,46 @@ export default function EventoPage() {
                 rows={2}
                 value={form.medicalInfo}
                 onChange={e => setForm(f => ({ ...f, medicalInfo: e.target.value }))} />
+            </div>
+
+            {/* Coupon code */}
+            <div className="rounded-2xl border p-4 mb-4" style={{ background: WHITE, borderColor: LIGHT }}>
+              <p className="text-xs font-black uppercase tracking-widest mb-2" style={{ color: GRAY }}>🎟️ Cupom de desconto</p>
+              {coupon ? (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-bold" style={{ color: GREEN }}>✅ {coupon.code} aplicado!</p>
+                    <p className="text-xs" style={{ color: GRAY }}>
+                      Desconto: {coupon.type === 'COURTESY' ? '100% (cortesia)' : coupon.type === 'PERCENT' ? `${coupon.value}%` : fmtPrice(coupon.value)}
+                      {' → '}{fmtPrice(kitPrice)}
+                    </p>
+                  </div>
+                  <button onClick={() => { setCoupon(null); setCouponCode(''); }}
+                    className="text-xs px-2 py-1 rounded-lg" style={{ color: RED, border: `1px solid ${RED}` }}>
+                    Remover
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={couponCode}
+                    onChange={(e) => { setCouponCode(e.target.value.toUpperCase()); setCouponError(''); }}
+                    onKeyDown={(e) => e.key === 'Enter' && validateCoupon()}
+                    placeholder="Digite o código"
+                    className="flex-1 border rounded-xl px-3 py-2 text-sm outline-none uppercase"
+                    style={{ borderColor: couponError ? RED : LIGHT, color: DARK }}
+                  />
+                  <button
+                    onClick={validateCoupon}
+                    disabled={validatingCoupon || !couponCode.trim()}
+                    className="px-3 py-2 rounded-xl text-sm font-semibold transition"
+                    style={{ background: couponCode.trim() ? RED : LIGHT, color: couponCode.trim() ? WHITE : GRAY }}>
+                    {validatingCoupon ? '...' : 'Aplicar'}
+                  </button>
+                </div>
+              )}
+              {couponError && <p className="text-xs mt-1.5 font-semibold" style={{ color: RED }}>{couponError}</p>}
             </div>
 
             <div className="rounded-2xl p-4 mb-5" style={{ background: '#F0FDF4', border: `1px solid #BBF7D0` }}>

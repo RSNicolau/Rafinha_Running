@@ -8,7 +8,8 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
-import { EventStatus, EventRegistrationStatus, KitType, Prisma } from '@prisma/client';
+import { EventStatus, EventRegistrationStatus, KitType, PaymentStatus, Prisma } from '@prisma/client';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class EventsService {
@@ -152,7 +153,7 @@ export class EventsService {
     return this.prisma.event.update({ where: { id: eventId }, data });
   }
 
-  async register(eventId: string, userId: string, extra?: { shirtSize?: string; kitType?: KitType; emergencyContact?: string; medicalInfo?: string }) {
+  async register(eventId: string, userId: string, extra?: { shirtSize?: string; kitType?: KitType; emergencyContact?: string; medicalInfo?: string; couponId?: string }) {
     return this.prisma.$transaction(async (tx) => {
       const event = await tx.event.findUnique({
         where: { id: eventId },
@@ -195,6 +196,28 @@ export class EventsService {
       // Schedule kit pickup = event's kitPickupDate (or null)
       const kitPickupScheduledAt = event.kitPickupDate ?? null;
 
+      // Resolve coupon and calculate final price
+      let finalPrice: number | null = null;
+      let resolvedCouponId: string | null = null;
+      if (extra?.couponId) {
+        const coupon = await tx.eventCoupon.findUnique({ where: { id: extra.couponId } });
+        if (coupon && coupon.isActive && coupon.eventId === eventId) {
+          if (!coupon.maxUses || coupon.usedCount < coupon.maxUses) {
+            const basePrice = event.price;
+            const discount = coupon.type === 'COURTESY' ? basePrice
+              : coupon.type === 'PERCENT' ? Math.round(basePrice * coupon.value / 100)
+              : coupon.value;
+            finalPrice = Math.max(0, basePrice - discount);
+            resolvedCouponId = coupon.id;
+            // Increment usage count
+            await tx.eventCoupon.update({
+              where: { id: coupon.id },
+              data: { usedCount: { increment: 1 } },
+            });
+          }
+        }
+      }
+
       let registration;
       if (existing && existing.status === EventRegistrationStatus.CANCELED) {
         registration = await tx.eventRegistration.update({
@@ -209,6 +232,8 @@ export class EventsService {
             bibNumber,
             emergencyContact: extra?.emergencyContact,
             medicalInfo: extra?.medicalInfo,
+            couponId: resolvedCouponId,
+            finalPrice,
           },
         });
       } else {
@@ -224,7 +249,16 @@ export class EventsService {
             bibNumber,
             emergencyContact: extra?.emergencyContact,
             medicalInfo: extra?.medicalInfo,
+            couponId: resolvedCouponId,
+            finalPrice,
           },
+        });
+      }
+
+      // Create EventCouponUse record if coupon was applied
+      if (resolvedCouponId) {
+        await tx.eventCouponUse.create({
+          data: { couponId: resolvedCouponId, registrationId: registration.id },
         });
       }
 
@@ -406,5 +440,193 @@ export class EventsService {
     ]);
 
     return { data: registrations, total, page, totalPages: Math.ceil(total / limit) };
+  }
+
+  // ============================================
+  // COUPONS
+  // ============================================
+
+  async createCoupon(
+    eventId: string,
+    userId: string,
+    dto: {
+      code: string;
+      type: 'PERCENT' | 'FIXED' | 'COURTESY';
+      value?: number;
+      maxUses?: number;
+      expiresAt?: string;
+    },
+  ) {
+    const event = await this.prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) throw new NotFoundException('Evento não encontrado');
+    if (event.createdById !== userId) throw new ForbiddenException('Sem permissão');
+
+    const code = dto.code.toUpperCase().trim();
+    const existing = await this.prisma.eventCoupon.findUnique({
+      where: { eventId_code: { eventId, code } },
+    });
+    if (existing) throw new ConflictException('Código já existe para este evento');
+
+    return this.prisma.eventCoupon.create({
+      data: {
+        eventId,
+        code,
+        type: dto.type,
+        value: dto.type === 'COURTESY' ? 0 : (dto.value ?? 0),
+        maxUses: dto.maxUses ?? null,
+        expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
+      },
+    });
+  }
+
+  async listCoupons(eventId: string, userId: string) {
+    const event = await this.prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) throw new NotFoundException('Evento não encontrado');
+    if (event.createdById !== userId) throw new ForbiddenException('Sem permissão');
+
+    return this.prisma.eventCoupon.findMany({
+      where: { eventId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async validateCoupon(eventId: string, code: string) {
+    const coupon = await this.prisma.eventCoupon.findUnique({
+      where: { eventId_code: { eventId, code: code.toUpperCase().trim() } },
+    });
+
+    if (!coupon || !coupon.isActive) {
+      throw new NotFoundException('Cupom inválido ou inativo');
+    }
+
+    if (coupon.expiresAt && coupon.expiresAt < new Date()) {
+      throw new BadRequestException('Cupom expirado');
+    }
+
+    if (coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses) {
+      throw new BadRequestException('Cupom atingiu o limite de usos');
+    }
+
+    return {
+      id: coupon.id,
+      code: coupon.code,
+      type: coupon.type,
+      value: coupon.value,
+      valid: true,
+    };
+  }
+
+  // ============================================
+  // KIT DELIVERY SESSIONS
+  // ============================================
+
+  async createKitSession(eventId: string, userId: string, label: string) {
+    const event = await this.prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) throw new NotFoundException('Evento não encontrado');
+    if (event.createdById !== userId) throw new ForbiddenException('Sem permissão');
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000); // 8 hours
+
+    return this.prisma.kitDeliverySession.create({
+      data: { eventId, token, label, expiresAt },
+    });
+  }
+
+  async getKitDeliveryData(token: string) {
+    const session = await this.prisma.kitDeliverySession.findUnique({
+      where: { token },
+      include: { event: { select: { id: true, title: true, eventDate: true, kitPickupLocation: true } } },
+    });
+
+    if (!session) throw new NotFoundException('Sessão inválida');
+    if (session.expiresAt < new Date()) throw new BadRequestException('Sessão expirada');
+
+    return {
+      eventId: session.eventId,
+      event: session.event,
+      volunteerLabel: session.label,
+      expiresAt: session.expiresAt,
+    };
+  }
+
+  async searchKitRegistrations(eventId: string, token: string, query: string) {
+    // Validate session
+    await this.getKitDeliveryData(token);
+
+    const registrations = await this.prisma.eventRegistration.findMany({
+      where: {
+        eventId,
+        status: { not: EventRegistrationStatus.CANCELED },
+        OR: [
+          { bibNumber: { contains: query, mode: 'insensitive' } },
+          { user: { name: { contains: query, mode: 'insensitive' } } },
+        ],
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true, avatarUrl: true } },
+      },
+      take: 20,
+    });
+
+    return registrations.map((r) => ({
+      id: r.id,
+      bibNumber: r.bibNumber,
+      name: r.user.name,
+      email: r.user.email,
+      avatarUrl: r.user.avatarUrl,
+      shirtSize: r.shirtSize,
+      kitType: r.kitType,
+      paymentStatus: r.paymentStatus,
+      status: r.status,
+      kitDeliveredAt: r.kitDeliveredAt,
+      kitDeliveredBy: r.kitDeliveredBy,
+      // indicator: GREEN = not delivered+paid, YELLOW = already delivered, RED = not paid/not confirmed
+      indicator: r.kitDeliveredAt
+        ? 'YELLOW'
+        : r.paymentStatus === PaymentStatus.SUCCEEDED && r.status !== EventRegistrationStatus.CANCELED
+          ? 'GREEN'
+          : 'RED',
+    }));
+  }
+
+  async deliverKit(registrationId: string, token: string, volunteerLabel?: string) {
+    // Validate session
+    const session = await this.prisma.kitDeliverySession.findUnique({ where: { token } });
+    if (!session) throw new NotFoundException('Sessão inválida');
+    if (session.expiresAt < new Date()) throw new BadRequestException('Sessão expirada');
+
+    const registration = await this.prisma.eventRegistration.findUnique({
+      where: { id: registrationId },
+      include: { user: { select: { name: true } } },
+    });
+
+    if (!registration) throw new NotFoundException('Inscrição não encontrada');
+    if (registration.eventId !== session.eventId) throw new ForbiddenException('Inscrição de outro evento');
+    if (registration.kitDeliveredAt) {
+      return {
+        success: false,
+        alreadyDelivered: true,
+        message: `Kit já entregue em ${registration.kitDeliveredAt.toLocaleString('pt-BR')} por ${registration.kitDeliveredBy}`,
+        registration,
+      };
+    }
+
+    const label = volunteerLabel || session.label;
+    const updated = await this.prisma.eventRegistration.update({
+      where: { id: registrationId },
+      data: {
+        kitDeliveredAt: new Date(),
+        kitDeliveredBy: label,
+        kitPickupConfirmed: true,
+      },
+      include: { user: { select: { name: true } } },
+    });
+
+    return {
+      success: true,
+      message: `Kit entregue para ${updated.user.name}`,
+      registration: updated,
+    };
   }
 }

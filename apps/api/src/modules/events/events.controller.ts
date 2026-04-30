@@ -8,6 +8,8 @@ import {
   Param,
   Query,
   UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import {
@@ -102,7 +104,7 @@ export class EventsController {
   async register(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    @Body() body: { shirtSize?: string; kitType?: 'COMPLETO' | 'PREMIUM'; emergencyContact?: string; medicalInfo?: string },
+    @Body() body: { shirtSize?: string; kitType?: 'COMPLETO' | 'PREMIUM'; emergencyContact?: string; medicalInfo?: string; couponId?: string },
   ) {
     return this.eventsService.register(id, userId, { ...body, kitType: body.kitType as any });
   }
@@ -174,5 +176,81 @@ export class EventsController {
     @Body() body: { status: EventRegistrationStatus },
   ) {
     return this.eventsService.updateRegistrationStatus(id, regId, userId, body.status);
+  }
+
+  // ========== COUPONS ==========
+
+  @Post(':id/coupons')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'))
+  @ApiOperation({ summary: 'Criar cupom de desconto para o evento (somente criador)' })
+  @ApiParam({ name: 'id', description: 'ID do evento' })
+  async createCoupon(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @Body() body: { code: string; type: 'PERCENT' | 'FIXED' | 'COURTESY'; value?: number; maxUses?: number; expiresAt?: string },
+  ) {
+    return this.eventsService.createCoupon(id, userId, body);
+  }
+
+  @Get(':id/coupons')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'))
+  @ApiOperation({ summary: 'Listar cupons do evento (somente criador)' })
+  @ApiParam({ name: 'id', description: 'ID do evento' })
+  async listCoupons(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.eventsService.listCoupons(id, userId);
+  }
+
+  @Post('validate-coupon')
+  @ApiOperation({ summary: 'Validar cupom (publico) — retorna desconto' })
+  async validateCoupon(@Body() body: { eventId: string; code: string }) {
+    return this.eventsService.validateCoupon(body.eventId, body.code);
+  }
+
+  // ========== KIT DELIVERY ==========
+
+  @Post(':id/kit-session')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'))
+  @ApiOperation({ summary: 'Criar sessao de entrega de kit para voluntario (token 8h)' })
+  @ApiParam({ name: 'id', description: 'ID do evento' })
+  async createKitSession(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @Body() body: { label: string },
+  ) {
+    return this.eventsService.createKitSession(id, userId, body.label);
+  }
+
+  @Get('kit-delivery')
+  @ApiOperation({ summary: 'Dados de entrega de kit para voluntario (publico via token)' })
+  @ApiQuery({ name: 'token', required: true, description: 'Token de sessao do voluntario' })
+  async getKitDeliveryData(@Query('token') token: string) {
+    return this.eventsService.getKitDeliveryData(token);
+  }
+
+  @Get('kit-delivery/search')
+  @ApiOperation({ summary: 'Buscar inscricoes por nome ou numero de peito' })
+  @ApiQuery({ name: 'token', required: true })
+  @ApiQuery({ name: 'q', required: true, description: 'Nome ou numero de peito' })
+  async searchKitRegistrations(
+    @Query('token') token: string,
+    @Query('q') q: string,
+  ) {
+    const session = await this.eventsService.getKitDeliveryData(token);
+    return this.eventsService.searchKitRegistrations(session.eventId, token, q);
+  }
+
+  @Post('kit-delivery/scan')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Dar baixa na entrega do kit via QR code ou ID' })
+  async deliverKit(
+    @Body() body: { registrationId: string; token: string; volunteerLabel?: string },
+  ) {
+    return this.eventsService.deliverKit(body.registrationId, body.token, body.volunteerLabel);
   }
 }
