@@ -243,6 +243,7 @@ model User {
   athleteDocuments      AthleteDocument[]      @relation("AthleteDocuments")
   coachDocuments        AthleteDocument[]      @relation("CoachDocuments")
   storeCoupons          StoreCoupon[]          @relation("CoachStoreCoupons")
+  whatsappConfig        WhatsappConfig?
 
   @@map("users")
 }
@@ -1281,6 +1282,27 @@ model AthleteBadge {
   @@unique([athleteId, badgeId])
   @@index([athleteId])
   @@map("athlete_badges")
+}
+
+// ============================================
+// WHATSAPP SETTINGS
+// ============================================
+
+model WhatsappConfig {
+  id              String   @id @default(uuid())
+  coachId         String   @unique @map("coach_id")
+  provider        String   @default("zapi")   // 'zapi' | 'twilio' | 'evolution'
+  phone           String   @default("")
+  apiToken        String   @default("") @map("api_token")
+  instanceId      String   @default("") @map("instance_id")
+  welcomeMessage  String   @default("Olá {nome}! Sou o assistente do {coachName}. Acesse: {onboardingLink}") @map("welcome_message")
+  isConnected     Boolean  @default(false) @map("is_connected")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  coach User @relation(fields: [coachId], references: [id], onDelete: Cascade)
+
+  @@map("whatsapp_configs")
 }
 
 // ============================================

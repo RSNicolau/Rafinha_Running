@@ -38,6 +38,7 @@ import { HealthModule as HealthCheckModule } from './health/health.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { AthleteDocumentsModule } from './modules/athlete-documents/athlete-documents.module';
+import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -90,6 +91,7 @@ import { AthleteDocumentsModule } from './modules/athlete-documents/athlete-docu
     MetricsModule,
     UploadsModule,
     AthleteDocumentsModule,
+    WhatsappModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: CustomThrottlerGuard },
