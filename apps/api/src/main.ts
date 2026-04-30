@@ -78,14 +78,17 @@ async function bootstrap() {
     ? [
         ...(process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean),
         ...(process.env.APP_URL ? [process.env.APP_URL] : []),
-        // Vercel preview/production URLs
-        'https://rr-rafinha-running.vercel.app',
       ].filter(Boolean)
     : ['http://localhost:8081', 'http://localhost:3001', 'http://localhost:3000'];
 
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      if (!origin) return callback(null, true); // curl, mobile, server-to-server
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      // Allow all Vercel preview + production domains (*.vercel.app)
+      if (/^https:\/\/[a-zA-Z0-9-]+(\.vercel\.app)$/.test(origin)) return callback(null, true);
+      // Allow Railway domains for internal calls
+      if (/^https:\/\/.*\.up\.railway\.app$/.test(origin)) return callback(null, true);
       if (process.env.NODE_ENV !== 'production') return callback(null, true);
       callback(new Error('Not allowed by CORS'));
     },
