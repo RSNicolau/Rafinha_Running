@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { api } from '@/lib/api';
 
 const RED   = '#CC1F1A';
 const WHITE = '#FFFFFF';
@@ -115,47 +116,43 @@ export default function DashboardLojaPage() {
   const [showCouponForm, setShowCouponForm] = useState(false);
   const [savingCoupon, setSavingCoupon] = useState(false);
 
-  const API = '/api/v1';
-  const headers = () => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('rr_access_token') : '';
-    return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-  };
-
   async function load() {
     setLoading(true);
-    const [pRes, oRes, sRes, cRes] = await Promise.all([
-      fetch(`${API}/store/products`, { headers: headers() }),
-      fetch(`${API}/store/orders`, { headers: headers() }),
-      fetch(`${API}/store/stats`, { headers: headers() }),
-      fetch(`${API}/store/coupons`, { headers: headers() }),
-    ]);
-    if (pRes.ok) setProducts(await pRes.json());
-    if (oRes.ok) setOrders(await oRes.json());
-    if (sRes.ok) setStats(await sRes.json());
-    if (cRes.ok) setCoupons(await cRes.json());
-    setLoading(false);
+    try {
+      const [pRes, oRes, sRes, cRes] = await Promise.allSettled([
+        api.get('/v1/store/products'),
+        api.get('/v1/store/orders'),
+        api.get('/v1/store/stats'),
+        api.get('/v1/store/coupons'),
+      ]);
+      if (pRes.status === 'fulfilled') setProducts(pRes.value.data);
+      if (oRes.status === 'fulfilled') setOrders(oRes.value.data);
+      if (sRes.status === 'fulfilled') setStats(sRes.value.data);
+      if (cRes.status === 'fulfilled') setCoupons(cRes.value.data);
+    } catch {
+      // handled individually above
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function createCoupon(e: React.FormEvent) {
     e.preventDefault();
     setSavingCoupon(true);
     try {
-      const res = await fetch(`${API}/store/coupons`, {
-        method: 'POST',
-        headers: headers(),
-        body: JSON.stringify({
-          code: couponForm.code,
-          type: couponForm.type,
-          value: couponForm.type !== 'COURTESY' ? parseFloat(couponForm.value) : 0,
-          maxUses: couponForm.maxUses ? parseInt(couponForm.maxUses) : undefined,
-          expiresAt: couponForm.expiresAt || undefined,
-        }),
+      await api.post('/v1/store/coupons', {
+        code: couponForm.code,
+        type: couponForm.type,
+        value: couponForm.type !== 'COURTESY' ? parseFloat(couponForm.value) : 0,
+        maxUses: couponForm.maxUses ? parseInt(couponForm.maxUses) : undefined,
+        expiresAt: couponForm.expiresAt || undefined,
       });
-      if (!res.ok) { const d = await res.json(); alert(d.message ?? 'Erro ao criar cupom'); return; }
       setCouponForm({ code: '', type: 'PERCENT', value: '', maxUses: '', expiresAt: '' });
       setShowCouponForm(false);
-      const cRes = await fetch(`${API}/store/coupons`, { headers: headers() });
-      if (cRes.ok) setCoupons(await cRes.json());
+      const { data } = await api.get('/v1/store/coupons');
+      setCoupons(data);
+    } catch (err: any) {
+      alert(err.response?.data?.message ?? 'Erro ao criar cupom');
     } finally {
       setSavingCoupon(false);
     }
@@ -203,26 +200,28 @@ export default function DashboardLojaPage() {
       colors: (formData.colors ?? '').split(',').map(s => s.trim()).filter(Boolean),
       featured: formData.featured ?? false,
     };
-    const url = editProduct ? `${API}/store/products/${editProduct.id}` : `${API}/store/products`;
-    const method = editProduct ? 'PUT' : 'POST';
-    const res = await fetch(url, { method, headers: headers(), body: JSON.stringify(body) });
-    if (res.ok) { setShowForm(false); load(); }
-    setSaving(false);
+    try {
+      if (editProduct) {
+        await api.put(`/v1/store/products/${editProduct.id}`, body);
+      } else {
+        await api.post('/v1/store/products', body);
+      }
+      setShowForm(false);
+      load();
+    } catch (err: any) {
+      alert(err.response?.data?.message ?? 'Erro ao salvar produto');
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function toggleActive(p: Product) {
-    await fetch(`${API}/store/products/${p.id}`, {
-      method: 'PUT', headers: headers(),
-      body: JSON.stringify({ active: !p.active }),
-    });
+    await api.put(`/v1/store/products/${p.id}`, { active: !p.active }).catch(() => null);
     load();
   }
 
   async function updateOrder(orderId: string, status: string) {
-    await fetch(`${API}/store/orders/${orderId}/status`, {
-      method: 'PUT', headers: headers(),
-      body: JSON.stringify({ status }),
-    });
+    await api.put(`/v1/store/orders/${orderId}/status`, { status }).catch(() => null);
     load();
   }
 
