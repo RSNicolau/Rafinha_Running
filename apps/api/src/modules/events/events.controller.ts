@@ -211,6 +211,54 @@ export class EventsController {
     return this.eventsService.validateCoupon(body.eventId, body.code);
   }
 
+  // ========== DISTANCES ==========
+
+  @Post(':id/distances')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.COACH, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Criar percurso/distância para o evento (somente criador)' })
+  @ApiParam({ name: 'id', description: 'ID do evento' })
+  async createDistance(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @Body() body: { name: string; distanceKm?: number; price?: number; maxParticipants?: number; description?: string; sortOrder?: number },
+  ) {
+    return this.eventsService.createDistance(id, userId, body);
+  }
+
+  @Get(':id/distances')
+  @ApiOperation({ summary: 'Listar percursos de um evento (público)' })
+  @ApiParam({ name: 'id', description: 'ID do evento' })
+  async listDistances(@Param('id') id: string) {
+    return this.eventsService.listDistances(id);
+  }
+
+  @Put('distances/:distanceId')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'))
+  @ApiOperation({ summary: 'Atualizar percurso (somente criador do evento)' })
+  @ApiParam({ name: 'distanceId', description: 'ID do percurso' })
+  async updateDistance(
+    @Param('distanceId') distanceId: string,
+    @CurrentUser('id') userId: string,
+    @Body() body: { name?: string; distanceKm?: number; price?: number; maxParticipants?: number; description?: string; sortOrder?: number; isActive?: boolean },
+  ) {
+    return this.eventsService.updateDistance(distanceId, userId, body);
+  }
+
+  @Delete('distances/:distanceId')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'))
+  @ApiOperation({ summary: 'Remover percurso (soft-delete)' })
+  @ApiParam({ name: 'distanceId', description: 'ID do percurso' })
+  async deleteDistance(
+    @Param('distanceId') distanceId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    return this.eventsService.deleteDistance(distanceId, userId);
+  }
+
   // ========== KIT DELIVERY ==========
 
   @Post(':id/kit-session')

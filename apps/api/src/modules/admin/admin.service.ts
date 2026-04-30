@@ -231,4 +231,62 @@ export class AdminService {
 
     return { success: true, subscriptionId: sub.id, status: sub.status, validUntil: end };
   }
+
+  // ── Platform / Split Payments ──
+
+  async getCoaches() {
+    return this.prisma.user.findMany({
+      where: { role: { in: [UserRole.COACH, UserRole.ADMIN] } },
+      select: {
+        id: true, name: true, email: true, avatarUrl: true, isActive: true, createdAt: true,
+        coachProfile: {
+          select: {
+            slug: true, maxAthletes: true, paymentEnabled: true,
+            platformFeePercent: true,
+          },
+        },
+        _count: { select: { coachAthletes: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getPlatformStats() {
+    const [totalCoaches, activeCoaches, totalAthletes, revenueResult] = await Promise.all([
+      this.prisma.user.count({ where: { role: { in: [UserRole.COACH, UserRole.ADMIN] } } }),
+      this.prisma.user.count({ where: { role: { in: [UserRole.COACH, UserRole.ADMIN] }, isActive: true } }),
+      this.prisma.user.count({ where: { role: UserRole.ATHLETE } }),
+      this.prisma.payment.aggregate({ where: { status: 'SUCCEEDED' }, _sum: { amount: true } }),
+    ]);
+
+    return {
+      totalCoaches,
+      activeCoaches,
+      totalAthletes,
+      totalRevenue: revenueResult._sum.amount || 0,
+    };
+  }
+
+  async setCoachPlatformFee(coachId: string, platformFeePercent: number) {
+    const user = await this.prisma.user.findUnique({ where: { id: coachId } });
+    if (!user) throw new NotFoundException('Coach não encontrado');
+
+    const fee = Math.min(Math.max(platformFeePercent, 0), 50); // clamp 0-50%
+
+    // Upsert coach profile with the fee
+    await this.prisma.coachProfile.upsert({
+      where: { userId: coachId },
+      create: { userId: coachId, maxAthletes: 30, platformFeePercent: fee },
+      update: { platformFeePercent: fee },
+    });
+
+    return { success: true, coachId, platformFeePercent: fee };
+  }
+
+  async setUserActiveStatus(userId: string, isActive: boolean) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+    await this.prisma.user.update({ where: { id: userId }, data: { isActive } });
+    return { success: true, userId, isActive };
+  }
 }

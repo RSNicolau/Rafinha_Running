@@ -6,6 +6,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { api } from '@/lib/api';
 import CouponManager from './CouponManager';
+import DistanceManager from './DistanceManager';
 
 const EventMap = dynamic(() => import('@/components/maps/EventMap'), { ssr: false });
 
@@ -142,6 +143,9 @@ export default function EventDetailPage() {
           )}
         </div>
       )}
+
+      {/* Distance Manager */}
+      <DistanceManager eventId={event.id} eventPrice={event.price} />
 
       {/* Coupon Manager + Kit Delivery */}
       <div className="mt-4">

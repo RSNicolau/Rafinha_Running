@@ -20,8 +20,12 @@ export class UsersService {
         name: true,
         role: true,
         avatarUrl: true,
+        bannerUrl: true,
         phone: true,
         dateOfBirth: true,
+        aiProvider: true,
+        aiModel: true,
+        aiByok: true,
         createdAt: true,
         updatedAt: true,
         athleteProfile: true,
@@ -31,6 +35,35 @@ export class UsersService {
 
     if (!user) throw new NotFoundException('Usuário não encontrado');
     return user;
+  }
+
+  async updateAvatarUrl(userId: string, avatarUrl: string) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { avatarUrl },
+      select: { id: true, avatarUrl: true },
+    });
+  }
+
+  async updateBannerUrl(userId: string, bannerUrl: string) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { bannerUrl },
+      select: { id: true, bannerUrl: true },
+    });
+  }
+
+  async updateAiSettings(userId: string, dto: { aiProvider?: string; aiModel?: string; aiByok?: boolean; aiApiKey?: string }) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(dto.aiProvider !== undefined && { aiProvider: dto.aiProvider }),
+        ...(dto.aiModel !== undefined && { aiModel: dto.aiModel }),
+        ...(dto.aiByok !== undefined && { aiByok: dto.aiByok }),
+        ...(dto.aiApiKey !== undefined && { aiApiKey: dto.aiApiKey }),
+      },
+      select: { id: true, aiProvider: true, aiModel: true, aiByok: true },
+    });
   }
 
   async findPublicById(id: string) {

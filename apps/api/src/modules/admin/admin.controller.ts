@@ -93,4 +93,37 @@ export class AdminController {
   async setUserPassword(@Param('id') id: string, @Body('password') password: string) {
     return this.adminService.setUserPassword(id, password);
   }
+
+  // ── Platform / Split Payments ──
+
+  @Get('coaches')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Listar todos os coaches com stats' })
+  async getCoaches() {
+    return this.adminService.getCoaches();
+  }
+
+  @Get('platform-stats')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Estatísticas gerais da plataforma' })
+  async getPlatformStats() {
+    return this.adminService.getPlatformStats();
+  }
+
+  @Patch('coaches/:id/platform-fee')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Definir % de split da plataforma para um coach' })
+  async setCoachPlatformFee(
+    @Param('id') id: string,
+    @Body('platformFeePercent') platformFeePercent: number,
+  ) {
+    return this.adminService.setCoachPlatformFee(id, platformFeePercent);
+  }
+
+  @Patch('coaches/:id/status')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Ativar/desativar coach' })
+  async setCoachStatus(@Param('id') id: string, @Body('isActive') isActive: boolean) {
+    return this.adminService.setUserActiveStatus(id, isActive);
+  }
 }

@@ -1,6 +1,7 @@
-import { Controller, Get, Put, Post, Delete, Body, Param, Query, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Put, Patch, Post, Delete, Body, Param, Query, UseGuards, BadRequestException, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { IsString, MinLength } from 'class-validator';
 import { UsersService } from './users.service';
@@ -9,6 +10,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { UploadsService } from '../uploads/uploads.service';
 
 class ChangePasswordDto {
   @IsString() currentPassword: string;
@@ -23,12 +25,50 @@ export class UsersController {
   constructor(
     private usersService: UsersService,
     private twoFactorService: TwoFactorService,
+    private uploadsService: UploadsService,
   ) {}
 
   @Get('me')
   @ApiOperation({ summary: 'Obter perfil do usuário atual' })
   async getProfile(@CurrentUser('id') userId: string) {
     return this.usersService.findById(userId);
+  }
+
+  @Post('me/avatar')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload de foto de perfil' })
+  async uploadAvatar(
+    @CurrentUser('id') userId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Arquivo não enviado');
+    const path = `avatars/${userId}/${Date.now()}-${file.originalname}`;
+    const url = await this.uploadsService.uploadFile(file.buffer, file.originalname, file.mimetype, path);
+    return this.usersService.updateAvatarUrl(userId, url);
+  }
+
+  @Post('me/banner')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload de banner de perfil' })
+  async uploadBanner(
+    @CurrentUser('id') userId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Arquivo não enviado');
+    const path = `banners/${userId}/${Date.now()}-${file.originalname}`;
+    const url = await this.uploadsService.uploadFile(file.buffer, file.originalname, file.mimetype, path);
+    return this.usersService.updateBannerUrl(userId, url);
+  }
+
+  @Patch('me/ai-settings')
+  @ApiOperation({ summary: 'Atualizar configurações de IA do usuário' })
+  async updateAiSettings(
+    @CurrentUser('id') userId: string,
+    @Body() body: { aiProvider?: string; aiModel?: string; aiByok?: boolean; aiApiKey?: string },
+  ) {
+    return this.usersService.updateAiSettings(userId, body);
   }
 
   @Put('me')

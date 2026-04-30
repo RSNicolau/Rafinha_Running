@@ -629,4 +629,89 @@ export class EventsService {
       registration: updated,
     };
   }
+
+  // ============================================
+  // EVENT DISTANCES
+  // ============================================
+
+  async createDistance(
+    eventId: string,
+    userId: string,
+    dto: {
+      name: string;
+      distanceKm?: number;
+      price?: number;
+      maxParticipants?: number;
+      description?: string;
+      sortOrder?: number;
+    },
+  ) {
+    const event = await this.prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) throw new NotFoundException('Evento não encontrado');
+    if (event.createdById !== userId) throw new ForbiddenException('Apenas o criador pode gerenciar percursos');
+
+    return this.prisma.eventDistance.create({
+      data: {
+        eventId,
+        name: dto.name,
+        distanceKm: dto.distanceKm,
+        price: dto.price ?? 0,
+        maxParticipants: dto.maxParticipants,
+        description: dto.description,
+        sortOrder: dto.sortOrder ?? 0,
+      },
+    });
+  }
+
+  async listDistances(eventId: string) {
+    return this.prisma.eventDistance.findMany({
+      where: { eventId, isActive: true },
+      include: {
+        _count: { select: { registrations: true } },
+      },
+      orderBy: { sortOrder: 'asc' },
+    });
+  }
+
+  async updateDistance(
+    distanceId: string,
+    userId: string,
+    dto: {
+      name?: string;
+      distanceKm?: number;
+      price?: number;
+      maxParticipants?: number;
+      description?: string;
+      sortOrder?: number;
+      isActive?: boolean;
+    },
+  ) {
+    const distance = await this.prisma.eventDistance.findUnique({
+      where: { id: distanceId },
+      include: { event: true },
+    });
+    if (!distance) throw new NotFoundException('Percurso não encontrado');
+    if (distance.event.createdById !== userId) throw new ForbiddenException('Sem permissão');
+
+    return this.prisma.eventDistance.update({
+      where: { id: distanceId },
+      data: dto,
+    });
+  }
+
+  async deleteDistance(distanceId: string, userId: string) {
+    const distance = await this.prisma.eventDistance.findUnique({
+      where: { id: distanceId },
+      include: { event: true },
+    });
+    if (!distance) throw new NotFoundException('Percurso não encontrado');
+    if (distance.event.createdById !== userId) throw new ForbiddenException('Sem permissão');
+
+    await this.prisma.eventDistance.update({
+      where: { id: distanceId },
+      data: { isActive: false },
+    });
+
+    return { success: true };
+  }
 }
