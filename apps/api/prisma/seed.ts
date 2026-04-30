@@ -6,33 +6,30 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Iniciando seed do banco de dados...');
 
-  // Create Admin
-  const adminPassword = await bcrypt.hash('admin123', 12);
-  const admin = await prisma.user.upsert({
-    where: { email: 'admin@rafinharunning.com.br' },
-    update: {},
+  // ── MASTER SUPER_ADMIN (criador do sistema) ──
+  const masterPassword = await bcrypt.hash('masteradmin123@', 12);
+  const master = await prisma.user.upsert({
+    where: { email: 'master@rafinharunning.com' },
+    update: { passwordHash: masterPassword, role: UserRole.SUPER_ADMIN },
     create: {
-      email: 'admin@rafinharunning.com.br',
-      passwordHash: adminPassword,
-      name: 'Administrador RR',
-      role: UserRole.ADMIN,
+      email: 'master@rafinharunning.com',
+      passwordHash: masterPassword,
+      name: 'Master Admin',
+      role: UserRole.SUPER_ADMIN,
     },
   });
-  console.log(`✅ Admin criado: ${admin.email}`);
+  console.log(`✅ Master SUPER_ADMIN criado: ${master.email}`);
 
-  // Create Coach (SUPER_ADMIN for full access)
+  // ── RAFINHA (ADMIN — gerencia a assessoria) ──
   const coachPassword = await bcrypt.hash('Rafinhaadmin123@', 12);
   const coach = await prisma.user.upsert({
-    where: { email: 'rafinha@rafinharunning.com.br' },
-    update: {
-      passwordHash: coachPassword,
-      role: UserRole.SUPER_ADMIN,
-    },
+    where: { email: 'rafinha@rafinharunning.com' },
+    update: { passwordHash: coachPassword, role: UserRole.ADMIN },
     create: {
-      email: 'rafinha@rafinharunning.com.br',
+      email: 'rafinha@rafinharunning.com',
       passwordHash: coachPassword,
       name: 'Rafinha Silva',
-      role: UserRole.SUPER_ADMIN,
+      role: UserRole.ADMIN,
       coachProfile: {
         create: {
           slug: 'rafinha',
@@ -45,13 +42,38 @@ async function main() {
     },
   });
 
-  // Ensure slug is set if coachProfile already exists
-  await prisma.coachProfile.updateMany({
-    where: { userId: coach.id, slug: null },
-    data: { slug: 'rafinha' },
-  });
+  // Ensure coachProfile exists with correct slug (if user was created without it)
+  const existingProfile = await prisma.coachProfile.findUnique({ where: { userId: coach.id } });
+  if (!existingProfile) {
+    await prisma.coachProfile.create({
+      data: {
+        userId: coach.id,
+        slug: 'rafinha',
+        bio: 'Treinador de corrida com 10 anos de experiência. Especialista em maratonas.',
+        specializations: ['Maratona', 'Meia Maratona', '10km'],
+        certifications: ['CREF', 'USATF Level 2'],
+        maxAthletes: 50,
+      },
+    });
+  } else if (!existingProfile.slug) {
+    await prisma.coachProfile.update({ where: { userId: coach.id }, data: { slug: 'rafinha' } });
+  }
 
-  console.log(`✅ Treinador criado: ${coach.email}`);
+  console.log(`✅ Rafinha ADMIN criado: ${coach.email}`);
+
+  // ── ADMIN legado (manter compatibilidade) ──
+  const adminPassword = await bcrypt.hash('admin123', 12);
+  const admin = await prisma.user.upsert({
+    where: { email: 'admin@rafinharunning.com.br' },
+    update: {},
+    create: {
+      email: 'admin@rafinharunning.com.br',
+      passwordHash: adminPassword,
+      name: 'Administrador RR',
+      role: UserRole.ADMIN,
+    },
+  });
+  console.log(`✅ Admin legado criado: ${admin.email}`);
 
   // Create Athletes
   const athletePassword = await bcrypt.hash('atleta123', 12);

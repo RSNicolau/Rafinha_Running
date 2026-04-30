@@ -18,7 +18,7 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ short: { ttl: 60000, limit: 5 } }) // 5 tentativas/min
+  @Throttle({ short: { ttl: 60000, limit: 20 } }) // 20 tentativas/min (múltiplos IPs do Vercel edge)
   @ApiOperation({ summary: 'Fazer login' })
   async login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
