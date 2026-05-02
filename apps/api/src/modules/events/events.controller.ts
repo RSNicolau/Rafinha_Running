@@ -10,7 +10,12 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { AuthGuard } from '@nestjs/passport';
 import {
   ApiTags,
@@ -26,11 +31,32 @@ import { UpdateEventDto } from './dto/update-event.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { UploadsService } from '../uploads/uploads.service';
 
 @ApiTags('Eventos')
 @Controller('events')
 export class EventsController {
-  constructor(private eventsService: EventsService) {}
+  constructor(
+    private eventsService: EventsService,
+    private uploadsService: UploadsService,
+  ) {}
+
+  @Post(':id/cover-image')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'))
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }))
+  @ApiOperation({ summary: 'Upload de imagem de capa do evento' })
+  async uploadCoverImage(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Arquivo não enviado');
+    const ext = file.originalname.split('.').pop() || 'jpg';
+    const path = `events/${id}/cover.${ext}`;
+    const url = await this.uploadsService.uploadFile(file.buffer, file.originalname, file.mimetype, path);
+    return this.eventsService.update(id, userId, { coverImageUrl: url } as any);
+  }
 
   @Get()
   @ApiOperation({ summary: 'Listar eventos publicados (publico, paginado, filtravel)' })

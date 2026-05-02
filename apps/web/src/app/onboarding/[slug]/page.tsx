@@ -58,6 +58,15 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
   const [checkingOut, setCheckingOut] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [athlete, setAthlete]     = useState({ name: '', email: '', phone: '' });
+
+  const formatPhone = (v: string) => {
+    const d = v.replace(/\D/g, '');
+    if (d.length <= 2) return d.length ? `+${d}` : '';
+    if (d.length <= 4) return `+${d.slice(0,2)} (${d.slice(2)}`;
+    if (d.length <= 9) return `+${d.slice(0,2)} (${d.slice(2,4)}) ${d.slice(4)}`;
+    if (d.length <= 13) return `+${d.slice(0,2)} (${d.slice(2,4)}) ${d.slice(4,9)}-${d.slice(9)}`;
+    return `+${d.slice(0,2)} (${d.slice(2,4)}) ${d.slice(4,9)}-${d.slice(9,13)}`;
+  };
   const [athleteId, setAthleteId] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<'mensal' | 'trimestral' | 'semestral'>('mensal');
 
@@ -357,9 +366,8 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
 
             <div className="space-y-3 mb-5">
               {[
-                { key: 'name',  label: 'Nome completo *',      type: 'text',  ph: 'João da Silva' },
-                { key: 'email', label: 'E-mail *',             type: 'email', ph: 'joao@email.com' },
-                { key: 'phone', label: 'WhatsApp (opcional)',   type: 'tel',   ph: '(11) 99999-9999' },
+                { key: 'name',  label: 'Nome completo *', type: 'text',  ph: 'João da Silva' },
+                { key: 'email', label: 'E-mail *',         type: 'email', ph: 'joao@email.com' },
               ].map(f => (
                 <div key={f.key}>
                   <label className="block text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: GRAY }}>
@@ -377,6 +385,22 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
                   />
                 </div>
               ))}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: GRAY }}>
+                  WhatsApp (opcional)
+                </label>
+                <input
+                  type="tel"
+                  value={athlete.phone}
+                  onChange={e => setAthlete(p => ({ ...p, phone: formatPhone(e.target.value) }))}
+                  placeholder="+55 (21) 99698-0356"
+                  maxLength={19}
+                  className="w-full px-4 py-3 rounded-xl text-sm focus:outline-none transition"
+                  style={{ background: PAGE, border: `1.5px solid ${LIGHT}`, color: DARK }}
+                  onFocus={e => (e.target.style.borderColor = RED)}
+                  onBlur={e => (e.target.style.borderColor = LIGHT)}
+                />
+              </div>
             </div>
 
             <RedBtn onClick={() => {

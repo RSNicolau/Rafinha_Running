@@ -1,6 +1,7 @@
 import { Controller, Get, Put, Patch, Post, Delete, Body, Param, Query, UseGuards, BadRequestException, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { IsString, MinLength } from 'class-validator';
@@ -35,7 +36,7 @@ export class UsersController {
   }
 
   @Post('me/avatar')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Upload de foto de perfil' })
   async uploadAvatar(
@@ -43,13 +44,14 @@ export class UsersController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('Arquivo não enviado');
-    const path = `avatars/${userId}/${Date.now()}-${file.originalname}`;
+    const ext = file.originalname.split('.').pop() || 'jpg';
+    const path = `avatars/${userId}/avatar.${ext}`;
     const url = await this.uploadsService.uploadFile(file.buffer, file.originalname, file.mimetype, path);
     return this.usersService.updateAvatarUrl(userId, url);
   }
 
   @Post('me/banner')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Upload de banner de perfil' })
   async uploadBanner(
@@ -57,7 +59,8 @@ export class UsersController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('Arquivo não enviado');
-    const path = `banners/${userId}/${Date.now()}-${file.originalname}`;
+    const ext = file.originalname.split('.').pop() || 'jpg';
+    const path = `banners/${userId}/banner.${ext}`;
     const url = await this.uploadsService.uploadFile(file.buffer, file.originalname, file.mimetype, path);
     return this.usersService.updateBannerUrl(userId, url);
   }
