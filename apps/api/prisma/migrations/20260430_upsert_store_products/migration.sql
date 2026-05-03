@@ -25,7 +25,7 @@ BEGIN
     'Camisa RR 2026',
     'Camisa oficial da coleção Rafinha Running 2026. Tecido dry-fit de alta performance, ideal para treinos e provas.',
     'CAMISA', 12990,
-    ARRAY['/produtos/camisa_rr_26.jpg'],
+    ARRAY['/produtos/camisa_rr_26_v3.jpg'],
     ARRAY['PP','P','M','G','GG','XG'],
     ARRAY['Vermelho','Branco'],
     100, true, true, NOW(), NOW()
@@ -33,7 +33,7 @@ BEGIN
   ON CONFLICT DO NOTHING;
 
   UPDATE products SET
-    images = ARRAY['/produtos/camisa_rr_26.jpg'],
+    images = ARRAY['/produtos/camisa_rr_26_v3.jpg'],
     price_in_cents = 12990,
     description = 'Camisa oficial da coleção Rafinha Running 2026. Tecido dry-fit de alta performance, ideal para treinos e provas.',
     sizes = ARRAY['PP','P','M','G','GG','XG'],
@@ -48,7 +48,7 @@ BEGIN
     'Casaco RR 2026',
     'Casaco oficial RR 2026. Conforto e estilo para o dia a dia e treinos em dias mais frios.',
     'CASACO', 18990,
-    ARRAY['/produtos/casaco_rr_26.jpg'],
+    ARRAY['/produtos/casaco_rr_26_v2.jpg'],
     ARRAY['PP','P','M','G','GG','XG'],
     ARRAY['Preto','Vermelho'],
     60, true, true, NOW(), NOW()
@@ -56,7 +56,7 @@ BEGIN
   ON CONFLICT DO NOTHING;
 
   UPDATE products SET
-    images = ARRAY['/produtos/casaco_rr_26.jpg'],
+    images = ARRAY['/produtos/casaco_rr_26_v2.jpg'],
     price_in_cents = 18990,
     description = 'Casaco oficial RR 2026. Conforto e estilo para o dia a dia e treinos em dias mais frios.',
     sizes = ARRAY['PP','P','M','G','GG','XG'],
@@ -71,7 +71,7 @@ BEGIN
     'Corta-vento RR 2026',
     'Corta-vento leve e impermeável da coleção RR 2026. Perfeito para treinos em dias de vento e garoa.',
     'CORTA_VENTO', 15990,
-    ARRAY['/produtos/corta_vento_rr_26.jpg'],
+    ARRAY['/produtos/corta_vento_rr_26_v2.jpg'],
     ARRAY['PP','P','M','G','GG','XG'],
     ARRAY['Preto'],
     50, false, true, NOW(), NOW()
@@ -79,7 +79,7 @@ BEGIN
   ON CONFLICT DO NOTHING;
 
   UPDATE products SET
-    images = ARRAY['/produtos/corta_vento_rr_26.jpg'],
+    images = ARRAY['/produtos/corta_vento_rr_26_v2.jpg'],
     price_in_cents = 15990,
     description = 'Corta-vento leve e impermeável da coleção RR 2026. Perfeito para treinos em dias de vento e garoa.',
     sizes = ARRAY['PP','P','M','G','GG','XG'],
@@ -94,7 +94,7 @@ BEGIN
     'Viseira RR 2026',
     'Viseira RR 2026 com proteção UV. Leve, regulável e ideal para corridas ao sol.',
     'VISEIRA', 6990,
-    ARRAY['/produtos/viseira_rr_26.jpg'],
+    ARRAY['/produtos/viseira_rr_26_v2.jpg'],
     ARRAY['Único'],
     ARRAY['Vermelho','Preto'],
     80, false, true, NOW(), NOW()
@@ -102,7 +102,7 @@ BEGIN
   ON CONFLICT DO NOTHING;
 
   UPDATE products SET
-    images = ARRAY['/produtos/viseira_rr_26.jpg'],
+    images = ARRAY['/produtos/viseira_rr_26_v2.jpg'],
     price_in_cents = 6990,
     description = 'Viseira RR 2026 com proteção UV. Leve, regulável e ideal para corridas ao sol.',
     sizes = ARRAY['Único'],
@@ -117,7 +117,7 @@ BEGIN
     'Camisa São Garrafa',
     'Camisa especial edição São Garrafa. Exclusiva e limitada para os atletas RR.',
     'CAMISA', 12990,
-    ARRAY['/produtos/camisa_sao_garrafa_v3.jpg','/produtos/camisa_sao_garrafa_v2.jpg'],
+    ARRAY['/produtos/camisa_sao_garrafa_v4.jpg'],
     ARRAY['PP','P','M','G','GG','XG'],
     ARRAY['Branco'],
     40, false, true, NOW(), NOW()
@@ -125,7 +125,7 @@ BEGIN
   ON CONFLICT DO NOTHING;
 
   UPDATE products SET
-    images = ARRAY['/produtos/camisa_sao_garrafa_v3.jpg','/produtos/camisa_sao_garrafa_v2.jpg'],
+    images = ARRAY['/produtos/camisa_sao_garrafa_v4.jpg'],
     price_in_cents = 12990,
     description = 'Camisa especial edição São Garrafa. Exclusiva e limitada para os atletas RR.',
     sizes = ARRAY['PP','P','M','G','GG','XG'],
