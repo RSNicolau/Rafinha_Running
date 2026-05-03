@@ -53,6 +53,16 @@ export class StoreController {
     return this.storeService.getOrderById(id);
   }
 
+  // ── Athlete vitrine ──
+
+  @Get('athlete/products')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'))
+  @ApiOperation({ summary: 'Atleta vê produtos da loja do coach (com desconto aplicado)' })
+  listForAthlete(@CurrentUser('id') athleteId: string) {
+    return this.storeService.listForAthlete(athleteId);
+  }
+
   // ── Coach / Admin endpoints ──
 
   @Get('products')
@@ -82,6 +92,7 @@ export class StoreController {
       colors?: string[];
       totalStock?: number;
       featured?: boolean;
+      athleteDiscountPercent?: number;
     },
   ) {
     return this.storeService.createProduct(coachId, body);
@@ -106,6 +117,7 @@ export class StoreController {
       totalStock: number;
       active: boolean;
       featured: boolean;
+      athleteDiscountPercent: number;
     }>,
   ) {
     return this.storeService.updateProduct(id, coachId, body);

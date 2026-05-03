@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/stores/auth.store';
+import AthleteStorefront from './AthleteStorefront';
 
 const RED   = '#CC1F1A';
 const WHITE = '#FFFFFF';
@@ -101,6 +103,18 @@ type FormData = Partial<{
 }>;
 
 export default function DashboardLojaPage() {
+  const { user } = useAuthStore();
+  const isCoachOrAdmin = user?.role === 'COACH' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+
+  // Athletes see the storefront (vitrine) view
+  if (user && !isCoachOrAdmin) {
+    return <AthleteStorefront />;
+  }
+
+  return <CoachLojaManagement />;
+}
+
+function CoachLojaManagement() {
   const [tab, setTab] = useState<Tab>('produtos');
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);

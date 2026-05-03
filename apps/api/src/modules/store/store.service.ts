@@ -39,8 +39,45 @@ export class StoreService {
         totalStock: true,
         reserved: true,
         featured: true,
+        athleteDiscountPercent: true,
       },
     });
+  }
+
+  async listForAthlete(athleteId: string) {
+    // Find athlete's coach
+    const athlete = await this.prisma.athleteProfile.findUnique({
+      where: { userId: athleteId },
+      select: { coachId: true },
+    });
+    if (!athlete?.coachId) return [];
+
+    const products = await this.prisma.product.findMany({
+      where: { coachId: athlete.coachId, active: true },
+      orderBy: [{ featured: 'desc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        category: true,
+        priceInCents: true,
+        images: true,
+        sizes: true,
+        colors: true,
+        totalStock: true,
+        reserved: true,
+        featured: true,
+        athleteDiscountPercent: true,
+      },
+    });
+
+    // Apply athlete discount and return effective price
+    return products.map(p => ({
+      ...p,
+      originalPriceInCents: p.priceInCents,
+      finalPriceInCents: Math.round(p.priceInCents * (1 - (p.athleteDiscountPercent || 0) / 100)),
+      hasAthleteDiscount: (p.athleteDiscountPercent || 0) > 0,
+    }));
   }
 
   async listCoachProducts(coachId: string) {
@@ -69,6 +106,7 @@ export class StoreService {
     colors?: string[];
     totalStock?: number;
     featured?: boolean;
+    athleteDiscountPercent?: number;
   }) {
     return this.prisma.product.create({
       data: {
@@ -82,6 +120,7 @@ export class StoreService {
         colors: data.colors ?? [],
         totalStock: data.totalStock ?? 0,
         featured: data.featured ?? false,
+        athleteDiscountPercent: data.athleteDiscountPercent ?? 0,
       },
     });
   }
@@ -97,6 +136,7 @@ export class StoreService {
     totalStock: number;
     active: boolean;
     featured: boolean;
+    athleteDiscountPercent: number;
   }>) {
     const product = await this.prisma.product.findFirst({ where: { id, coachId } });
     if (!product) throw new NotFoundException('Produto não encontrado');
