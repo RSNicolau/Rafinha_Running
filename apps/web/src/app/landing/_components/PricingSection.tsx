@@ -1,8 +1,9 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
+import type { Audience } from '../page';
 
-const plans = [
+const coachPlans = [
   {
     name: 'Básico',
     monthlyPrice: '49',
@@ -10,6 +11,7 @@ const plans = [
     desc: 'Para coaches iniciando',
     features: ['Até 15 atletas', 'Planilhas ilimitadas', 'Sync Garmin & Strava', 'Dashboard web', 'Chat com atletas'],
     cta: 'Começar grátis',
+    href: '/login',
     highlight: false,
   },
   {
@@ -19,6 +21,7 @@ const plans = [
     desc: 'Para assessorias em crescimento',
     features: ['Até 50 atletas', 'IA para planilhas', 'Live Tracking', 'App mobile white-label', 'Suporte prioritário', 'Análise de performance'],
     cta: 'Experimentar 14 dias grátis',
+    href: '/login',
     highlight: true,
   },
   {
@@ -28,37 +31,78 @@ const plans = [
     desc: 'Para grandes assessorias',
     features: ['Atletas ilimitados', 'Tudo do Pro', 'Múltiplos coaches', 'Relatórios financeiros', 'API personalizada', 'Onboarding dedicado'],
     cta: 'Falar com consultor',
+    href: '/login',
     highlight: false,
   },
 ];
 
-export function PricingSection() {
+const athletePlans = [
+  {
+    name: 'Mensal',
+    monthlyPrice: '174',
+    annualPrice: '174',
+    desc: 'Flexibilidade total, sem fidelidade',
+    features: ['Planilha personalizada', 'Treino na Concha Acústica (terças)', 'Treinos alternados aos sábados', 'Assessoria em provas', 'Acesso ao App da equipe'],
+    cta: 'Começar agora',
+    href: '/onboarding/rafinha',
+    highlight: false,
+  },
+  {
+    name: 'Trimestral',
+    monthlyPrice: '165',
+    annualPrice: '165',
+    desc: 'Parcela única — economia de R$27',
+    features: ['Tudo do Mensal', 'Equivale a R$165/mês', 'R$495 cobrado uma vez', 'Sem renovação automática'],
+    cta: 'Quero esse plano',
+    href: '/onboarding/rafinha',
+    highlight: true,
+  },
+  {
+    name: 'Semestral',
+    monthlyPrice: '160',
+    annualPrice: '160',
+    desc: 'Parcela única — economia de R$84',
+    features: ['Tudo do Mensal', 'Equivale a R$160/mês', 'R$960 cobrado uma vez', 'Sem renovação automática', 'Melhor valor 💰'],
+    cta: 'Melhor valor',
+    href: '/onboarding/rafinha',
+    highlight: false,
+  },
+];
+
+export function PricingSection({ audience = 'coach' }: { audience?: Audience }) {
   const [annual, setAnnual] = useState(false);
+  const isAthlete = audience === 'athlete';
+  const plans = isAthlete ? athletePlans : coachPlans;
 
   return (
     <section id="planos" className="py-24 px-6 bg-white">
       <div className="max-w-5xl mx-auto">
         <div className="text-center mb-10">
           <span className="text-xs font-bold text-[#DC2626] uppercase tracking-widest">Planos</span>
-          <h2 className="text-4xl font-black text-gray-900 mt-2 mb-4">Para toda assessoria</h2>
-          <p className="text-lg text-gray-500 mb-8">Comece grátis por 14 dias. Sem cartão de crédito.</p>
+          <h2 className="text-4xl font-black text-gray-900 mt-2 mb-4">
+            {isAthlete ? 'Treine com o Rafinha' : 'Para toda assessoria'}
+          </h2>
+          <p className="text-lg text-gray-500 mb-8">
+            {isAthlete ? 'Escolha seu plano e comece sua jornada hoje mesmo.' : 'Comece grátis por 14 dias. Sem cartão de crédito.'}
+          </p>
 
-          {/* Toggle anual/mensal */}
-          <div className="inline-flex items-center gap-3 p-1 bg-gray-100 rounded-xl">
-            <button
-              onClick={() => setAnnual(false)}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${!annual ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
-            >
-              Mensal
-            </button>
-            <button
-              onClick={() => setAnnual(true)}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${annual ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
-            >
-              Anual
-              <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-bold rounded">-20%</span>
-            </button>
-          </div>
+          {!isAthlete && (
+            <div className="inline-flex items-center gap-3 p-1 bg-gray-100 rounded-xl">
+              <button
+                onClick={() => setAnnual(false)}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${!annual ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+              >
+                Mensal
+              </button>
+              <button
+                onClick={() => setAnnual(true)}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${annual ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}
+              >
+                Anual
+                <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-bold rounded">-20%</span>
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="grid md:grid-cols-3 gap-5 md:gap-6 items-center">
@@ -96,7 +140,7 @@ export function PricingSection() {
                 ))}
               </ul>
               <Link
-                href="/login"
+                href={p.href}
                 className={`block w-full py-3 rounded-xl text-sm font-bold text-center transition-colors ${
                   p.highlight ? 'bg-white text-[#DC2626] hover:bg-red-50' : 'bg-gray-900 text-white hover:bg-gray-800'
                 }`}
