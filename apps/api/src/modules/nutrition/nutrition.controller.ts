@@ -9,6 +9,13 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 export class NutritionController {
   constructor(private readonly nutritionService: NutritionService) {}
 
+  // ── AI macro estimation ────────────────────────────────────────────────────
+
+  @Post('analyze')
+  analyzeMacros(@Body() body: { description: string }) {
+    return this.nutritionService.analyzeMacrosWithAI(body.description);
+  }
+
   // ── Original endpoints (kept for backwards compat) ──────────────────────────
 
   @Get('day')

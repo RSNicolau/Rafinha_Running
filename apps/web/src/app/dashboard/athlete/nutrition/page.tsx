@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -235,17 +235,87 @@ function AddMealForm({
     protein: '',
     fat: '',
   });
+  const [analyzing, setAnalyzing] = useState(false);
+  const [aiHint, setAiHint] = useState('');
+  const [showMfpModal, setShowMfpModal] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const analyzeWithAI = useCallback(async (description: string) => {
+    if (!description.trim() || description.trim().length < 3) return;
+    setAnalyzing(true);
+    setAiHint('');
+    try {
+      const { data } = await api.post('/nutrition/analyze', { description });
+      if (data.calories > 0) {
+        setForm(f => ({
+          ...f,
+          calories: String(data.calories),
+          protein: String(data.protein),
+          carbs: String(data.carbs),
+          fat: String(data.fat),
+        }));
+        setAiHint(data.analysis || '');
+      }
+    } catch { /* silent */ }
+    finally { setAnalyzing(false); }
+  }, []);
+
+  const handleDescriptionChange = (val: string) => {
+    setForm(f => ({ ...f, description: val }));
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (val.trim().length >= 4) {
+      debounceRef.current = setTimeout(() => analyzeWithAI(val), 1200);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.description.trim()) return;
     onAdd(form);
     setForm({ mealType: 'breakfast', description: '', calories: '', carbs: '', protein: '', fat: '' });
+    setAiHint('');
   };
 
   return (
     <div className="rounded-2xl border border-gray-100 bg-white p-6">
-      <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">Adicionar Refeição</h2>
+      <div className="flex items-center justify-between mb-5">
+        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Adicionar Refeição</h2>
+        <button
+          type="button"
+          onClick={() => setShowMfpModal(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-100 bg-blue-50 text-blue-600 text-xs font-medium hover:bg-blue-100 transition"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
+          </svg>
+          MyFitnessPal
+        </button>
+      </div>
+
+      {/* MFP Modal */}
+      {showMfpModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowMfpModal(false)}>
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-lg">M</div>
+              <div>
+                <p className="font-semibold text-gray-900 text-sm">MyFitnessPal</p>
+                <p className="text-xs text-gray-400">Integração de nutrição</p>
+              </div>
+            </div>
+            <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 mb-4">
+              <p className="text-xs text-amber-700 font-medium mb-1">API descontinuada</p>
+              <p className="text-xs text-amber-600">O MyFitnessPal encerrou sua API pública em 2020. Não é possível sincronizar automaticamente.</p>
+            </div>
+            <p className="text-xs text-gray-600 mb-4">Nossa IA calcula os macros automaticamente ao digitar a descrição da refeição — tão rápido quanto o MFP!</p>
+            <div className="flex gap-2">
+              <button onClick={() => setShowMfpModal(false)} className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition">Fechar</button>
+              <a href="https://www.myfitnesspal.com/account/export" target="_blank" rel="noopener noreferrer" className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium text-center hover:bg-blue-700 transition">Exportar MFP CSV →</a>
+            </div>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1.5">Tipo de refeição</label>
@@ -264,19 +334,34 @@ function AddMealForm({
 
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1.5">Descrição</label>
-          <input
-            type="text"
-            value={form.description}
-            onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-            placeholder="Ex: Arroz, feijão e frango grelhado"
-            required
-            className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition"
-          />
+          <div className="relative">
+            <input
+              type="text"
+              value={form.description}
+              onChange={(e) => handleDescriptionChange(e.target.value)}
+              placeholder="Ex: Arroz, feijão e frango grelhado (IA calcula automaticamente)"
+              required
+              className="w-full px-3.5 py-2.5 pr-10 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition"
+            />
+            {analyzing && (
+              <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                <span className="w-4 h-4 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin inline-block" />
+              </div>
+            )}
+          </div>
+          {aiHint && (
+            <p className="text-xs text-indigo-500 mt-1.5 flex items-center gap-1">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+              </svg>
+              {aiHint}
+            </p>
+          )}
         </div>
 
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1.5">
-            Calorias <span className="text-gray-300">(opcional)</span>
+            Calorias {analyzing ? <span className="text-indigo-400 ml-1">calculando...</span> : <span className="text-gray-300">(auto-calculado pela IA)</span>}
           </label>
           <input
             type="number"

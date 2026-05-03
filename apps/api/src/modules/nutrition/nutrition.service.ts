@@ -1,10 +1,61 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateMealDto, UpdateWaterDto } from './dto/nutrition.dto';
+import Anthropic from '@anthropic-ai/sdk';
 
 @Injectable()
 export class NutritionService {
+  private readonly logger = new Logger(NutritionService.name);
+  private anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? '' });
+
   constructor(private prisma: PrismaService) {}
+
+  // ── AI Macro Estimator ────────────────────────────────────────────────────
+
+  async analyzeMacrosWithAI(description: string): Promise<{
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    analysis: string;
+  }> {
+    if (!description?.trim()) {
+      return { calories: 0, protein: 0, carbs: 0, fat: 0, analysis: '' };
+    }
+
+    try {
+      const msg = await this.anthropic.messages.create({
+        model: 'claude-haiku-4-5',
+        max_tokens: 300,
+        system: `Você é um nutricionista especializado em nutrição esportiva para corredores.
+Analise a descrição de alimento e retorne SOMENTE um JSON válido com os macronutrientes estimados.
+Use valores típicos brasileiros. Seja preciso e realista.
+Formato OBRIGATÓRIO (apenas JSON, sem texto extra):
+{"calories":450,"protein":30,"carbs":40,"fat":15,"analysis":"Estimativa para X: rico em proteínas"}`,
+        messages: [{
+          role: 'user',
+          content: `Alimento: ${description}\n\nRetorne apenas o JSON com calories (kcal), protein (g), carbs (g), fat (g) e analysis (string curta).`,
+        }],
+      });
+
+      const text = (msg.content[0] as any)?.text ?? '{}';
+      // Extract JSON from response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('No JSON in response');
+      const result = JSON.parse(jsonMatch[0]);
+
+      return {
+        calories: Math.round(result.calories ?? 0),
+        protein: Math.round((result.protein ?? 0) * 10) / 10,
+        carbs: Math.round((result.carbs ?? 0) * 10) / 10,
+        fat: Math.round((result.fat ?? 0) * 10) / 10,
+        analysis: result.analysis ?? '',
+      };
+    } catch (err: any) {
+      this.logger.error(`Nutrition AI error: ${err.message}`);
+      return { calories: 0, protein: 0, carbs: 0, fat: 0, analysis: 'Erro ao estimar — preencha manualmente.' };
+    }
+  }
 
   async getDaySummary(userId: string, date: string) {
     const dateObj = new Date(date);
