@@ -7,9 +7,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/theme';
-import { GlassCard, GlassBadge } from '../../src/components/ui';
+import { GlassCard, GlassBadge, RecoveryBadge } from '../../src/components/ui';
 import { useAuthStore } from '../../src/stores/auth.store';
 import { workoutService } from '../../src/services/workout.service';
+import { api } from '../../src/services/api';
 import { formatDistance } from '../../src/utils/pace';
 import { getWeekStart } from '../../src/utils/date';
 
@@ -24,6 +25,17 @@ export default function AthleteDashboard() {
   const { data: weekData, isLoading, refetch } = useQuery({
     queryKey: ['weeklyWorkouts', weekStart],
     queryFn: () => workoutService.getWeekly(weekStart),
+  });
+
+  // Garmin training load / recovery data
+  const { data: trainingLoad } = useQuery({
+    queryKey: ['trainingLoad'],
+    queryFn: async () => {
+      const { data } = await api.get('/workouts/training-load', { params: { days: 1 } });
+      return data;
+    },
+    // Non-critical — silence errors silently
+    retry: false,
   });
 
   const nextWorkout = weekData?.workouts?.find(
@@ -108,6 +120,54 @@ export default function AthleteDashboard() {
         </View>
 
         <View style={{ paddingHorizontal: 20, paddingTop: 24 }}>
+
+          {/* ─── RECUPERAÇÃO / GARMIN ─── */}
+          {trainingLoad && (
+            <GlassCard intensity="subtle" shadow="sm" padding={16} style={{ marginBottom: 16 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <View>
+                  <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1.2, color: colors.textTertiary, textTransform: 'uppercase', marginBottom: 6 }}>
+                    Recuperação
+                  </Text>
+                  <RecoveryBadge
+                    tsb={trainingLoad.tsb}
+                    hrv={trainingLoad.hrv}
+                    sleepScore={trainingLoad.sleepScore}
+                    size="md"
+                  />
+                </View>
+                <View style={{ flexDirection: 'row', gap: 16 }}>
+                  {trainingLoad.ctl !== undefined && (
+                    <View style={{ alignItems: 'center' }}>
+                      <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text, letterSpacing: -0.5 }}>
+                        {Math.round(trainingLoad.ctl)}
+                      </Text>
+                      <Text style={{ fontSize: 10, color: colors.textTertiary, fontWeight: '600' }}>CTL</Text>
+                    </View>
+                  )}
+                  {trainingLoad.atl !== undefined && (
+                    <View style={{ alignItems: 'center' }}>
+                      <Text style={{ fontSize: 20, fontWeight: '800', color: colors.warning, letterSpacing: -0.5 }}>
+                        {Math.round(trainingLoad.atl)}
+                      </Text>
+                      <Text style={{ fontSize: 10, color: colors.textTertiary, fontWeight: '600' }}>ATL</Text>
+                    </View>
+                  )}
+                  {trainingLoad.tsb !== undefined && (
+                    <View style={{ alignItems: 'center' }}>
+                      <Text style={{
+                        fontSize: 20, fontWeight: '800', letterSpacing: -0.5,
+                        color: trainingLoad.tsb >= 0 ? colors.success : colors.error,
+                      }}>
+                        {trainingLoad.tsb > 0 ? '+' : ''}{Math.round(trainingLoad.tsb)}
+                      </Text>
+                      <Text style={{ fontSize: 10, color: colors.textTertiary, fontWeight: '600' }}>TSB</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </GlassCard>
+          )}
 
           {/* ─── RESUMO DA SEMANA (GLASS HERO) ─── */}
           <GlassCard intensity="medium" shadow="md" padding={24} style={{ marginBottom: 20 }}>

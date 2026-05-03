@@ -119,7 +119,6 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
     setSubmitError(''); setSubmitting(true);
     try {
       const res = await api.post(`/v1/onboarding/public/${slug}/submit`, {
-        coachId: formData!.coachId,
         athleteName: athlete.name,
         athleteEmail: athlete.email,
         athletePhone: athlete.phone || undefined,

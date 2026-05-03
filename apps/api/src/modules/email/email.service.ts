@@ -274,6 +274,42 @@ export class EmailService {
     );
   }
 
+  async sendCoachNewAthleteAlert(
+    coachEmail: string,
+    coachName: string,
+    athleteName: string,
+    athleteEmail: string,
+    dashboardUrl: string,
+  ): Promise<void> {
+    const platformName = process.env.PLATFORM_NAME || 'Rafinha Running';
+    await this.send(
+      coachEmail,
+      `🏃 Novo aluno cadastrado: ${athleteName}`,
+      `<div style="font-family:Georgia,serif;max-width:580px;margin:0 auto;background:#ffffff">
+        <div style="background:#DC2626;padding:8px 40px;text-align:center">
+          <img src="https://rrweb-production.up.railway.app/logo.png" alt="${platformName}" style="width:180px;max-width:100%;display:block;margin:0 auto" />
+        </div>
+        <div style="padding:40px 40px 32px;background:#fff">
+          <p style="font-size:18px;color:#111827;margin:0 0 8px">Olá, <strong>${coachName}</strong>! 👋</p>
+          <p style="font-size:15px;color:#374151;line-height:1.7;margin:0 0 24px">
+            Um novo aluno acabou de preencher o questionário de anamnese e está aguardando sua revisão:
+          </p>
+          <div style="background:#FEF2F2;border-left:4px solid #DC2626;border-radius:0 8px 8px 0;padding:20px 24px;margin:0 0 32px">
+            <p style="font-size:16px;font-weight:700;color:#111827;margin:0 0 4px">${athleteName}</p>
+            <p style="font-size:14px;color:#6B7280;margin:0">${athleteEmail}</p>
+          </div>
+          <a href="${dashboardUrl}" style="display:inline-block;background:#DC2626;color:#fff;font-size:15px;font-weight:700;padding:14px 32px;border-radius:8px;text-decoration:none">
+            Ver questionário no painel →
+          </a>
+          <p style="font-size:13px;color:#9CA3AF;margin:32px 0 0">A IA já está analisando as respostas. Você receberá uma notificação quando o relatório estiver pronto.</p>
+        </div>
+        <div style="background:#F9FAFB;padding:16px 40px;text-align:center;border-top:1px solid #E5E7EB">
+          <p style="font-size:12px;color:#9CA3AF;margin:0">${platformName} • Sistema de assessoria de corrida</p>
+        </div>
+      </div>`,
+    );
+  }
+
   async sendWelcome(to: string, name: string): Promise<void> {
     const platformName = process.env.PLATFORM_NAME || 'Rafinha Running';
     const loginUrl = `${process.env.FRONTEND_URL || this.appUrl}/athlete-login`;

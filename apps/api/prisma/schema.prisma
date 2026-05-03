@@ -624,6 +624,7 @@ model EventDistance {
   maxParticipants Int?     @map("max_participants")
   registeredCount Int      @default(0) @map("registered_count")
   description     String?
+  ageGroup        String?  @map("age_group")
   sortOrder       Int      @default(0) @map("sort_order")
   isActive        Boolean  @default(true) @map("is_active")
   createdAt       DateTime @default(now()) @map("created_at")

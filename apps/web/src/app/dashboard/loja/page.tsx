@@ -220,6 +220,16 @@ export default function DashboardLojaPage() {
     load();
   }
 
+  async function deleteProduct(p: Product) {
+    if (!confirm(`Deletar "${p.name}" permanentemente? Esta ação não pode ser desfeita.`)) return;
+    try {
+      await api.delete(`/v1/store/products/${p.id}`);
+      load();
+    } catch (err: any) {
+      alert(err.response?.data?.message ?? 'Erro ao deletar produto');
+    }
+  }
+
   async function updateOrder(orderId: string, status: string) {
     await api.put(`/v1/store/orders/${orderId}/status`, { status }).catch(() => null);
     load();
@@ -298,9 +308,24 @@ export default function DashboardLojaPage() {
 
           <div className="space-y-3">
             {products.map(p => (
-              <div key={p.id} className="rounded-2xl border p-4"
-                style={{ background: WHITE, borderColor: LIGHT, opacity: p.active ? 1 : 0.6 }}>
-                <div className="flex items-start justify-between gap-3">
+              <div key={p.id} className="rounded-2xl border overflow-hidden"
+                style={{ background: WHITE, borderColor: LIGHT, opacity: p.active ? 1 : 0.65 }}>
+                <div className="flex gap-3 p-4">
+                  {/* Product image */}
+                  {p.images && p.images.length > 0 ? (
+                    <img
+                      src={p.images[0]}
+                      alt={p.name}
+                      className="w-20 h-20 rounded-xl object-cover shrink-0"
+                      style={{ border: `1px solid ${LIGHT}` }}
+                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  ) : (
+                    <div className="w-20 h-20 rounded-xl shrink-0 flex items-center justify-center text-3xl"
+                      style={{ background: PAGE, border: `1px solid ${LIGHT}` }}>
+                      🛍️
+                    </div>
+                  )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-black" style={{ color: DARK }}>{p.name}</p>
@@ -315,28 +340,33 @@ export default function DashboardLojaPage() {
                     </div>
                     <p className="text-sm font-bold mt-0.5" style={{ color: RED }}>{fmtPrice(p.priceInCents)}</p>
                     <div className="flex gap-3 mt-1 text-xs" style={{ color: GRAY }}>
-                      <span>Estoque: {p.totalStock - p.reserved} / {p.totalStock}</span>
-                      <span>Reservados: {p.reserved}</span>
+                      <span>Estoque: {p.totalStock - p.reserved}/{p.totalStock}</span>
                       {p._count && <span>Pedidos: {p._count.orders}</span>}
                     </div>
                     {p.sizes.length > 0 && (
                       <p className="text-xs mt-1" style={{ color: GRAY }}>
-                        Tamanhos: {p.sizes.join(', ')}
+                        {p.sizes.join(' · ')}
                       </p>
                     )}
                   </div>
-                  <div className="flex gap-2 shrink-0">
-                    <button onClick={() => openEdit(p)}
-                      className="px-3 py-1.5 rounded-xl border text-xs font-bold"
-                      style={{ borderColor: LIGHT, color: DARK }}>
-                      Editar
-                    </button>
-                    <button onClick={() => toggleActive(p)}
-                      className="px-3 py-1.5 rounded-xl border text-xs font-bold"
-                      style={{ borderColor: LIGHT, color: p.active ? '#DC2626' : '#16A34A' }}>
-                      {p.active ? 'Desativar' : 'Ativar'}
-                    </button>
-                  </div>
+                </div>
+                {/* Actions bar */}
+                <div className="flex gap-2 px-4 pb-3">
+                  <button onClick={() => openEdit(p)}
+                    className="flex-1 py-1.5 rounded-xl border text-xs font-bold"
+                    style={{ borderColor: LIGHT, color: DARK }}>
+                    ✏️ Editar
+                  </button>
+                  <button onClick={() => toggleActive(p)}
+                    className="flex-1 py-1.5 rounded-xl border text-xs font-bold"
+                    style={{ borderColor: LIGHT, color: p.active ? '#D97706' : '#16A34A' }}>
+                    {p.active ? '⏸ Desativar' : '▶ Ativar'}
+                  </button>
+                  <button onClick={() => deleteProduct(p)}
+                    className="py-1.5 px-3 rounded-xl border text-xs font-bold"
+                    style={{ borderColor: '#FCA5A5', color: '#DC2626', background: '#FEF2F2' }}>
+                    🗑
+                  </button>
                 </div>
               </div>
             ))}

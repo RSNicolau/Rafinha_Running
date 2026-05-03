@@ -8,3 +8,5 @@ export { GlassBadge } from './GlassBadge';
 export { GlassToggle } from './GlassToggle';
 export { GlassAvatar } from './GlassAvatar';
 export { StatCard } from './StatCard';
+export { RecoveryBadge } from './RecoveryBadge';
+export type { RecoveryStatus } from './RecoveryBadge';

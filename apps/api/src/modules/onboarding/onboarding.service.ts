@@ -301,7 +301,7 @@ export class OnboardingService {
       },
     });
 
-    // Immediate coach notification (don't wait for AI analysis)
+    // Immediate coach in-app notification (don't wait for AI analysis)
     this.prisma.notification.create({
       data: {
         userId: coachId,
@@ -311,6 +311,22 @@ export class OnboardingService {
         data: { profileId: profile.id, athleteId: athlete.id },
       },
     }).catch(err => this.logger.error(`Failed to create coach notification: ${err.message}`));
+
+    // Send coach email alert (fire-and-forget)
+    this.prisma.user.findUnique({ where: { id: coachId }, select: { email: true, name: true } })
+      .then(coachUser => {
+        if (coachUser?.email) {
+          const dashboardUrl = `${process.env.FRONTEND_URL || 'https://rr-rafinha-running.vercel.app'}/dashboard/onboarding`;
+          this.emailService.sendCoachNewAthleteAlert(
+            coachUser.email,
+            coachUser.name,
+            data.athleteName,
+            data.athleteEmail,
+            dashboardUrl,
+          ).catch(err => this.logger.error(`Failed to send coach alert email: ${err.message}`));
+        }
+      })
+      .catch(err => this.logger.error(`Failed to fetch coach for email: ${err.message}`));
 
     // Kick off async AI analysis (fire-and-forget)
     this.analyzeWithAI(profile.id, coachId).catch(err =>

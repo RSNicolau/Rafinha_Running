@@ -13,6 +13,7 @@ interface EventDistance {
   maxParticipants?: number | null;
   registeredCount: number;
   description?: string | null;
+  ageGroup?: string | null;
   sortOrder: number;
   isActive: boolean;
   _count?: { registrations: number };
@@ -24,6 +25,7 @@ interface DistanceForm {
   price: string;
   maxParticipants: string;
   description: string;
+  ageGroup: string;
 }
 
 const EMPTY_FORM: DistanceForm = {
@@ -32,14 +34,27 @@ const EMPTY_FORM: DistanceForm = {
   price: '',
   maxParticipants: '',
   description: '',
+  ageGroup: '',
 };
+
+const AGE_GROUP_OPTIONS = [
+  '',
+  '5-6 anos',
+  '7-8 anos',
+  '9-11 anos',
+  '12-15 anos',
+  'Adulto geral',
+  'Sub-20',
+  'Master 40+',
+  'Master 50+',
+];
 
 function formatPrice(cents: number) {
   if (cents === 0) return 'Grátis';
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100);
 }
 
-export default function DistanceManager({ eventId, eventPrice }: { eventId: string; eventPrice: number }) {
+export default function DistanceManager({ eventId, eventPrice, onDistancesChange }: { eventId: string; eventPrice: number; onDistancesChange?: () => void }) {
   const { user } = useAuthStore();
   const isCoach = user?.role === 'COACH' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
 
@@ -77,6 +92,7 @@ export default function DistanceManager({ eventId, eventPrice }: { eventId: stri
       price: d.price > 0 ? String(d.price / 100) : '',
       maxParticipants: d.maxParticipants != null ? String(d.maxParticipants) : '',
       description: d.description || '',
+      ageGroup: d.ageGroup || '',
     });
     setShowModal(true);
   };
@@ -91,6 +107,7 @@ export default function DistanceManager({ eventId, eventPrice }: { eventId: stri
         price: form.price ? Math.round(Number(form.price) * 100) : 0,
         maxParticipants: form.maxParticipants ? Number(form.maxParticipants) : undefined,
         description: form.description || undefined,
+        ageGroup: form.ageGroup || undefined,
       };
 
       if (editingDistance) {
@@ -101,6 +118,7 @@ export default function DistanceManager({ eventId, eventPrice }: { eventId: stri
 
       setShowModal(false);
       load();
+      onDistancesChange?.();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Erro ao salvar percurso');
     } finally {
@@ -114,6 +132,7 @@ export default function DistanceManager({ eventId, eventPrice }: { eventId: stri
     try {
       await api.delete(`/events/distances/${id}`);
       load();
+      onDistancesChange?.();
     } catch {
       alert('Erro ao remover percurso');
     } finally {
@@ -169,18 +188,27 @@ export default function DistanceManager({ eventId, eventPrice }: { eventId: stri
             return (
               <div key={d.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-semibold text-gray-800 truncate">{d.name}</p>
                     {d.distanceKm != null && (
                       <span className="shrink-0 text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full font-medium">
                         {d.distanceKm}km
                       </span>
                     )}
+                    {d.ageGroup && (
+                      <span className="shrink-0 text-xs bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded-full font-medium">
+                        {d.ageGroup}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
                     <span>{formatPrice(effectivePrice)}{d.price === 0 && eventPrice > 0 ? ' (padrão)' : ''}</span>
-                    {d.maxParticipants != null && (
-                      <span>{registeredCount} / {d.maxParticipants} inscritos</span>
+                    {d.maxParticipants != null ? (
+                      <span className={registeredCount >= d.maxParticipants ? 'text-red-500 font-medium' : ''}>
+                        {registeredCount} / {d.maxParticipants} vagas
+                      </span>
+                    ) : (
+                      registeredCount > 0 && <span>{registeredCount} inscritos</span>
                     )}
                     {d.description && (
                       <span className="truncate text-gray-400">{d.description}</span>
@@ -291,6 +319,34 @@ export default function DistanceManager({ eventId, eventPrice }: { eventId: stri
                   placeholder="0 = sem limite"
                   className={inputClass}
                 />
+              </div>
+              <div>
+                <label className={labelClass}>Faixa Etária</label>
+                <div className="flex gap-2">
+                  <select
+                    value={AGE_GROUP_OPTIONS.includes(form.ageGroup) ? form.ageGroup : '__custom__'}
+                    onChange={(e) => {
+                      if (e.target.value === '__custom__') return;
+                      setForm((p) => ({ ...p, ageGroup: e.target.value }));
+                    }}
+                    className={inputClass + ' flex-1'}
+                  >
+                    <option value="">Sem faixa definida</option>
+                    {AGE_GROUP_OPTIONS.filter(Boolean).map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                    {form.ageGroup && !AGE_GROUP_OPTIONS.includes(form.ageGroup) && (
+                      <option value="__custom__">{form.ageGroup} (personalizado)</option>
+                    )}
+                  </select>
+                  <input
+                    type="text"
+                    value={form.ageGroup}
+                    onChange={(e) => setForm((p) => ({ ...p, ageGroup: e.target.value }))}
+                    placeholder="Personalizar..."
+                    className={inputClass + ' w-36 shrink-0'}
+                  />
+                </div>
               </div>
               <div>
                 <label className={labelClass}>Descrição (opcional)</label>

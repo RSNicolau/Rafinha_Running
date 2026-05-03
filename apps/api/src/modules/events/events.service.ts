@@ -153,7 +153,7 @@ export class EventsService {
     return this.prisma.event.update({ where: { id: eventId }, data });
   }
 
-  async register(eventId: string, userId: string, extra?: { shirtSize?: string; kitType?: KitType; emergencyContact?: string; medicalInfo?: string; couponId?: string }) {
+  async register(eventId: string, userId: string, extra?: { shirtSize?: string; kitType?: KitType; emergencyContact?: string; medicalInfo?: string; couponId?: string; distanceId?: string }) {
     return this.prisma.$transaction(async (tx) => {
       const event = await tx.event.findUnique({
         where: { id: eventId },
@@ -196,6 +196,19 @@ export class EventsService {
       // Schedule kit pickup = event's kitPickupDate (or null)
       const kitPickupScheduledAt = event.kitPickupDate ?? null;
 
+      // Validate distanceId if provided
+      let resolvedDistanceId: string | null = null;
+      if (extra?.distanceId) {
+        const distance = await tx.eventDistance.findUnique({ where: { id: extra.distanceId } });
+        if (!distance || distance.eventId !== eventId || !distance.isActive) {
+          throw new BadRequestException('Percurso inválido ou inao pertence a este evento');
+        }
+        if (distance.maxParticipants !== null && distance.registeredCount >= distance.maxParticipants) {
+          throw new BadRequestException('Este percurso está com vagas esgotadas');
+        }
+        resolvedDistanceId = distance.id;
+      }
+
       // Resolve coupon and calculate final price
       let finalPrice: number | null = null;
       let resolvedCouponId: string | null = null;
@@ -234,6 +247,7 @@ export class EventsService {
             medicalInfo: extra?.medicalInfo,
             couponId: resolvedCouponId,
             finalPrice,
+            distanceId: resolvedDistanceId,
           },
         });
       } else {
@@ -251,6 +265,7 @@ export class EventsService {
             medicalInfo: extra?.medicalInfo,
             couponId: resolvedCouponId,
             finalPrice,
+            distanceId: resolvedDistanceId,
           },
         });
       }
@@ -259,6 +274,14 @@ export class EventsService {
       if (resolvedCouponId) {
         await tx.eventCouponUse.create({
           data: { couponId: resolvedCouponId, registrationId: registration.id },
+        });
+      }
+
+      // Increment registeredCount on the distance
+      if (resolvedDistanceId && status !== EventRegistrationStatus.WAITLIST) {
+        await tx.eventDistance.update({
+          where: { id: resolvedDistanceId },
+          data: { registeredCount: { increment: 1 } },
         });
       }
 
@@ -644,6 +667,7 @@ export class EventsService {
       maxParticipants?: number;
       description?: string;
       sortOrder?: number;
+      ageGroup?: string;
     },
   ) {
     const event = await this.prisma.event.findUnique({ where: { id: eventId } });
@@ -659,6 +683,7 @@ export class EventsService {
         maxParticipants: dto.maxParticipants,
         description: dto.description,
         sortOrder: dto.sortOrder ?? 0,
+        ageGroup: dto.ageGroup,
       },
     });
   }
@@ -684,6 +709,7 @@ export class EventsService {
       description?: string;
       sortOrder?: number;
       isActive?: boolean;
+      ageGroup?: string;
     },
   ) {
     const distance = await this.prisma.eventDistance.findUnique({

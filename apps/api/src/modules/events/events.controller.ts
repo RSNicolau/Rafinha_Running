@@ -130,7 +130,7 @@ export class EventsController {
   async register(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    @Body() body: { shirtSize?: string; kitType?: 'COMPLETO' | 'PREMIUM'; emergencyContact?: string; medicalInfo?: string; couponId?: string },
+    @Body() body: { shirtSize?: string; kitType?: 'COMPLETO' | 'PREMIUM'; emergencyContact?: string; medicalInfo?: string; couponId?: string; distanceId?: string },
   ) {
     return this.eventsService.register(id, userId, { ...body, kitType: body.kitType as any });
   }
@@ -248,7 +248,7 @@ export class EventsController {
   async createDistance(
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
-    @Body() body: { name: string; distanceKm?: number; price?: number; maxParticipants?: number; description?: string; sortOrder?: number },
+    @Body() body: { name: string; distanceKm?: number; price?: number; maxParticipants?: number; description?: string; sortOrder?: number; ageGroup?: string },
   ) {
     return this.eventsService.createDistance(id, userId, body);
   }
@@ -268,7 +268,7 @@ export class EventsController {
   async updateDistance(
     @Param('distanceId') distanceId: string,
     @CurrentUser('id') userId: string,
-    @Body() body: { name?: string; distanceKm?: number; price?: number; maxParticipants?: number; description?: string; sortOrder?: number; isActive?: boolean },
+    @Body() body: { name?: string; distanceKm?: number; price?: number; maxParticipants?: number; description?: string; sortOrder?: number; isActive?: boolean; ageGroup?: string },
   ) {
     return this.eventsService.updateDistance(distanceId, userId, body);
   }
