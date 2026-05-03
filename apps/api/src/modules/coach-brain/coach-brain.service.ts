@@ -299,8 +299,13 @@ Data atual: ${new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'n
 Responda em português. Seja objetivo, prático e específico com nomes dos atletas quando relevante.
 Quando gerar planilhas de treino, use formato estruturado (dia, tipo, distância/tempo, ritmo).`;
 
+    // Filter out messages with empty content (can cause Claude API error)
+    const cleanHistory = history.slice(-19).filter(m =>
+      m.content && (typeof m.content === 'string' ? m.content.trim().length > 0 : m.content.length > 0)
+    );
+
     const updatedHistory: BrainMessage[] = [
-      ...history.slice(-19),
+      ...cleanHistory,
       { role: 'user', content: message },
     ];
 
@@ -508,8 +513,13 @@ Quando gerar planilhas de treino, use formato estruturado (dia, tipo, distância
       userContent = message;
     }
 
+    // Filter out messages with empty content before sending to AI
+    const cleanHistory2 = history.slice(-19).filter(m =>
+      m.content && (typeof m.content === 'string' ? m.content.trim().length > 0 : (m.content as any[]).length > 0)
+    );
+
     const updatedHistory: BrainMessage[] = [
-      ...history.slice(-19),
+      ...cleanHistory2,
       { role: 'user', content: userContent },
     ];
 

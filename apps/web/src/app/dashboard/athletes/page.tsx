@@ -74,8 +74,8 @@ export default function AthletesPage() {
   }, [isDemoMode]);
 
   const filtered = athletes.filter((a) =>
-    a.user.name.toLowerCase().includes(search.toLowerCase()) ||
-    a.user.email.toLowerCase().includes(search.toLowerCase())
+    (a.user.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
+    (a.user.email ?? '').toLowerCase().includes(search.toLowerCase())
   );
 
   const handleSendInvite = async (e: React.FormEvent) => {

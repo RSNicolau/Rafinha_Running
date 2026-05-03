@@ -76,8 +76,8 @@ export default function PlansPage() {
   useEffect(() => { load(); }, []);
 
   const filtered = plans.filter((p) => {
-    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.athlete?.name?.toLowerCase().includes(search.toLowerCase());
+    const matchSearch = (p.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
+      (p.athlete?.name ?? '').toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === 'ALL' || p.status === statusFilter;
     return matchSearch && matchStatus;
   });

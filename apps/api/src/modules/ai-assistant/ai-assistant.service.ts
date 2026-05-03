@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import { Response } from 'express';
 import { ChatMessageDto } from './dto/chat-message.dto';
 import { GeneratePlanAiDto } from './dto/generate-plan-ai.dto';
@@ -15,13 +16,19 @@ const TONE_MAP = {
 @Injectable()
 export class AiAssistantService {
   private readonly logger = new Logger(AiAssistantService.name);
-  private client: OpenAI;
+  private openaiClient: OpenAI;
+  private anthropicClient: Anthropic;
+  // keep old name for compatibility
+  private get client() { return this.openaiClient; }
 
   constructor(
     private prisma: PrismaService,
   ) {
-    this.client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
+    this.openaiClient = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY ?? 'not-set',
+    });
+    this.anthropicClient = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY ?? '',
     });
   }
 
@@ -162,59 +169,131 @@ export class AiAssistantService {
     }
   }
 
+  private useAnthropic(): boolean {
+    return !!(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.length > 10);
+  }
+
   private async getSystemPrompt(coachId: string): Promise<string> {
     const coach = await this.prisma.user.findUnique({ where: { id: coachId } });
     const config = await this.prisma.aIAssistantConfig.findUnique({ where: { coachId } });
     const assistantName = config?.assistantName ?? 'Rafinha';
     const tone = config?.tone ?? 'FRIENDLY';
     const personaPrompt = config?.personaPrompt ?? '';
-    return `Você é ${assistantName}, o assistente IA do coach ${coach?.name ?? 'Coach'} na plataforma Rafinha Running.
-Tom: ${TONE_MAP[tone] ?? TONE_MAP.FRIENDLY}. Responda sempre em português brasileiro.
-${personaPrompt ? `Instruções especiais: ${personaPrompt}` : ''}
-Você ajuda o coach a criar planilhas de treino, analisar performance dos atletas, responder dúvidas e tomar decisões baseadas em dados reais.
-Nunca invente dados — use as ferramentas disponíveis para buscar informações reais.
-Seja conciso e direto. Quando relevante, sugira ações práticas.`;
+    const coachName = coach?.name ?? 'Rafinha';
+    const today = new Date().toLocaleDateString('pt-BR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+    return `Você é ${assistantName}, o assistente pessoal de inteligência artificial do coach ${coachName} na plataforma RR Rafinha Running.
+
+IDENTIDADE: Você não é apenas um chatbot genérico — você é a IA do ${coachName}, treinada com o conhecimento e a filosofia de treino dele. Fale sempre como um expert em treinamento de corrida que conhece cada atleta pessoalmente.
+
+TOM: ${TONE_MAP[tone] ?? TONE_MAP.FRIENDLY}
+IDIOMA: Sempre em português brasileiro
+DATA ATUAL: ${today}
+
+CAPACIDADES:
+- Criar e ajustar planilhas de treino personalizadas (com ritmos, distâncias, tipos de treino)
+- Analisar performance e evolução de cada atleta com dados reais
+- Identificar atletas em risco (sobrecarga, lesões, abandono)
+- Calcular VDOT, zonas de FC e ritmo a partir de provas recentes
+- Sugerir periodização e tapering para provas
+- Responder dúvidas técnicas de fisiologia do exercício e biomecânica
+
+PRINCÍPIOS DO ${coachName.toUpperCase()}:
+- Treino inteligente > volume cego
+- Consistência > intensidade esporádica
+- Cada atleta tem um ritmo e objetivo único
+- Dados Garmin/relógio informam, mas o feeling do atleta decide
+
+${personaPrompt ? `INSTRUÇÕES ESPECIAIS: ${personaPrompt}\n` : ''}
+REGRAS:
+- Nunca invente dados — use as ferramentas para buscar informações reais
+- Quando não souber algo, seja honesto e sugira como descobrir
+- Seja conciso e prático — coaches precisam de respostas rápidas e acionáveis
+- Quando gerar planilhas, use formato estruturado: Dia | Tipo | Distância/Tempo | Ritmo/Zona`;
   }
 
   async streamToResponse(coachId: string, dto: ChatMessageDto, res: Response): Promise<void> {
-    const systemPrompt = await this.getSystemPrompt(coachId);
-    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      { role: 'system', content: systemPrompt },
-      ...(dto.history ?? []).map(h => ({ role: h.role as 'user' | 'assistant', content: h.content })),
-      { role: 'user', content: dto.message },
-    ];
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
 
-    let iterations = 0;
-    const MAX_ITERATIONS = 5;
+    try {
+      const systemPrompt = await this.getSystemPrompt(coachId);
 
-    while (iterations < MAX_ITERATIONS) {
-      iterations++;
-      const response = await this.client.chat.completions.create({
-        model: 'gpt-4o',
-        max_tokens: 2048,
-        tools: this.tools,
-        messages,
-      });
+      // Clean history — filter empty messages to avoid API errors
+      const cleanHistory = (dto.history ?? []).filter(h => h.content?.trim());
 
-      const choice = response.choices[0];
+      if (this.useAnthropic()) {
+        // Use Anthropic Claude (preferred — key is always set in production)
+        const anthropicMessages = [
+          ...cleanHistory.map(h => ({ role: h.role as 'user' | 'assistant', content: h.content })),
+          { role: 'user' as const, content: dto.message },
+        ];
 
-      if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls?.length) {
-        messages.push(choice.message);
-        for (const tc of choice.message.tool_calls) {
-          if (tc.type !== 'function') continue;
-          res.write(`data: ${JSON.stringify({ type: 'tool_call', tool: tc.function.name })}\n\n`);
-          const args = JSON.parse(tc.function.arguments || '{}');
-          const result = await this.executeTool(tc.function.name, args, coachId);
-          messages.push({ role: 'tool', tool_call_id: tc.id, content: result });
+        // Build context from database if athlete is selected
+        let contextAddition = '';
+        if (dto.athleteId) {
+          try {
+            const profile = await this.executeTool('get_athlete_profile', { athleteId: dto.athleteId }, coachId);
+            const history = await this.executeTool('get_workout_history', { athleteId: dto.athleteId, weeks: 4 }, coachId);
+            contextAddition = `\n\nDADOS DO ATLETA SELECIONADO:\nPerfil: ${profile}\nHistórico (4 semanas): ${history}`;
+          } catch {}
+        }
+
+        const stream = this.anthropicClient.messages.stream({
+          model: 'claude-opus-4-5',
+          max_tokens: 2048,
+          system: systemPrompt + contextAddition,
+          messages: anthropicMessages,
+        });
+
+        for await (const event of stream) {
+          if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+            res.write(`data: ${JSON.stringify({ type: 'text', content: event.delta.text })}\n\n`);
+          }
+        }
+      } else if (process.env.OPENAI_API_KEY) {
+        // Fallback to OpenAI with tool calling
+        const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+          { role: 'system', content: systemPrompt },
+          ...cleanHistory.map(h => ({ role: h.role as 'user' | 'assistant', content: h.content })),
+          { role: 'user', content: dto.message },
+        ];
+
+        let iterations = 0;
+        while (iterations < 5) {
+          iterations++;
+          const response = await this.openaiClient.chat.completions.create({
+            model: 'gpt-4o',
+            max_tokens: 2048,
+            tools: this.tools,
+            messages,
+          });
+          const choice = response.choices[0];
+          if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls?.length) {
+            messages.push(choice.message);
+            for (const tc of choice.message.tool_calls) {
+              if (tc.type !== 'function') continue;
+              res.write(`data: ${JSON.stringify({ type: 'tool_call', tool: tc.function.name })}\n\n`);
+              const args = JSON.parse(tc.function.arguments || '{}');
+              const result = await this.executeTool(tc.function.name, args, coachId);
+              messages.push({ role: 'tool', tool_call_id: tc.id, content: result });
+            }
+          } else {
+            const text = choice.message.content ?? '';
+            for (const word of text.split(' ')) {
+              res.write(`data: ${JSON.stringify({ type: 'text', content: word + ' ' })}\n\n`);
+            }
+            break;
+          }
         }
       } else {
-        const text = choice.message.content ?? '';
-        const words = text.split(' ');
-        for (const word of words) {
-          res.write(`data: ${JSON.stringify({ type: 'text', content: word + ' ' })}\n\n`);
-        }
-        break;
+        res.write(`data: ${JSON.stringify({ type: 'text', content: 'IA não configurada. Configure ANTHROPIC_API_KEY ou OPENAI_API_KEY nas variáveis de ambiente.' })}\n\n`);
       }
+    } catch (err: any) {
+      this.logger.error(`AI Assistant error: ${err.message}`);
+      res.write(`data: ${JSON.stringify({ type: 'text', content: 'Desculpe, ocorreu um erro interno. Tente novamente em instantes.' })}\n\n`);
     }
 
     res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
@@ -223,7 +302,16 @@ Seja conciso e direto. Quando relevante, sugira ações práticas.`;
 
   async generatePlan(coachId: string, dto: GeneratePlanAiDto): Promise<{ plan: string }> {
     const systemPrompt = await this.getSystemPrompt(coachId);
-    const response = await this.client.chat.completions.create({
+    if (this.useAnthropic()) {
+      const msg = await this.anthropicClient.messages.create({
+        model: 'claude-opus-4-5',
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: `Crie um plano de treino detalhado para o atleta ${dto.athleteId}, com duração de ${dto.durationWeeks} semanas, objetivo: ${dto.goal}. Data de início: ${dto.startDate ?? 'hoje'}.` }],
+      });
+      return { plan: (msg.content[0] as any)?.text ?? 'Plano gerado' };
+    }
+    const response = await this.openaiClient.chat.completions.create({
       model: 'gpt-4o',
       max_tokens: 4096,
       messages: [
@@ -241,14 +329,21 @@ Seja conciso e direto. Quando relevante, sugira ações práticas.`;
       include: { user: true },
       take: 5,
     });
+    const prompt = `Gere um insight rápido e motivador sobre a semana da assessoria. Você tem ${athletes.length} atletas ativos. Seja breve (máximo 3 frases).`;
 
-    const response = await this.client.chat.completions.create({
+    if (this.useAnthropic()) {
+      const msg = await this.anthropicClient.messages.create({
+        model: 'claude-haiku-4-5',
+        max_tokens: 512,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      return { insight: (msg.content[0] as any)?.text ?? 'Semana em progresso!' };
+    }
+    const response = await this.openaiClient.chat.completions.create({
       model: 'gpt-4o',
       max_tokens: 512,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Gere um insight rápido e motivador sobre a semana da assessoria. Você tem ${athletes.length} atletas ativos. Seja breve (máximo 3 frases).` },
-      ],
+      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
     });
     return { insight: response.choices[0]?.message?.content ?? 'Semana em progresso!' };
   }

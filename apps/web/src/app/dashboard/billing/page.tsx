@@ -502,37 +502,39 @@ export default function BillingPage() {
                 </ul>
 
                 {/* PIX payment button */}
-                <button
-                  onClick={() => handlePixPayment(plan)}
-                  disabled={isCurrent || pixLoading === plan.type}
-                  className={`w-full py-2.5 rounded-xl text-sm font-medium transition cursor-pointer mb-2 flex items-center justify-center gap-2 ${
-                    isCurrent
-                      ? 'bg-gray-100 text-gray-400 cursor-default'
-                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                  } disabled:opacity-60`}
-                >
-                  {pixLoading === plan.type ? (
-                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
-                  ) : (
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
-                    </svg>
-                  )}
-                  {isCurrent ? 'Plano Atual' : 'Pagar com PIX'}
-                </button>
-
-                {/* Card payment button */}
-                {!isCurrent && (
+                {/* PIX + Cartão side by side */}
+                <div className={`flex gap-2 ${isCurrent ? '' : ''}`}>
                   <button
-                    onClick={() => setCardPlanType(cardPlanType === plan.type ? null : plan.type)}
-                    className="w-full py-2.5 rounded-xl text-sm font-medium transition cursor-pointer border border-gray-200 text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-2"
+                    onClick={() => handlePixPayment(plan)}
+                    disabled={isCurrent || pixLoading === plan.type}
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                      isCurrent
+                        ? 'bg-gray-100 text-gray-400 cursor-default'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                    } disabled:opacity-60`}
                   >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
-                    </svg>
-                    Pagar com Cartão
+                    {pixLoading === plan.type ? (
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
+                    ) : (
+                      <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
+                      </svg>
+                    )}
+                    {isCurrent ? 'Plano Atual' : 'PIX'}
                   </button>
-                )}
+
+                  {!isCurrent && (
+                    <button
+                      onClick={() => setCardPlanType(cardPlanType === plan.type ? null : plan.type)}
+                      className="flex-1 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer border border-gray-200 text-gray-700 hover:bg-gray-50 flex items-center justify-center gap-1.5"
+                    >
+                      <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
+                      </svg>
+                      Cartão
+                    </button>
+                  )}
+                </div>
 
                 {/* Card form */}
                 {cardPlanType === plan.type && !isCurrent && (
