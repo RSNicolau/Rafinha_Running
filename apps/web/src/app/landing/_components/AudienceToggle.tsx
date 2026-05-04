@@ -3,9 +3,9 @@ import type { Audience } from '../page';
 
 export function AudienceToggle({ audience, onChange }: { audience: Audience; onChange: (a: Audience) => void }) {
   return (
-    <div className="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-gray-100 py-3 px-4">
+    <div className="sticky top-16 z-40 bg-white/95 backdrop-blur border-b border-gray-100 py-3 px-4 shadow-sm">
       <div className="max-w-5xl mx-auto flex justify-center">
-        <div className="inline-flex items-center gap-1 p-1 bg-gray-100 rounded-2xl">
+        <div className="inline-flex items-center gap-1 p-1 bg-gray-100 rounded-2xl shadow-inner">
           <button
             onClick={() => onChange('coach')}
             className={`px-5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${

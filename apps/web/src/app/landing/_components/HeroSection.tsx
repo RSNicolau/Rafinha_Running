@@ -5,7 +5,7 @@ export function HeroSection({ audience = 'coach' }: { audience?: Audience }) {
   const isAthlete = audience === 'athlete';
 
   return (
-    <section className="relative pt-20 pb-24 px-6 overflow-hidden">
+    <section className="relative pt-12 pb-24 px-6 overflow-hidden">
       {/* Gradient mesh background */}
       <div className="absolute inset-0 pointer-events-none" style={{
         background: 'radial-gradient(ellipse 80% 60% at 50% -10%, rgba(220,38,38,0.10) 0%, transparent 70%), radial-gradient(ellipse 60% 40% at 80% 60%, rgba(220,38,38,0.05) 0%, transparent 60%)',
