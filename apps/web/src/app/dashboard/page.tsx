@@ -156,8 +156,8 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Niche setup banner — coaches only */}
-      {(user?.role === 'COACH' || user?.role === 'ADMIN') && <NicheSetupBanner />}
+      {/* Niche setup banner — only for new white-label COACH (first-time setup, zero athletes) */}
+      {user?.role === 'COACH' && athletes.length === 0 && <NicheSetupBanner />}
 
       {/* API Error banner */}
       {loadError && (
