@@ -102,6 +102,8 @@ export default function SubscribePage() {
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) { router.replace('/login'); return; }
+    // Athletes should never see coach plans — redirect them
+    if (user?.role === 'ATHLETE') { router.replace('/athlete-subscribe'); return; }
     Promise.all([
       api.get('/admin/config/plans').catch(() => null),
       api.get('/subscriptions/current').catch(() => null),
@@ -115,7 +117,7 @@ export default function SubscribePage() {
         router.replace('/dashboard');
       }
     }).finally(() => setLoading(false));
-  }, [isAuthenticated, authLoading]);
+  }, [isAuthenticated, authLoading, user?.role, router]);
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 

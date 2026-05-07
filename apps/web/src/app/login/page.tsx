@@ -6,7 +6,11 @@ import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/lib/api';
 
-function getSubscriptionRoute(status: string | undefined): string {
+function getSubscriptionRoute(status: string | undefined, role?: string): string {
+  // Athletes use /athlete-login + /athlete-subscribe, never /subscribe (coach plans)
+  if (role === 'ATHLETE') {
+    return status === 'ACTIVE' || status === 'TRIALING' ? '/athlete' : '/athlete-subscribe';
+  }
   return status === 'ACTIVE' || status === 'TRIALING' ? '/dashboard' : '/subscribe';
 }
 
@@ -49,8 +53,14 @@ function LoginContent() {
           if (me?.role === 'ADMIN') { router.replace('/dashboard/admin/plans'); return; }
           // COACH goes straight to dashboard — no subscription required
           if (BYPASS_SUBSCRIPTION_ROLES.includes(me?.role)) { router.replace('/dashboard'); return; }
+          // Athlete flow
+          if (me?.role === 'ATHLETE') {
+            return api.get('/subscriptions/current')
+              .then(({ data }) => router.replace(getSubscriptionRoute(data?.status, 'ATHLETE')))
+              .catch(() => router.replace('/athlete-subscribe'));
+          }
           return api.get('/subscriptions/current')
-            .then(({ data }) => router.replace(getSubscriptionRoute(data?.status)))
+            .then(({ data }) => router.replace(getSubscriptionRoute(data?.status, me?.role)))
             .catch((err) => {
               if (err?.response?.status === 404 || err?.response?.status === 400) {
                 router.replace('/subscribe');
@@ -86,8 +96,18 @@ function LoginContent() {
         if (role === 'ADMIN') { router.replace('/dashboard/admin/plans'); return; }
         // COACH and other bypass roles go straight to dashboard — no subscription required
         if (BYPASS_SUBSCRIPTION_ROLES.includes(role)) { router.replace('/dashboard'); return; }
+        // Athlete flow
+        if (role === 'ATHLETE') {
+          try {
+            const { data } = await api.get('/subscriptions/current');
+            router.replace(getSubscriptionRoute(data?.status, 'ATHLETE'));
+          } catch {
+            router.replace('/athlete-subscribe');
+          }
+          return;
+        }
         const { data } = await api.get('/subscriptions/current');
-        router.replace(getSubscriptionRoute(data?.status));
+        router.replace(getSubscriptionRoute(data?.status, role));
       } catch (err: any) {
         if (err?.response?.status === 404 || err?.response?.status === 400) {
           router.replace('/subscribe');
