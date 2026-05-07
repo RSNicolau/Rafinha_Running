@@ -288,7 +288,7 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
               <p className="text-sm leading-relaxed mb-6" style={{ color: GRAY }}>
                 Verifique seu e-mail — enviamos suas credenciais de acesso.
               </p>
-              <a href="/login" className="inline-block px-8 py-3.5 rounded-xl text-white text-sm font-black uppercase tracking-widest shadow-md"
+              <a href="/athlete-login" className="inline-block px-8 py-3.5 rounded-xl text-white text-sm font-black uppercase tracking-widest shadow-md"
                 style={{ background: `linear-gradient(135deg, ${RED}, #B91C1C)` }}>
                 Acessar o app →
               </a>

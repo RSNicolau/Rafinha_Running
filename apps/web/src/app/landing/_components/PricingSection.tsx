@@ -29,7 +29,17 @@ const coachPlans = [
     monthlyPrice: '697',
     annualPrice: '557',
     desc: 'Para assessorias escalando',
-    features: ['Até 300 atletas', 'Tudo do Pro', 'Multi-coach', 'Dashboard analítico', 'Acesso à API', 'Onboarding dedicado'],
+    features: ['Até 300 atletas', 'Tudo do Pro', 'Multi-coach', 'Dashboard analítico', 'Acesso à API'],
+    cta: 'Quero esse plano',
+    href: '/subscribe',
+    highlight: false,
+  },
+  {
+    name: 'Elite',
+    monthlyPrice: '997',
+    annualPrice: '797',
+    desc: 'Para grandes assessorias',
+    features: ['Atletas ilimitados', 'Tudo do Scale', 'SLA garantido', 'Integração Garmin/Strava', 'Onboarding dedicado'],
     cta: 'Falar com consultor',
     href: '/subscribe',
     highlight: false,
@@ -76,7 +86,7 @@ export function PricingSection({ audience = 'coach' }: { audience?: Audience }) 
 
   return (
     <section id="planos" className="py-24 px-6 bg-white">
-      <div className="max-w-5xl mx-auto">
+      <div className={`${isAthlete ? 'max-w-5xl' : 'max-w-7xl'} mx-auto`}>
         <div className="text-center mb-10">
           <span className="text-xs font-bold text-[#DC2626] uppercase tracking-widest">Planos</span>
           <h2 className="text-4xl font-black text-gray-900 mt-2 mb-4">
@@ -105,13 +115,13 @@ export function PricingSection({ audience = 'coach' }: { audience?: Audience }) 
           )}
         </div>
 
-        <div className="grid md:grid-cols-3 gap-5 md:gap-6 items-center">
+        <div className={`grid ${isAthlete ? 'md:grid-cols-3' : 'md:grid-cols-2 lg:grid-cols-4'} gap-5 md:gap-6 items-center`}>
           {plans.map((p) => (
             <div
               key={p.name}
               className={`rounded-2xl p-6 border transition-all ${
                 p.highlight
-                  ? 'bg-[#DC2626] border-[#DC2626] shadow-2xl shadow-red-200/60 md:scale-105 ring-2 ring-[#DC2626]'
+                  ? `bg-[#DC2626] border-[#DC2626] shadow-2xl shadow-red-200/60 ${isAthlete ? 'md:scale-105' : ''} ring-2 ring-[#DC2626]`
                   : 'bg-white border-gray-200 hover:border-gray-300 hover:shadow-md'
               }`}
             >

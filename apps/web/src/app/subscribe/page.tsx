@@ -65,6 +65,15 @@ const DEFAULT_PLANS: Plan[] = [
     popular: false,
     features: ['Até 300 atletas', 'Tudo do Pro', 'Multi-coach', 'Dashboard analítico', 'Acesso à API'],
   },
+  {
+    type: 'ELITE',
+    name: 'Elite',
+    price: 'R$ 997',
+    amount: 99700,
+    desc: 'Para grandes assessorias',
+    popular: false,
+    features: ['Atletas ilimitados', 'Tudo do Scale', 'SLA garantido', 'Integração Garmin/Strava', 'Onboarding dedicado'],
+  },
 ];
 
 interface PixData {
@@ -206,7 +215,7 @@ export default function SubscribePage() {
           </div>
         )}
         {!pixData && !plansError && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 mb-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 mb-8">
             {plans.map((plan) => {
               const isSelected = selectedPlan?.type === plan.type;
               return (

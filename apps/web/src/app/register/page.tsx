@@ -25,7 +25,7 @@ function validateRegisterForm(name: string, email: string, password: string): Fi
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { loadUser, isAuthenticated } = useAuthStore();
+  const { loadUser, isAuthenticated, login } = useAuthStore();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -34,7 +34,7 @@ export default function RegisterPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   useEffect(() => { loadUser(); }, []);
-  useEffect(() => { if (isAuthenticated) router.replace('/dashboard'); }, [isAuthenticated]);
+  useEffect(() => { if (isAuthenticated) router.replace('/subscribe'); }, [isAuthenticated]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,8 +49,15 @@ export default function RegisterPage() {
     setLoading(true);
     try {
       await api.post('/auth/register', { name: name.trim(), email, password, role: 'COACH' });
-      toast.success('Conta criada com sucesso!');
-      router.replace('/login?registered=1');
+      toast.success('Conta criada! Direcionando para escolher seu plano...');
+      // Auto-login and redirect direct to /subscribe (no double login)
+      try {
+        await login(email, password);
+        router.replace('/subscribe');
+      } catch {
+        // If auto-login fails, fallback to login page
+        router.replace('/login?registered=1');
+      }
     } catch (err: any) {
       const msg = err?.response?.data?.message ?? 'Erro ao criar conta. Tente novamente.';
       toast.error(msg);
