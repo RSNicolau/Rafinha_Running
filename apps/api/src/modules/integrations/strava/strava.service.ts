@@ -192,7 +192,30 @@ export class StravaService {
       this.logger.log(`Strava webhook registrado: subscriptionId=${data.id}`);
       return { status: 'registered', subscriptionId: data.id };
     }
-    if (res.status === 422) {
+    // Strava returns 400 with errors[].code='already exists' when subscription already exists
+    // Older API returned 422. Both mean "already registered" which is fine.
+    const alreadyExists =
+      res.status === 422 ||
+      (res.status === 400 &&
+        Array.isArray(data?.errors) &&
+        data.errors.some((e: any) => e?.code === 'already exists'));
+    if (alreadyExists) {
+      // Try to fetch the existing subscription ID
+      try {
+        const listRes = await fetch(
+          `https://www.strava.com/api/v3/push_subscriptions?client_id=${this.clientId}&client_secret=${this.clientSecret}`,
+          { signal: AbortSignal.timeout(10000) },
+        );
+        if (listRes.ok) {
+          const subs = await listRes.json() as any[];
+          const existingId = Array.isArray(subs) && subs[0]?.id;
+          return {
+            status: 'already_registered',
+            subscriptionId: existingId,
+            message: 'Webhook já está registrado no Strava',
+          };
+        }
+      } catch {}
       return { status: 'already_registered', message: 'Webhook já está registrado no Strava' };
     }
     this.logger.error(`Strava webhook registration failed: ${res.status} ${JSON.stringify(data)}`);
