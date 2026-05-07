@@ -29,6 +29,12 @@ export class SubmitOnboardingDto {
   @ApiProperty({ description: 'Respostas do questionário (chave = ID da pergunta)' })
   @IsObject({ message: 'Respostas devem ser um objeto' })
   answers: Record<string, any>;
+
+  @ApiPropertyOptional({ description: 'Código de indicação (opcional)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  referralCode?: string;
 }
 
 export class CreateCheckoutDto {

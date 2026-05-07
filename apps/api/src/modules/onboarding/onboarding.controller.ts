@@ -37,6 +37,7 @@ export class OnboardingController {
       athleteEmail: body.athleteEmail,
       athletePhone: body.athletePhone,
       answers: body.answers,
+      referralCode: body.referralCode,
     });
   }
 

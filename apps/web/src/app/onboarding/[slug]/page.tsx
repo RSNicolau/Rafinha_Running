@@ -69,9 +69,19 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
   };
   const [athleteId, setAthleteId] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<'mensal' | 'trimestral' | 'semestral'>('mensal');
+  const [referralInfo, setReferralInfo] = useState<{ valid: boolean; referrerName?: string; refereeRewardCents?: number } | null>(null);
 
   useEffect(() => {
     if (searchParams.get('payment') === 'success') setStep('success');
+  }, [searchParams]);
+
+  // Validate referral code from URL
+  useEffect(() => {
+    const ref = searchParams.get('ref');
+    if (!ref) return;
+    api.get(`/v1/referrals/public/validate/${ref}`)
+      .then(r => setReferralInfo(r.data))
+      .catch(() => setReferralInfo({ valid: false }));
   }, [searchParams]);
 
   useEffect(() => {
@@ -118,11 +128,13 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
     if (!athlete.name.trim() || !athlete.email.trim()) { setSubmitError('Nome e e-mail são obrigatórios'); return; }
     setSubmitError(''); setSubmitting(true);
     try {
+      const refCode = searchParams.get('ref') || undefined;
       const res = await api.post(`/v1/onboarding/public/${slug}/submit`, {
         athleteName: athlete.name,
         athleteEmail: athlete.email,
         athletePhone: athlete.phone || undefined,
         answers,
+        referralCode: refCode,
       });
       setAthleteId(res.data.athleteId);
       setStep('plan');
@@ -312,6 +324,13 @@ export default function OnboardingPage({ params }: { params: { slug: string } })
   if (step === 'intro') {
     return (
       <div className="min-h-screen" style={{ background: PAGE }}>
+        {/* Referral banner */}
+        {referralInfo?.valid && (
+          <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 text-white px-4 py-3 text-center text-sm font-semibold">
+            🎁 <strong>{referralInfo.referrerName}</strong> te indicou! Você ganha{' '}
+            <strong>R$ {((referralInfo.refereeRewardCents ?? 3000) / 100).toFixed(0)} de desconto</strong> na primeira mensalidade.
+          </div>
+        )}
         {/* Hero vermelho */}
         <div className="relative overflow-hidden py-12 text-center" style={{ background: '#CC1F1A' }}>
           <div className="relative">

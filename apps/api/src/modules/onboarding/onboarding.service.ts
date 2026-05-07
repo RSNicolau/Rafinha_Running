@@ -5,6 +5,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { PaymentsService } from '../payments/payments.service';
+import { ReferralsService } from '../referrals/referrals.service';
 import { OnboardingStatus, QuestionType, PaymentProvider, SubscriptionPlanType } from '@prisma/client';
 
 const DEFAULT_QUESTIONS = [
@@ -46,6 +47,7 @@ export class OnboardingService {
     private prisma: PrismaService,
     private emailService: EmailService,
     private paymentsService: PaymentsService,
+    private referralsService: ReferralsService,
   ) {}
 
   // ──────────────────────────────────────
@@ -231,6 +233,7 @@ export class OnboardingService {
     athleteEmail: string;
     athletePhone?: string;
     answers: Record<string, any>;
+    referralCode?: string;
   }) {
     const coach = await this.prisma.user.findFirst({
       where: {
@@ -249,6 +252,7 @@ export class OnboardingService {
     athleteEmail: string;
     athletePhone?: string;
     answers: Record<string, any>;
+    referralCode?: string;
   }) {
     // Create or find athlete user
     let athlete = await this.prisma.user.findUnique({ where: { email: data.athleteEmail } });
@@ -278,6 +282,13 @@ export class OnboardingService {
     if (isNewAthlete && tempPassword) {
       this.emailService.sendAthleteCredentials(athlete.email ?? '', athlete.name, tempPassword).catch(err =>
         this.logger.error(`Failed to send athlete credentials email: ${err.message}`),
+      );
+    }
+
+    // Link referral if code provided (PENDING — credit on first payment)
+    if (isNewAthlete && data.referralCode) {
+      this.referralsService.linkRefereeOnSignup(athlete.id, data.athleteEmail, data.referralCode).catch(err =>
+        this.logger.error(`Failed to link referral: ${err.message}`),
       );
     }
 

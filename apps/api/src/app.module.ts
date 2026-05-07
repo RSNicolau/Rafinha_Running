@@ -40,6 +40,7 @@ import { UploadsModule } from './modules/uploads/uploads.module';
 import { AthleteDocumentsModule } from './modules/athlete-documents/athlete-documents.module';
 import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 import { TestimonialsModule } from './modules/testimonials/testimonials.module';
+import { ReferralsModule } from './modules/referrals/referrals.module';
 
 @Module({
   imports: [
@@ -94,6 +95,7 @@ import { TestimonialsModule } from './modules/testimonials/testimonials.module';
     AthleteDocumentsModule,
     WhatsappModule,
     TestimonialsModule,
+    ReferralsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: CustomThrottlerGuard },

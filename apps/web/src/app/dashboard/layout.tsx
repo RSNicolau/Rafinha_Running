@@ -39,6 +39,7 @@ const navItems = [
   { href: '/dashboard/athlete/schedule', label: 'Agendar Sessão', icon: 'calendar', roles: ['ATHLETE'] },
   { href: '/dashboard/athlete/documents', label: 'Meus Documentos', icon: 'documents', roles: ['ATHLETE'] },
   { href: '/dashboard/athlete/testimonial', label: 'Meu Depoimento', icon: 'star', roles: ['ATHLETE'] },
+  { href: '/dashboard/athlete/referrals', label: 'Indicar Amigos', icon: 'gift', roles: ['ATHLETE'] },
   { href: '/dashboard/chat', label: 'Chat', icon: 'chat', roles: ['ATHLETE'] },
   { href: '/dashboard/integrations', label: 'Integrações', icon: 'integrations', roles: ['ATHLETE'] },
 ];
@@ -160,6 +161,11 @@ function NavIcon({ name, className }: { name: string; className?: string }) {
     documents: (
       <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+      </svg>
+    ),
+    gift: (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M21 11.25v8.25a1.5 1.5 0 01-1.5 1.5H5.25a1.5 1.5 0 01-1.5-1.5v-8.25M12 4.875A2.625 2.625 0 109.375 7.5H12m0-2.625V7.5m0-2.625A2.625 2.625 0 1114.625 7.5H12m0 0V21m-8.625-9.75h18c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125h-18c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
       </svg>
     ),
     guide: (

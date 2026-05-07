@@ -190,11 +190,17 @@ model User {
   // Profile banner
   bannerUrl    String?   @map("banner_url")
 
+  // Referral program
+  referralCode        String? @unique @map("referral_code")        // unique code shared in invite links
+  referredByCode      String? @map("referred_by_code")             // code of the user who referred this user
+  referralCreditCents Int     @default(0) @map("referral_credit_cents") // accumulated credit (BRL cents)
+
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
   @@index([role])
   @@index([isActive])
+  @@index([referralCode])
 
   coachProfile   CoachProfile?
   athleteProfile AthleteProfile?
@@ -249,6 +255,10 @@ model User {
   whatsappConfig        WhatsappConfig?
   athleteTestimonials   Testimonial[]          @relation("AthleteTestimonials")
   coachTestimonials     Testimonial[]          @relation("CoachTestimonials")
+
+  // Referrals
+  referralsAsReferrer   Referral[]             @relation("ReferralReferrer")
+  referralAsReferee     Referral?              @relation("ReferralReferee")
 
   @@map("users")
 }
@@ -1387,4 +1397,34 @@ model AthleteDocument {
   @@index([athleteId])
   @@index([coachId])
   @@map("athlete_documents")
+}
+
+model Referral {
+  id                  String         @id @default(uuid())
+  referrerId          String         @map("referrer_id")           // athlete who shared the link
+  refereeId           String?        @unique @map("referee_id")    // athlete who signed up via link
+  code                String         @map("code")                  // referrer's referralCode
+  status              ReferralStatus @default(PENDING)
+  rewardCents         Int            @default(5000) @map("reward_cents")           // R$50 to referrer
+  refereeRewardCents  Int            @default(3000) @map("referee_reward_cents")    // R$30 to referee
+  refereeEmail        String?        @map("referee_email")          // captured at signup
+  paidAt              DateTime?      @map("paid_at")                // when referee made first payment
+  creditedAt          DateTime?      @map("credited_at")            // when referrer credit was applied
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
+
+  referrer User  @relation("ReferralReferrer", fields: [referrerId], references: [id])
+  referee  User? @relation("ReferralReferee",  fields: [refereeId],  references: [id])
+
+  @@index([referrerId])
+  @@index([code])
+  @@index([status])
+  @@map("referrals")
+}
+
+enum ReferralStatus {
+  PENDING       // signup completed, no payment yet
+  PAID          // referee paid, both rewards earned
+  CREDITED      // referrer's reward applied to subscription
+  CANCELLED     // referee cancelled before paying
 }
