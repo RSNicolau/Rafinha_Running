@@ -25,7 +25,7 @@ export class NutritionService {
 
     try {
       const msg = await this.anthropic.messages.create({
-        model: 'claude-haiku-4-5',
+        model: 'claude-haiku-4-6',
         max_tokens: 300,
         system: `Você é um nutricionista especializado em nutrição esportiva para corredores.
 Analise a descrição de alimento e retorne SOMENTE um JSON válido com os macronutrientes estimados.

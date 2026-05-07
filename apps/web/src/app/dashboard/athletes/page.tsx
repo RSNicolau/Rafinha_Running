@@ -74,8 +74,8 @@ export default function AthletesPage() {
   }, [isDemoMode]);
 
   const filtered = athletes.filter((a) =>
-    (a.user.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (a.user.email ?? '').toLowerCase().includes(search.toLowerCase())
+    (a?.user?.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
+    (a?.user?.email ?? '').toLowerCase().includes(search.toLowerCase())
   );
 
   const handleSendInvite = async (e: React.FormEvent) => {
@@ -201,18 +201,18 @@ export default function AthletesPage() {
               filtered.map((athlete) => (
                 <tr key={athlete.id} className="hover:bg-gray-50/50 transition">
                   <td className="px-5 py-4">
-                    <Link href={`/dashboard/athletes/${athlete.user.id}`} className="flex items-center gap-3">
+                    <Link href={`/dashboard/athletes/${athlete?.user?.id ?? athlete.id}`} className="flex items-center gap-3">
                       <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                         <span className="text-xs font-semibold text-primary">
-                          {athlete.user.name?.charAt(0)}
+                          {athlete?.user?.name?.charAt(0) ?? '?'}
                         </span>
                       </div>
                       <span className="text-sm font-medium text-gray-900 hover:text-primary transition">
-                        {athlete.user.name}
+                        {athlete?.user?.name ?? 'Atleta'}
                       </span>
                     </Link>
                   </td>
-                  <td className="px-5 py-4 text-sm text-gray-500">{athlete.user.email}</td>
+                  <td className="px-5 py-4 text-sm text-gray-500">{athlete?.user?.email ?? '—'}</td>
                   <td className="px-5 py-4">
                     <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-primary/8 text-primary">
                       {athlete.level}

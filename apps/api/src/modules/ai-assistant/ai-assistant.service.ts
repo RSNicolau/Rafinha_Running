@@ -242,7 +242,7 @@ REGRAS:
         }
 
         const stream = this.anthropicClient.messages.stream({
-          model: 'claude-opus-4-5',
+          model: 'claude-opus-4-6',
           max_tokens: 2048,
           system: systemPrompt + contextAddition,
           messages: anthropicMessages,
@@ -304,7 +304,7 @@ REGRAS:
     const systemPrompt = await this.getSystemPrompt(coachId);
     if (this.useAnthropic()) {
       const msg = await this.anthropicClient.messages.create({
-        model: 'claude-opus-4-5',
+        model: 'claude-opus-4-6',
         max_tokens: 4096,
         system: systemPrompt,
         messages: [{ role: 'user', content: `Crie um plano de treino detalhado para o atleta ${dto.athleteId}, com duração de ${dto.durationWeeks} semanas, objetivo: ${dto.goal}. Data de início: ${dto.startDate ?? 'hoje'}.` }],
@@ -333,7 +333,7 @@ REGRAS:
 
     if (this.useAnthropic()) {
       const msg = await this.anthropicClient.messages.create({
-        model: 'claude-haiku-4-5',
+        model: 'claude-haiku-4-6',
         max_tokens: 512,
         system: systemPrompt,
         messages: [{ role: 'user', content: prompt }],
