@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/lib/api';
+import { AdminPreviewBanner } from '@/components/AdminPreviewBanner';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -701,7 +702,11 @@ export default function AthletePortalPage() {
   const [feedbackWorkout, setFeedbackWorkout] = useState<Workout | null>(null);
 
   useEffect(() => { loadUser(); }, []);
-  useEffect(() => { if (!authLoading && !isAuthenticated) router.replace('/athlete-login'); }, [isAuthenticated, authLoading]);
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) router.replace('/athlete-login');
+    // ADMIN preview mode: allow ADMIN/SUPER_ADMIN to view athlete UI
+    // (no redirect even if user.role is not ATHLETE)
+  }, [isAuthenticated, authLoading]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -728,6 +733,7 @@ export default function AthletePortalPage() {
 
   return (
     <div className="min-h-screen bg-[#F7F7F8] pb-24">
+      <AdminPreviewBanner />
       {/* Header */}
       <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-gray-100 px-5 py-4">
         <div className="max-w-2xl mx-auto">

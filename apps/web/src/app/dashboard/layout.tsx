@@ -296,7 +296,25 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
       </nav>
 
       {/* User */}
-      <div className="p-3 border-t border-gray-100 shrink-0">
+      <div className="p-3 border-t border-gray-100 shrink-0 space-y-2">
+        {/* View as Athlete (admin only) */}
+        {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
+          <button
+            onClick={() => {
+              localStorage.setItem('rr_view_as_athlete', 'true');
+              window.location.href = '/athlete';
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 text-xs font-semibold transition cursor-pointer"
+            title="Visualizar a interface como um atleta veria"
+          >
+            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            Ver como Atleta
+          </button>
+        )}
+
         <div className="flex items-center gap-3 px-3 py-2">
           <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden border border-primary/10">
             {(user as any)?.avatarUrl ? (
