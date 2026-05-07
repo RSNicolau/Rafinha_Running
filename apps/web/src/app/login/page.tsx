@@ -50,7 +50,7 @@ function LoginContent() {
       api.get('/users/me')
         .then(({ data: me }) => {
           if (me?.role === 'SUPER_ADMIN') { router.replace('/super-admin'); return; }
-          if (me?.role === 'ADMIN') { router.replace('/dashboard/admin/plans'); return; }
+          if (me?.role === 'ADMIN') { router.replace('/dashboard'); return; }
           // COACH goes straight to dashboard — no subscription required
           if (BYPASS_SUBSCRIPTION_ROLES.includes(me?.role)) { router.replace('/dashboard'); return; }
           // Athlete flow
@@ -93,7 +93,7 @@ function LoginContent() {
         const meRes = await api.get('/users/me');
         const role = meRes.data?.role;
         if (role === 'SUPER_ADMIN') { router.replace('/super-admin'); return; }
-        if (role === 'ADMIN') { router.replace('/dashboard/admin/plans'); return; }
+        if (role === 'ADMIN') { router.replace('/dashboard'); return; }
         // COACH and other bypass roles go straight to dashboard — no subscription required
         if (BYPASS_SUBSCRIPTION_ROLES.includes(role)) { router.replace('/dashboard'); return; }
         // Athlete flow
