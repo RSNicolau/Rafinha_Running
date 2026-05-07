@@ -195,7 +195,10 @@ export default function IntegrationsPage() {
     setSettingUpWebhook(true);
     setWebhookMsg(null);
     try {
-      const { data } = await api.post('/integrations/strava/setup-webhook');
+      // Use Vercel proxy URL (which forwards to Railway) — direct Railway URL has 500 routing issue
+      // The callback will be ${apiBaseUrl}/webhooks/strava
+      const apiBaseUrl = `${window.location.origin}/api/v1`;
+      const { data } = await api.post('/integrations/strava/setup-webhook', { apiBaseUrl });
       setWebhookMsg(
         data.status === 'registered'
           ? `✓ Webhook Strava registrado! (ID: ${data.subscriptionId})`
@@ -214,7 +217,8 @@ export default function IntegrationsPage() {
     setSettingUpPolarWebhook(true);
     setPolarWebhookMsg(null);
     try {
-      const { data } = await api.post('/integrations/polar/setup-webhook');
+      const apiBaseUrl = `${window.location.origin}/api/v1`;
+      const { data } = await api.post('/integrations/polar/setup-webhook', { apiBaseUrl });
       setPolarWebhookMsg(
         data.status === 'registered'
           ? `✓ Webhook Polar registrado! (ID: ${data.webhookId})`
