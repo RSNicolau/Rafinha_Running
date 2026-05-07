@@ -68,7 +68,11 @@ export default function PlansPage() {
   const load = () => {
     setLoadError(false);
     api.get('/training-plans')
-      .then(({ data }) => setPlans(data))
+      .then(({ data }) => {
+        // API might return { data: [...], pagination } OR just an array
+        const list = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+        setPlans(list);
+      })
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   };

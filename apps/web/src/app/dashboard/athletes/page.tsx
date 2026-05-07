@@ -51,7 +51,10 @@ export default function AthletesPage() {
     }
     setLoadError(false);
     api.get('/users/athletes')
-      .then(({ data }) => setAthletes(data))
+      .then(({ data }) => {
+        const list = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+        setAthletes(list);
+      })
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   };
