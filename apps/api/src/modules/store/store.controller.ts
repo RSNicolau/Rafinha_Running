@@ -69,9 +69,9 @@ export class StoreController {
   @ApiBearerAuth()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  @ApiOperation({ summary: 'Listar todos os produtos do coach' })
-  listCoachProducts(@CurrentUser('id') coachId: string) {
-    return this.storeService.listCoachProducts(coachId);
+  @ApiOperation({ summary: 'Listar produtos (coach: próprios; admin: todos)' })
+  listCoachProducts(@CurrentUser('id') userId: string, @CurrentUser('role') role: UserRole) {
+    return this.storeService.listCoachProducts(userId, role);
   }
 
   @Post('products')
@@ -138,10 +138,11 @@ export class StoreController {
   @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Listar pedidos do coach' })
   listOrders(
-    @CurrentUser('id') coachId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: UserRole,
     @Query('status') status?: StoreOrderStatus,
   ) {
-    return this.storeService.listCoachOrders(coachId, status);
+    return this.storeService.listCoachOrders(userId, status, role);
   }
 
   @Put('orders/:id/status')
@@ -162,8 +163,8 @@ export class StoreController {
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Estatísticas da loja' })
-  getStats(@CurrentUser('id') coachId: string) {
-    return this.storeService.getStoreStats(coachId);
+  getStats(@CurrentUser('id') userId: string, @CurrentUser('role') role: UserRole) {
+    return this.storeService.getStoreStats(userId, role);
   }
 
   // ── COUPONS ──

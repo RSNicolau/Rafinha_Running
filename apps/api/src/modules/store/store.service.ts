@@ -80,9 +80,13 @@ export class StoreService {
     }));
   }
 
-  async listCoachProducts(coachId: string) {
+  async listCoachProducts(userId: string, role?: string) {
+    // ADMIN/SUPER_ADMIN see all products across the platform
+    const where = role === 'ADMIN' || role === 'SUPER_ADMIN'
+      ? {}
+      : { coachId: userId };
     return this.prisma.product.findMany({
-      where: { coachId },
+      where,
       orderBy: { createdAt: 'desc' },
       include: {
         _count: { select: { orders: true } },
@@ -234,10 +238,12 @@ export class StoreService {
     return order;
   }
 
-  async listCoachOrders(coachId: string, status?: StoreOrderStatus) {
+  async listCoachOrders(userId: string, status?: StoreOrderStatus, role?: string) {
+    // ADMIN/SUPER_ADMIN see all orders across the platform
+    const productFilter = role === 'ADMIN' || role === 'SUPER_ADMIN' ? {} : { coachId: userId };
     return this.prisma.storeOrder.findMany({
       where: {
-        product: { coachId },
+        product: productFilter,
         ...(status ? { status } : {}),
       },
       orderBy: { createdAt: 'desc' },
@@ -287,12 +293,15 @@ export class StoreService {
   }
 
   // Stats for dashboard
-  async getStoreStats(coachId: string) {
+  async getStoreStats(userId: string, role?: string) {
+    const isAdmin = role === 'ADMIN' || role === 'SUPER_ADMIN';
+    const productWhere = isAdmin ? { active: true } : { coachId: userId, active: true };
+    const orderProductFilter = isAdmin ? {} : { coachId: userId };
     const [products, orders, revenue] = await Promise.all([
-      this.prisma.product.count({ where: { coachId, active: true } }),
-      this.prisma.storeOrder.count({ where: { product: { coachId } } }),
+      this.prisma.product.count({ where: productWhere }),
+      this.prisma.storeOrder.count({ where: { product: orderProductFilter } }),
       this.prisma.storeOrder.aggregate({
-        where: { product: { coachId }, status: { in: ['PAID', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] } },
+        where: { product: orderProductFilter, status: { in: ['PAID', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] } },
         _sum: { totalInCents: true },
       }),
     ]);
