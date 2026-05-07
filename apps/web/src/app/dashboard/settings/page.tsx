@@ -608,18 +608,18 @@ export default function SettingsPage() {
 
               {/* Avatar + info */}
               <div className="px-6 pb-6">
-                <div className="flex items-end gap-4 -mt-8 mb-5">
-                  {/* Avatar */}
-                  <div className="relative shrink-0">
+                <div className="flex items-end gap-4 mb-5">
+                  {/* Avatar — only this overlaps the banner */}
+                  <div className="relative shrink-0 -mt-10">
                     <div
-                      className="w-16 h-16 rounded-full border-4 border-white bg-primary/10 flex items-center justify-center cursor-pointer group overflow-hidden shadow-md"
+                      className="w-20 h-20 rounded-full border-4 border-white bg-primary/10 flex items-center justify-center cursor-pointer group overflow-hidden shadow-md"
                       onClick={() => avatarInputRef.current?.click()}
                       title="Clique para alterar a foto"
                     >
                       {avatarUrl ? (
                         <img src={avatarUrl} alt={displayName} className="w-full h-full object-cover" />
                       ) : (
-                        <span className="text-2xl font-bold text-primary">{displayInitial}</span>
+                        <span className="text-3xl font-bold text-primary">{displayInitial}</span>
                       )}
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100">
                         {uploadingAvatar ? (
