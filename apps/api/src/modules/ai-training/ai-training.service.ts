@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WorkoutType, HeartRateZone, AthleteLevel, WorkoutStatus } from '@prisma/client';
 import { GeneratePlanDto, TrainingGoal } from './dto/generate-plan.dto';
+import Anthropic from '@anthropic-ai/sdk';
 
 interface WorkoutTemplate {
   type: WorkoutType;
@@ -17,8 +18,76 @@ interface WorkoutTemplate {
 @Injectable()
 export class AiTrainingService {
   private readonly logger = new Logger(AiTrainingService.name);
+  private anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? '' });
 
   constructor(private prisma: PrismaService) {}
+
+  /**
+   * Humanize plan with Claude — produces Rafinha-style coaching narrative
+   * for the plan description AND for each workout note.
+   * Falls back to rule-based descriptions if Claude fails.
+   */
+  private async humanizeWithClaude(args: {
+    athleteName: string;
+    athleteLevel: string;
+    goal: string;
+    weeks: number;
+    weeklyKmActual: number;
+    avgPaceSeconds: number | null;
+    avgRpe: number;
+    avgSensation: number;
+    onboardingProfile?: any;
+  }): Promise<{ description: string | null; weeklyNarratives: string[] | null }> {
+    if (!process.env.ANTHROPIC_API_KEY) return { description: null, weeklyNarratives: null };
+
+    const onboardingSummary = args.onboardingProfile?.aiSummary
+      ? `Resumo do atleta: ${args.onboardingProfile.aiSummary}`
+      : '';
+
+    const prompt = `Você é o coach Rafinha — direto, ardido, técnico e humano. Estilo de fala: motivador sem ser piegas, objetivo, com gírias de corredor brasileiro ("vamo", "tira", "bota pra correr", "no ritmo").
+
+Crie a NARRATIVA do plano de treino em JSON:
+
+DADOS DO ATLETA:
+- Nome: ${args.athleteName}
+- Nível: ${args.athleteLevel}
+- Objetivo: ${args.goal}
+- Duração: ${args.weeks} semanas
+- Volume atual: ${args.weeklyKmActual.toFixed(0)} km/semana
+- Pace médio: ${args.avgPaceSeconds ? `${Math.floor(args.avgPaceSeconds / 60)}:${String(Math.floor(args.avgPaceSeconds % 60)).padStart(2, '0')}/km` : 'sem dados'}
+- RPE médio recente: ${args.avgRpe.toFixed(1)}/10
+- Sensação média: ${args.avgSensation.toFixed(1)}/5
+${onboardingSummary}
+
+RETORNE APENAS UM JSON VÁLIDO no formato:
+{
+  "description": "<descrição do plano em 2-3 frases, tom Rafinha, mencionando o nome do atleta e o objetivo concreto. Ex: 'Plano de 8 semanas pra você quebrar os 50min nos 10K, João. Vamo construir base sólida nas 3 primeiras semanas e depois afiar o ritmo.'>",
+  "weeklyNarratives": [
+    "<narrativa curta da semana 1, 1-2 frases, tom motivador>",
+    "<narrativa semana 2>",
+    ... (uma para cada uma das ${args.weeks} semanas)
+  ]
+}`;
+
+    try {
+      const msg = await this.anthropic.messages.create({
+        model: 'claude-opus-4-6',
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const text = (msg.content[0] as any)?.text ?? '';
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return { description: null, weeklyNarratives: null };
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        description: parsed.description ?? null,
+        weeklyNarratives: Array.isArray(parsed.weeklyNarratives) ? parsed.weeklyNarratives : null,
+      };
+    } catch (err: any) {
+      this.logger.warn(`Claude humanization failed, using rule-based fallback: ${err.message}`);
+      return { description: null, weeklyNarratives: null };
+    }
+  }
 
   /**
    * Analyze athlete data and generate a training plan.
@@ -129,12 +198,34 @@ export class AiTrainingService {
 
     // Otherwise create a new plan
     const planName = this.getPlanName(dto.goal, dto.weeks);
+
+    // Try to load onboarding profile for richer Claude context
+    const onboardingProfile = await this.prisma.onboardingProfile.findUnique({
+      where: { athleteId: dto.athleteId },
+      select: { aiSummary: true },
+    }).catch(() => null);
+
+    // Humanize description with Claude (falls back to rule-based if Claude fails)
+    const humanized = await this.humanizeWithClaude({
+      athleteName: athlete.name,
+      athleteLevel: level,
+      goal: dto.goal,
+      weeks: dto.weeks,
+      weeklyKmActual,
+      avgPaceSeconds,
+      avgRpe,
+      avgSensation,
+      onboardingProfile,
+    });
+
+    const description = humanized.description ?? this.getPlanDescription(dto.goal, level, dto.weeks);
+
     const plan = await this.prisma.trainingPlan.create({
       data: {
         coachId,
         athleteId: dto.athleteId,
         name: planName,
-        description: this.getPlanDescription(dto.goal, level, dto.weeks),
+        description,
         startDate,
         endDate,
         weeklyFrequency: weeklyStructure.frequency,
@@ -149,6 +240,9 @@ export class AiTrainingService {
     return {
       planId: plan.id,
       planName,
+      planDescription: description,
+      weeklyNarratives: humanized.weeklyNarratives ?? null,
+      humanized: humanized.description !== null,
       generatedWorkouts: planWorkouts.length,
       weeks: dto.weeks,
       goal: dto.goal,

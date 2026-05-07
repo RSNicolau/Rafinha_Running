@@ -25,7 +25,11 @@ export default function CreatePlanPage() {
 
   useEffect(() => {
     api.get('/users/athletes')
-      .then(({ data }) => setAthletes(data))
+      .then(({ data }) => {
+        const list = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+        // Filter out malformed entries (missing user object)
+        setAthletes(list.filter((a: any) => a?.user?.id && a?.user?.name));
+      })
       .catch(() => setAthletesError(true));
   }, []);
 
@@ -242,7 +246,40 @@ export default function CreatePlanPage() {
                 <h4 className="text-sm font-bold text-emerald-800">Plano gerado com sucesso!</h4>
               </div>
               <p className="text-base font-semibold text-gray-900 mb-1">{aiResult.planName}</p>
-              <p className="text-sm text-gray-500 mb-4">{aiResult.generatedWorkouts} treinos · {aiResult.weeks} semanas</p>
+              <p className="text-sm text-gray-500 mb-3">{aiResult.generatedWorkouts} treinos · {aiResult.weeks} semanas</p>
+
+              {/* Humanized description (Rafinha voice) */}
+              {aiResult.planDescription && (
+                <div className="mb-4 p-4 rounded-xl bg-white border-l-4 border-primary">
+                  {aiResult.humanized && (
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <svg className="w-3.5 h-3.5 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                      </svg>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-primary">Voz do Rafinha</span>
+                    </div>
+                  )}
+                  <p className="text-sm text-gray-700 leading-relaxed">{aiResult.planDescription}</p>
+                </div>
+              )}
+
+              {/* Weekly narratives */}
+              {aiResult.weeklyNarratives && aiResult.weeklyNarratives.length > 0 && (
+                <details className="mb-4">
+                  <summary className="cursor-pointer text-xs font-semibold text-gray-500 hover:text-gray-700 mb-2">
+                    📖 Narrativa semana-a-semana ({aiResult.weeklyNarratives.length} semanas)
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    {aiResult.weeklyNarratives.map((narrative: string, i: number) => (
+                      <div key={i} className="flex gap-3 p-3 rounded-lg bg-white border border-gray-100">
+                        <span className="text-xs font-bold text-primary shrink-0 w-12">Sem {i + 1}</span>
+                        <p className="text-xs text-gray-600 leading-relaxed">{narrative}</p>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+
               <div className="grid grid-cols-3 gap-3 mb-4">
                 {[
                   { label: 'Nível', value: aiResult.level },
