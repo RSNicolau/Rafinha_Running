@@ -38,7 +38,7 @@ export class PaymentsService {
     private mercadoPagoService: MercadoPagoService,
   ) {}
 
-  async createSubscription(userId: string, dto: CreateSubscriptionDto) {
+  async createSubscription(userId: string, dto: CreateSubscriptionDto & { discountCents?: number }) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('Usuário não encontrado');
 
@@ -53,7 +53,7 @@ export class PaymentsService {
       .digest('hex');
 
     if (dto.provider === PaymentProvider.MERCADO_PAGO) {
-      return this.mercadoPagoService.createSubscription(userId, user.email, user.name, dto.planType, idempotencyKey);
+      return this.mercadoPagoService.createSubscription(userId, user.email, user.name, dto.planType, idempotencyKey, dto.discountCents ?? 0);
     }
 
     return this.stripeService.createSubscription(userId, user.email, user.name, dto.planType, idempotencyKey);

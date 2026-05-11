@@ -4,10 +4,12 @@ import { PaymentsController } from './payments.controller';
 import { StripeService } from './stripe/stripe.service';
 import { MercadoPagoService } from './mercadopago/mercadopago.service';
 import { PagarmeService } from './pagarme/pagarme.service';
+import { ReferralsModule } from '../referrals/referrals.module';
 
 @Module({
+  imports: [ReferralsModule],
   controllers: [PaymentsController],
   providers: [PaymentsService, StripeService, MercadoPagoService, PagarmeService],
-  exports: [PaymentsService, PagarmeService],
+  exports: [PaymentsService, PagarmeService, MercadoPagoService],
 })
 export class PaymentsModule {}

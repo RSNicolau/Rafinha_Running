@@ -1,10 +1,23 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { ReferralsService } from '../../referrals/referrals.service';
 import {
   SubscriptionStatus, PaymentProvider, PaymentStatus,
   SubscriptionPlanType,
 } from '@prisma/client';
+
+// Plan amounts (full price) used by both createSubscription and webhook restore
+const PLAN_FULL_AMOUNTS: Record<string, number> = {
+  MONTHLY:    174.00,
+  QUARTERLY:  495.00,
+  SEMIANNUAL: 960.00,
+  ANNUAL:     960.00,
+  TRIAL:      0,
+};
+const PLAN_FULL_FREQUENCY: Record<string, number> = {
+  MONTHLY: 1, QUARTERLY: 3, SEMIANNUAL: 6, ANNUAL: 12, TRIAL: 1,
+};
 
 @Injectable()
 export class MercadoPagoService {
@@ -12,7 +25,10 @@ export class MercadoPagoService {
   private readonly accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN || '';
   private readonly webhookSecret = process.env.MERCADO_PAGO_WEBHOOK_SECRET || '';
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private referralsService: ReferralsService,
+  ) {}
 
   async createSubscription(
     userId: string,
@@ -20,25 +36,14 @@ export class MercadoPagoService {
     name: string,
     planType: SubscriptionPlanType,
     idempotencyKey?: string,
+    discountCents: number = 0,
   ) {
-    // Plan amounts in BRL
-    const PLAN_AMOUNTS: Record<string, number> = {
-      MONTHLY:    174.00,
-      QUARTERLY:  495.00,
-      SEMIANNUAL: 960.00,
-      ANNUAL:     960.00,
-      TRIAL:      0,
-    };
-    // Billing frequency in months
-    const PLAN_FREQUENCY: Record<string, number> = {
-      MONTHLY:    1,
-      QUARTERLY:  3,
-      SEMIANNUAL: 6,
-      ANNUAL:     12,
-      TRIAL:      1,
-    };
-    const amount    = PLAN_AMOUNTS[planType]   ?? 174.00;
-    const frequency = PLAN_FREQUENCY[planType] ?? 1;
+    const fullAmount = PLAN_FULL_AMOUNTS[planType]   ?? 174.00;
+    const frequency  = PLAN_FULL_FREQUENCY[planType] ?? 1;
+    // Apply one-time referral discount on first cycle (revert on first paid webhook)
+    const discount = Math.min(Math.max(discountCents, 0) / 100, fullAmount - 1); // never zero
+    const amount   = Number((fullAmount - discount).toFixed(2));
+    const hasDiscount = discount > 0;
 
     if (!this.accessToken) {
       this.logger.warn('MERCADO_PAGO_ACCESS_TOKEN não configurado');
@@ -74,6 +79,10 @@ export class MercadoPagoService {
     }
 
     const preapprovalData: any = await res.json();
+
+    if (hasDiscount) {
+      this.logger.log(`Preapproval ${preapprovalData.id}: first-cycle discount R$${discount.toFixed(2)} applied (will revert to R$${fullAmount.toFixed(2)} after first payment)`);
+    }
 
     await this.prisma.subscription.create({
       data: {
@@ -253,11 +262,44 @@ export class MercadoPagoService {
       }).catch(() => {}); // Ignore duplicate
 
       // Activate subscription on successful payment
-      if (status === PaymentStatus.SUCCEEDED && subscription.status !== SubscriptionStatus.ACTIVE) {
+      const wasInactive = subscription.status !== SubscriptionStatus.ACTIVE;
+      if (status === PaymentStatus.SUCCEEDED && wasInactive) {
         await this.prisma.subscription.update({
           where: { id: subscription.id },
           data: { status: SubscriptionStatus.ACTIVE },
         });
+
+        // (A) Auto-credit referral on first successful payment
+        try {
+          await this.referralsService.creditOnFirstPayment(subscription.userId);
+        } catch (e: any) {
+          this.logger.warn(`Falha ao creditar referral: ${e.message}`);
+        }
+
+        // (C) Restore preapproval price to full plan amount (in case first cycle had referral discount)
+        try {
+          const fullAmount = PLAN_FULL_AMOUNTS[subscription.planType] ?? 0;
+          const currentAmount = Number(payment.transaction_amount);
+          if (fullAmount > 0 && currentAmount + 0.01 < fullAmount) {
+            await fetch(`https://api.mercadopago.com/preapproval/${preapprovalId}`, {
+              method: 'PUT',
+              signal: AbortSignal.timeout(10000),
+              headers: {
+                Authorization: `Bearer ${this.accessToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                auto_recurring: {
+                  transaction_amount: fullAmount,
+                  currency_id: 'BRL',
+                },
+              }),
+            });
+            this.logger.log(`Preapproval ${preapprovalId}: price restored to R$${fullAmount.toFixed(2)} after first payment`);
+          }
+        } catch (e: any) {
+          this.logger.warn(`Falha ao restaurar preço cheio do preapproval: ${e.message}`);
+        }
       }
     } catch (err: any) {
       this.logger.error(`Erro ao processar pagamento MP ${paymentId}: ${err.message}`);

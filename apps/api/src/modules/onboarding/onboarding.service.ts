@@ -493,12 +493,22 @@ Responda APENAS em JSON válido com a estrutura: { "summary": "...", "level": ".
     };
     const resolvedPlanType = planType ? (planTypeMap[planType] ?? SubscriptionPlanType.MONTHLY) : SubscriptionPlanType.MONTHLY;
 
+    // (C) Apply referral credit as one-time first-cycle discount; consume it now so it doesn't double-apply
+    const discountCents = athlete.referralCreditCents ?? 0;
+    if (discountCents > 0) {
+      await this.prisma.user.update({
+        where: { id: athleteId },
+        data: { referralCreditCents: 0 },
+      });
+    }
+
     const result = await this.paymentsService.createSubscription(athleteId, {
       provider: PaymentProvider.MERCADO_PAGO,
       planType: resolvedPlanType,
+      discountCents,
     });
 
-    return result;
+    return { ...result, discountApplied: discountCents };
   }
 
   // ──────────────────────────────────────
