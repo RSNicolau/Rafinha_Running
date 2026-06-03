@@ -20,7 +20,7 @@ const DEFAULT_QUESTIONS = [
   { order: 9, question: 'Quantos dias por semana você tem disponível para treinar?', type: QuestionType.SELECT, options: ['2 dias', '3 dias', '4 dias', '5 dias', '6 dias'], required: true },
   { order: 10, question: 'Qual horário você prefere treinar?', type: QuestionType.SELECT, options: ['Manhã (antes das 8h)', 'Manhã (8h-12h)', 'Tarde', 'Noite', 'Flexível'], required: true },
   { order: 11, question: 'Prefere esteira ou rua?', type: QuestionType.SELECT, options: ['Esteira', 'Rua', 'Indiferente'], required: true },
-  { order: 12, question: 'Possui relógio GPS?', type: QuestionType.SELECT, options: ['Garmin', 'Polar', 'Apple Watch', 'Coros', 'Outro', 'Não tenho'], required: false },
+  { order: 12, question: 'Possui relógio GPS?', type: QuestionType.SELECT, options: ['Garmin', 'Apple Watch', 'Coros', 'Outro', 'Não tenho'], required: false },
   { order: 13, question: 'Usa algum aplicativo de corrida?', type: QuestionType.SELECT, options: ['Strava', 'Garmin Connect', 'Nike Run Club', 'Nenhum', 'Outro'], required: false },
   { order: 14, question: 'Qual seu melhor tempo nos 5km? (ex: 25:30)', type: QuestionType.TIME, placeholder: '00:00', required: false },
   { order: 15, question: 'Qual seu melhor tempo nos 10km? (ex: 52:00)', type: QuestionType.TIME, placeholder: '00:00', required: false },

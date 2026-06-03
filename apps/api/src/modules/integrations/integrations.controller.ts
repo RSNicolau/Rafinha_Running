@@ -73,22 +73,6 @@ export class IntegrationsController {
     return this.integrationsService.setupStravaWebhook(baseUrl);
   }
 
-  // ── Polar Webhook Setup (ADMIN only) ──
-
-  @Post('polar/setup-webhook')
-  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  @ApiOperation({
-    summary: 'Registrar webhook do Polar AccessLink automaticamente',
-    description: 'Registra a URL de webhook no Polar AccessLink para receber exercícios em tempo real. ' +
-      'Execute uma vez após o deploy. Requer: POLAR_CLIENT_ID, POLAR_CLIENT_SECRET.',
-  })
-  async setupPolarWebhook(@Req() req: Request, @Body('apiBaseUrl') apiBaseUrl?: string) {
-    const baseUrl = apiBaseUrl
-      || process.env.API_BASE_URL
-      || `${req.protocol}://${req.get('host')}/api`;
-    return this.integrationsService.setupPolarWebhook(baseUrl);
-  }
-
   // ── Garmin Training API: Push workouts TO Garmin watch ──
 
   @Post('garmin/push-workout/:workoutId')

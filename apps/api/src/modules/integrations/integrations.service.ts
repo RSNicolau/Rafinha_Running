@@ -3,7 +3,6 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { GarminService } from './garmin/garmin.service';
 import { StravaService } from './strava/strava.service';
 import { CorosService } from './coros/coros.service';
-import { PolarService } from './polar/polar.service';
 import { GoogleFitService } from './google-fit/google-fit.service';
 import { IntegrationProvider } from '@prisma/client';
 
@@ -14,7 +13,6 @@ export class IntegrationsService {
     private garminService: GarminService,
     private stravaService: StravaService,
     private corosService: CorosService,
-    private polarService: PolarService,
     private googleFitService: GoogleFitService,
   ) {}
 
@@ -40,8 +38,6 @@ export class IntegrationsService {
         return this.stravaService.getAuthUrl(userId);
       case IntegrationProvider.COROS:
         return this.corosService.getAuthUrl(userId);
-      case IntegrationProvider.POLAR:
-        return this.polarService.getAuthUrl(userId);
       case IntegrationProvider.GOOGLE_FIT:
         return this.googleFitService.getAuthUrl(userId);
       default:
@@ -61,8 +57,6 @@ export class IntegrationsService {
         return this.stravaService.handleCallback(code, state);
       case IntegrationProvider.COROS:
         return this.corosService.handleCallback(code, state);
-      case IntegrationProvider.POLAR:
-        return this.polarService.handleCallback(code, state);
       case IntegrationProvider.GOOGLE_FIT:
         return this.googleFitService.handleCallback(code, state);
       default:
@@ -105,9 +99,6 @@ export class IntegrationsService {
         case IntegrationProvider.COROS:
           results.push(await this.corosService.syncActivities(userId, integration));
           break;
-        case IntegrationProvider.POLAR:
-          results.push(await this.polarService.syncActivities(userId, integration));
-          break;
         case IntegrationProvider.GOOGLE_FIT:
           results.push(await this.googleFitService.syncActivities(userId, integration));
           break;
@@ -122,13 +113,6 @@ export class IntegrationsService {
   async setupStravaWebhook(apiBaseUrl: string) {
     const callbackUrl = `${apiBaseUrl}/webhooks/strava`;
     return this.stravaService.registerWebhook(callbackUrl);
-  }
-
-  // ── Polar Webhook Setup ──
-
-  async setupPolarWebhook(apiBaseUrl: string) {
-    const callbackUrl = `${apiBaseUrl}/webhooks/polar`;
-    return this.polarService.registerWebhook(callbackUrl);
   }
 
   // ── Garmin Push (Training API) ──
@@ -432,14 +416,4 @@ export class IntegrationsService {
     });
   }
 
-  // ── Polar Webhook Handlers ──
-
-  async handlePolarExercise(data: {
-    userId: string;
-    entity_id: string;
-    event_type: string;
-    timestamp: string;
-  }) {
-    await this.polarService.handleWebhookExercise(data);
-  }
 }

@@ -55,7 +55,7 @@ const RUNNING_QUESTIONS: NicheQuestionTemplate[] = [
   { order: 7, key: 'training_days', question: 'Quantos dias por semana você tem disponível para treinar?', type: 'SELECT', options: ['2', '3', '4', '5', '6'], required: true },
   { order: 8, key: 'preferred_time', question: 'Qual horário você prefere treinar?', type: 'SELECT', options: ['Manhã', 'Tarde', 'Noite', 'Flexível'], required: true },
   { order: 9, key: 'terrain', question: 'Prefere esteira ou rua?', type: 'SELECT', options: ['Esteira', 'Rua', 'Trilha', 'Indiferente'], required: false },
-  { order: 10, key: 'gps_watch', question: 'Possui relógio GPS?', type: 'SELECT', options: ['Garmin', 'Polar', 'Apple Watch', 'Coros', 'Outro', 'Não tenho'], required: false },
+  { order: 10, key: 'gps_watch', question: 'Possui relógio GPS?', type: 'SELECT', options: ['Garmin', 'Apple Watch', 'Coros', 'Outro', 'Não tenho'], required: false },
   { order: 11, key: 'best_5k', question: 'Qual seu melhor tempo nos 5km?', type: 'TIME', placeholder: 'ex: 25:30', required: false, aiHint: 'Tempo em mm:ss para calcular VDOT e zonas de pace' },
   { order: 12, key: 'best_10k', question: 'Qual seu melhor tempo nos 10km?', type: 'TIME', placeholder: 'ex: 55:00', required: false },
   { order: 13, key: 'next_race', question: 'Tem alguma prova em vista? Qual e quando?', type: 'TEXT', required: false },
@@ -79,7 +79,7 @@ const CYCLING_QUESTIONS: NicheQuestionTemplate[] = [
   { order: 8, key: 'goal', question: 'Objetivo principal', type: 'SELECT', options: ['Gran Fondo', 'Prova de XCO (MTB)', 'Triathlon', 'Ciclismo urbano', 'Performance/competição', 'Saúde e condicionamento', 'Emagrecimento'], required: true },
   { order: 9, key: 'next_event', question: 'Tem alguma prova ou evento em vista? Qual e quando?', type: 'TEXT', required: false },
   { order: 10, key: 'smart_trainer', question: 'Tem smart trainer para treino indoor?', type: 'SELECT', options: ['Sim (rodinho)', 'Sim (direto/direct drive)', 'Treino apenas outdoor', 'Não tenho'], required: false },
-  { order: 11, key: 'gps_device', question: 'Que ciclocomputador/GPS você usa?', type: 'SELECT', options: ['Garmin', 'Wahoo', 'Polar', 'Apple Watch', 'Coros', 'Celular', 'Nenhum'], required: false },
+  { order: 11, key: 'gps_device', question: 'Que ciclocomputador/GPS você usa?', type: 'SELECT', options: ['Garmin', 'Wahoo', 'Apple Watch', 'Coros', 'Celular', 'Nenhum'], required: false },
   { order: 12, key: 'injury_history', question: 'Já teve alguma lesão relacionada ao ciclismo?', type: 'TEXTAREA', required: false },
   { order: 13, key: 'training_days', question: 'Quantos dias por semana você tem disponível para treinar?', type: 'SELECT', options: ['2', '3', '4', '5', '6'], required: true },
   { order: 14, key: 'medical_restrictions', question: 'Possui algum problema cardíaco ou restrição médica?', type: 'TEXTAREA', required: false },
@@ -102,7 +102,7 @@ const TRIATHLON_QUESTIONS: NicheQuestionTemplate[] = [
   { order: 11, key: 'weight', question: 'Peso atual (kg)', type: 'NUMBER', required: true },
   { order: 12, key: 'injury_history', question: 'Já teve alguma lesão nas 3 modalidades?', type: 'TEXTAREA', required: false },
   { order: 13, key: 'medical_restrictions', question: 'Possui algum problema cardíaco ou restrição médica?', type: 'TEXTAREA', required: false },
-  { order: 14, key: 'devices', question: 'Que dispositivos você usa para monitorar treino?', type: 'MULTISELECT', options: ['Garmin', 'Polar', 'Apple Watch', 'Coros', 'Wahoo', 'Ciclocomputador Garmin', 'Nenhum'], required: false },
+  { order: 14, key: 'devices', question: 'Que dispositivos você usa para monitorar treino?', type: 'MULTISELECT', options: ['Garmin', 'Apple Watch', 'Coros', 'Wahoo', 'Ciclocomputador Garmin', 'Nenhum'], required: false },
   { order: 15, key: 'referral', question: 'Como soube da assessoria?', type: 'SELECT', options: ['WhatsApp (indicação)', 'Instagram', 'Strava', 'Google', 'Amigo', 'Outro'], required: false },
 ];
 
@@ -119,7 +119,7 @@ const SWIMMING_QUESTIONS: NicheQuestionTemplate[] = [
   { order: 8, key: 'goal', question: 'Objetivo principal', type: 'SELECT', options: ['Melhorar técnica', 'Prova de piscina', 'Água aberta/maratona aquática', 'Triathlon', 'Condicionamento físico', 'Reabilitação'], required: true },
   { order: 9, key: 'next_race', question: 'Tem alguma prova em vista? Qual e quando?', type: 'TEXT', required: false },
   { order: 10, key: 'has_equipment', question: 'Que equipamentos você usa?', type: 'MULTISELECT', options: ['Palmar', 'Pull buoy', 'Prancha', 'Faixa elástica', 'Tubo de arrasto', 'Barbatanas', 'Óculos de treino', 'Relógio aquático'], required: false },
-  { order: 11, key: 'swim_watch', question: 'Usa relógio para registrar treinos?', type: 'SELECT', options: ['Garmin (aquático)', 'Apple Watch', 'Polar', 'Coros', 'Suunto', 'Não uso'], required: false },
+  { order: 11, key: 'swim_watch', question: 'Usa relógio para registrar treinos?', type: 'SELECT', options: ['Garmin (aquático)', 'Apple Watch', 'Coros', 'Suunto', 'Não uso'], required: false },
   { order: 12, key: 'weight', question: 'Peso atual (kg)', type: 'NUMBER', required: true },
   { order: 13, key: 'injury_history', question: 'Já teve alguma lesão de ombro ou relacionada à natação?', type: 'TEXTAREA', required: false },
   { order: 14, key: 'medical_restrictions', question: 'Possui algum problema cardíaco ou restrição médica?', type: 'TEXTAREA', required: false },
@@ -275,7 +275,7 @@ export const NICHE_CONFIGS: Record<SportNiche, NicheConfig> = {
     zoneConfig: RUNNING_ZONES,
     questionTemplates: RUNNING_QUESTIONS,
     pricing: buildPricing(4990, 'Corrida'),
-    integrations: ['Garmin', 'Strava', 'Apple Health', 'Polar', 'Coros'],
+    integrations: ['Garmin', 'Strava', 'Apple Health', 'Coros'],
     features: ['Training Load ATL/CTL/TSB', 'VDOT Calculator', 'Zonas de Pace', 'Garmin Connect', 'PDF de Evolução'],
   },
   CYCLING: {
@@ -317,7 +317,7 @@ export const NICHE_CONFIGS: Record<SportNiche, NicheConfig> = {
     zoneConfig: SWIMMING_ZONES,
     questionTemplates: SWIMMING_QUESTIONS,
     pricing: buildPricing(4490, 'Natação'),
-    integrations: ['Garmin (aquático)', 'Apple Watch', 'Polar', 'Coros', 'Suunto'],
+    integrations: ['Garmin (aquático)', 'Apple Watch', 'Coros', 'Suunto'],
     features: ['CSS Calculator', 'Zonas por estilo', 'Planilha de piscina', 'Análise de splits por 50m'],
   },
   CROSSFIT: {
@@ -359,7 +359,7 @@ export const NICHE_CONFIGS: Record<SportNiche, NicheConfig> = {
     zoneConfig: FITNESS_ZONES,
     questionTemplates: FITNESS_QUESTIONS,
     pricing: buildPricing(4990, 'Multiesportivo'),
-    integrations: ['Garmin', 'Strava', 'Apple Health', 'Polar', 'Coros'],
+    integrations: ['Garmin', 'Strava', 'Apple Health', 'Coros'],
     features: ['Plano Personalizado', 'Múltiplas modalidades', 'Análise de performance'],
   },
 };

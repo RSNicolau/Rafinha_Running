@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 
 interface Integration {
   id: string;
-  provider: 'GARMIN' | 'STRAVA' | 'APPLE_HEALTH' | 'GOOGLE_FIT' | 'COROS' | 'POLAR';
+  provider: 'GARMIN' | 'STRAVA' | 'APPLE_HEALTH' | 'GOOGLE_FIT' | 'COROS';
   isActive: boolean;
   lastSyncAt: string | null;
 }
@@ -51,20 +51,6 @@ const DIRECT_INTEGRATIONS = [
     icon: (
       <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
         <path d="M12 2a10 10 0 100 20A10 10 0 0012 2zm0 18a8 8 0 110-16 8 8 0 010 16zm-1-5h2v2h-2zm0-8h2v6h-2z"/>
-      </svg>
-    ),
-  },
-  {
-    key: 'POLAR' as const,
-    name: 'Polar Flow',
-    description: 'Sincronização via Polar AccessLink API v3. Importa exercícios do Polar Flow automaticamente.',
-    color: '#D90429',
-    badge: 'Direto',
-    badgeColor: '#D90429',
-    features: ['Polar Vantage / Pacer / Ignite', 'Webhook em tempo real', 'Dados de zona cardíaca'],
-    icon: (
-      <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
-        <path d="M3 12h2l3-8 4 16 3-8h6"/>
       </svg>
     ),
   },
@@ -115,8 +101,6 @@ export default function IntegrationsPage() {
   const [syncing, setSyncing] = useState(false);
   const [settingUpWebhook, setSettingUpWebhook] = useState(false);
   const [webhookMsg, setWebhookMsg] = useState<string | null>(null);
-  const [settingUpPolarWebhook, setSettingUpPolarWebhook] = useState(false);
-  const [polarWebhookMsg, setPolarWebhookMsg] = useState<string | null>(null);
   const [oauthMsg, setOauthMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const searchParams = useSearchParams();
 
@@ -210,26 +194,6 @@ export default function IntegrationsPage() {
       setWebhookMsg(`Erro: ${e?.response?.data?.message || 'Falha ao registrar webhook'}`);
     } finally {
       setSettingUpWebhook(false);
-    }
-  };
-
-  const handleSetupPolarWebhook = async () => {
-    setSettingUpPolarWebhook(true);
-    setPolarWebhookMsg(null);
-    try {
-      const apiBaseUrl = `${window.location.origin}/api/v1`;
-      const { data } = await api.post('/integrations/polar/setup-webhook', { apiBaseUrl });
-      setPolarWebhookMsg(
-        data.status === 'registered'
-          ? `✓ Webhook Polar registrado! (ID: ${data.webhookId})`
-          : data.status === 'already_registered'
-          ? '✓ Webhook Polar já estava registrado.'
-          : `⚠ ${data.message}`,
-      );
-    } catch (e: any) {
-      setPolarWebhookMsg(`Erro: ${e?.response?.data?.message || 'Falha ao registrar webhook'}`);
-    } finally {
-      setSettingUpPolarWebhook(false);
     }
   };
 
@@ -380,35 +344,6 @@ export default function IntegrationsPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
             </svg>
             {settingUpWebhook ? 'Registrando...' : 'Registrar webhook'}
-          </button>
-        </div>
-      </div>
-
-      {/* Polar Webhook Setup */}
-      <div className="glass-card p-5 mb-4 border border-red-100/60 bg-red-50/20">
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-800 mb-0.5">Ativar webhook automático do Polar</p>
-            <p className="text-xs text-gray-500">
-              Execute uma vez após o deploy para que o Polar envie exercícios em tempo real via AccessLink.
-              Requer <code className="bg-gray-100 px-1 rounded text-[11px]">POLAR_CLIENT_ID</code> e{' '}
-              <code className="bg-gray-100 px-1 rounded text-[11px]">POLAR_CLIENT_SECRET</code> configurados.
-            </p>
-            {polarWebhookMsg && (
-              <p className={`text-xs mt-2 font-medium ${polarWebhookMsg.startsWith('✓') ? 'text-emerald-600' : 'text-red-600'}`}>
-                {polarWebhookMsg}
-              </p>
-            )}
-          </div>
-          <button
-            onClick={handleSetupPolarWebhook}
-            disabled={settingUpPolarWebhook}
-            className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-[#D90429]/10 text-[#D90429] hover:bg-[#D90429]/20 transition disabled:opacity-50 cursor-pointer"
-          >
-            <svg className={`w-4 h-4 ${settingUpPolarWebhook ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
-            </svg>
-            {settingUpPolarWebhook ? 'Registrando...' : 'Registrar webhook'}
           </button>
         </div>
       </div>

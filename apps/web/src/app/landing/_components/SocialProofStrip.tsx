@@ -1,5 +1,5 @@
 export function SocialProofStrip() {
-  const integrations = ['Garmin', 'Strava', 'Apple Health', 'Google Fit', 'Coros', 'Polar', 'Garmin', 'Strava', 'Apple Health', 'Google Fit', 'Coros', 'Polar'];
+  const integrations = ['Garmin', 'Strava', 'Apple Health', 'Google Fit', 'Coros', 'Garmin', 'Strava', 'Apple Health', 'Google Fit', 'Coros'];
   const coaches = ['Coach Rafael A.', 'Fernanda S. — Assessoria FS', 'Instituto Corre Brasil', 'Peak Performance RJ', 'Coach Rafael A.', 'Fernanda S. — Assessoria FS', 'Instituto Corre Brasil', 'Peak Performance RJ'];
 
   return (

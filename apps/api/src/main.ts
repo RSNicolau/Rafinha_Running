@@ -127,7 +127,7 @@ async function bootstrap() {
     .addTag('Training Plans', 'Planos de treino')
     .addTag('Workouts', 'Treinos e resultados')
     .addTag('Payments', 'Pagamentos e assinaturas')
-    .addTag('Integrations', 'Integrações com wearables (Garmin, Strava, COROS, Polar, Google Fit)')
+    .addTag('Integrations', 'Integrações com wearables (Garmin, Strava, COROS, Google Fit)')
     .addTag('Chat', 'Mensagens entre coach e atleta')
     .addTag('Events', 'Eventos e corridas')
     .addTag('Notifications', 'Notificações push e in-app')

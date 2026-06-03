@@ -15,7 +15,7 @@ const coachFeatures = [
   {
     Icon: Watch,
     title: 'Sync Automático',
-    desc: 'Dados chegam do Garmin, Strava, Polar e Coros automaticamente após cada treino. Sem digitação manual.',
+    desc: 'Dados chegam do Garmin, Strava e Coros automaticamente após cada treino. Sem digitação manual.',
   },
   {
     Icon: MapPin,
@@ -43,7 +43,7 @@ const athleteFeatures = [
   {
     Icon: Watch,
     title: 'Sync com seu Relógio',
-    desc: 'Conecte Garmin, Strava, Polar ou Coros. Seus treinos são sincronizados automaticamente — sem digitação manual.',
+    desc: 'Conecte Garmin, Strava ou Coros. Seus treinos são sincronizados automaticamente — sem digitação manual.',
   },
   {
     Icon: Target,
