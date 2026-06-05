@@ -1,3 +1,4 @@
+// boot: prisma migrate deploy at startup (commit f416ef9 fix)
 import './instrument';
 import { NestFactory } from '@nestjs/core';
 import { CorrelationIdInterceptor } from './common/interceptors/correlation-id.interceptor';
