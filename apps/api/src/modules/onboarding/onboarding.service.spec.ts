@@ -11,6 +11,7 @@ import { OnboardingService } from './onboarding.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { PaymentsService } from '../payments/payments.service';
+import { ReferralsService } from '../referrals/referrals.service';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,7 @@ describe('OnboardingService', () => {
   let prisma: ReturnType<typeof makePrismaMock>;
   let emailService: { sendAthleteCredentials: jest.Mock; sendAthleteWelcome: jest.Mock };
   let paymentsService: { createSubscription: jest.Mock };
+  let referralsService: { linkRefereeOnSignup: jest.Mock };
 
   beforeEach(async () => {
     prisma = makePrismaMock();
@@ -74,6 +76,9 @@ describe('OnboardingService', () => {
     paymentsService = {
       createSubscription: jest.fn().mockResolvedValue({ checkoutUrl: 'https://checkout.example.com' }),
     };
+    referralsService = {
+      linkRefereeOnSignup: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -81,6 +86,7 @@ describe('OnboardingService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: EmailService, useValue: emailService },
         { provide: PaymentsService, useValue: paymentsService },
+        { provide: ReferralsService, useValue: referralsService },
       ],
     }).compile();
 
