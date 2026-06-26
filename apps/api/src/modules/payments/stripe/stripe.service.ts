@@ -6,12 +6,23 @@ import Stripe from 'stripe';
 @Injectable()
 export class StripeService {
   private readonly logger = new Logger(StripeService.name);
-  private stripe: Stripe;
+  private _stripe: Stripe | null = null;
 
-  constructor(private prisma: PrismaService) {
-    this.stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-      apiVersion: '2025-01-27.acacia' as any,
-    });
+  constructor(private prisma: PrismaService) {}
+
+  // Lazy: só instancia o cliente Stripe quando um pagamento é processado, e
+  // falha com erro claro em vez de derrubar o boot da API se a env não existir.
+  private get stripe(): Stripe {
+    if (!this._stripe) {
+      const key = process.env.STRIPE_SECRET_KEY;
+      if (!key) {
+        throw new Error('Stripe indisponível: STRIPE_SECRET_KEY não configurada');
+      }
+      this._stripe = new Stripe(key, {
+        apiVersion: '2025-01-27.acacia' as any,
+      });
+    }
+    return this._stripe;
   }
 
   async createCustomer(userId: string, email: string, name: string) {

@@ -9,9 +9,22 @@ type PaceZones = Record<string, string>;
 @Injectable()
 export class PhysicalAssessmentsService {
   private readonly logger = new Logger(PhysicalAssessmentsService.name);
-  private readonly openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  private _openai: OpenAI | null = null;
 
   constructor(private prisma: PrismaService) {}
+
+  // Lazy: só instancia o cliente OpenAI quando a análise por IA é usada, e
+  // falha com erro claro em vez de derrubar o boot da API se a env não existir.
+  private get openai(): OpenAI {
+    if (!this._openai) {
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) {
+        throw new Error('Análise por IA indisponível: OPENAI_API_KEY não configurada');
+      }
+      this._openai = new OpenAI({ apiKey });
+    }
+    return this._openai;
+  }
 
   // ──────────────────────────────────────
   // Create assessment
