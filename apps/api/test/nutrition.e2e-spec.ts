@@ -1,5 +1,5 @@
 /**
- * E2E tests for /api/nutrition endpoints.
+ * E2E tests for /api/v1/nutrition endpoints.
  *
  * Requires a running API + accessible database.
  * Run: npm run test:e2e
@@ -16,16 +16,16 @@ let mealId: string;
 
 beforeAll(async () => {
   const res = await request(BASE)
-    .post('/api/auth/register')
+    .post('/api/v1/auth/register')
     .send({ email: testEmail, password: 'Test12345!', name: 'Nutrition Tester' });
   token = res.body.accessToken;
 });
 
-describe('Nutrition E2E — /api/nutrition', () => {
-  describe('GET /api/nutrition/day', () => {
+describe('Nutrition E2E — /api/v1/nutrition', () => {
+  describe('GET /api/v1/nutrition/day', () => {
     it('should return empty summary for a new user', async () => {
       const res = await request(BASE)
-        .get(`/api/nutrition/day?date=${today}`)
+        .get(`/api/v1/nutrition/day?date=${today}`)
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
@@ -39,7 +39,7 @@ describe('Nutrition E2E — /api/nutrition', () => {
 
     it('should use today as default date', async () => {
       const res = await request(BASE)
-        .get('/api/nutrition/day')
+        .get('/api/v1/nutrition/day')
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
@@ -48,15 +48,15 @@ describe('Nutrition E2E — /api/nutrition', () => {
 
     it('should return 401 without token', async () => {
       await request(BASE)
-        .get('/api/nutrition/day')
+        .get('/api/v1/nutrition/day')
         .expect(401);
     });
   });
 
-  describe('POST /api/nutrition/meal', () => {
+  describe('POST /api/v1/nutrition/meal', () => {
     it('should log a meal and return the record', async () => {
       const res = await request(BASE)
-        .post('/api/nutrition/meal')
+        .post('/api/v1/nutrition/meal')
         .set('Authorization', `Bearer ${token}`)
         .send({
           date: today,
@@ -78,7 +78,7 @@ describe('Nutrition E2E — /api/nutrition', () => {
 
     it('should show the meal in day summary', async () => {
       const res = await request(BASE)
-        .get(`/api/nutrition/day?date=${today}`)
+        .get(`/api/v1/nutrition/day?date=${today}`)
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
@@ -89,17 +89,17 @@ describe('Nutrition E2E — /api/nutrition', () => {
 
     it('should return 400 for invalid data', async () => {
       await request(BASE)
-        .post('/api/nutrition/meal')
+        .post('/api/v1/nutrition/meal')
         .set('Authorization', `Bearer ${token}`)
         .send({ mealName: 'No date' })
         .expect(400);
     });
   });
 
-  describe('POST /api/nutrition/water', () => {
+  describe('POST /api/v1/nutrition/water', () => {
     it('should set water intake for the day', async () => {
       const res = await request(BASE)
-        .post('/api/nutrition/water')
+        .post('/api/v1/nutrition/water')
         .set('Authorization', `Bearer ${token}`)
         .send({ date: today, amount: 1500 })
         .expect(201);
@@ -110,7 +110,7 @@ describe('Nutrition E2E — /api/nutrition', () => {
 
     it('should update water intake (upsert)', async () => {
       const res = await request(BASE)
-        .post('/api/nutrition/water')
+        .post('/api/v1/nutrition/water')
         .set('Authorization', `Bearer ${token}`)
         .send({ date: today, amount: 2200 })
         .expect(201);
@@ -120,7 +120,7 @@ describe('Nutrition E2E — /api/nutrition', () => {
 
     it('should reflect updated water in day summary', async () => {
       const res = await request(BASE)
-        .get(`/api/nutrition/day?date=${today}`)
+        .get(`/api/v1/nutrition/day?date=${today}`)
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
@@ -128,10 +128,10 @@ describe('Nutrition E2E — /api/nutrition', () => {
     });
   });
 
-  describe('GET /api/nutrition/week', () => {
+  describe('GET /api/v1/nutrition/week', () => {
     it('should return 7 days of history', async () => {
       const res = await request(BASE)
-        .get('/api/nutrition/week')
+        .get('/api/v1/nutrition/week')
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
 
@@ -144,17 +144,17 @@ describe('Nutrition E2E — /api/nutrition', () => {
     });
   });
 
-  describe('DELETE /api/nutrition/meal/:id', () => {
+  describe('DELETE /api/v1/nutrition/meal/:id', () => {
     it('should delete meal belonging to user', async () => {
       await request(BASE)
-        .delete(`/api/nutrition/meal/${mealId}`)
+        .delete(`/api/v1/nutrition/meal/${mealId}`)
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
     });
 
     it('should return 404 for non-existent meal', async () => {
       await request(BASE)
-        .delete('/api/nutrition/meal/non-existent-id')
+        .delete('/api/v1/nutrition/meal/non-existent-id')
         .set('Authorization', `Bearer ${token}`)
         .expect(404);
     });

@@ -54,10 +54,14 @@ import { ReferralsModule } from './modules/referrals/referrals.module';
         redact: ['req.headers.authorization'],
       },
     }),
-    ThrottlerModule.forRoot([
-      { name: 'short', ttl: 1000, limit: 20 },    // 20 req/s
-      { name: 'medium', ttl: 60000, limit: 100 },  // 100 req/min
-    ]),
+    ThrottlerModule.forRoot({
+      throttlers: [
+        { name: 'short', ttl: 1000, limit: 20 },    // 20 req/s
+        { name: 'medium', ttl: 60000, limit: 100 },  // 100 req/min
+      ],
+      // Opt-in bypass for E2E/load tests (default OFF — production unaffected).
+      skipIf: () => process.env.THROTTLE_DISABLED === 'true',
+    }),
     PrismaModule,
     CacheModule,
     AuthModule,

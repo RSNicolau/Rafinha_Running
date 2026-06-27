@@ -1,7 +1,7 @@
 /**
  * E2E tests for workout athlete feedback endpoint.
  *
- * Tests: PATCH /api/workouts/:id/feedback
+ * Tests: PATCH /api/v1/workouts/:id/feedback
  *   - RPE validation (1-10)
  *   - sensationScore validation (1-5)
  *   - athleteFeedback max length (500)
@@ -28,20 +28,20 @@ let workoutId: string;
 beforeAll(async () => {
   // Register coach
   const coachRes = await request(BASE)
-    .post('/api/auth/register')
+    .post('/api/v1/auth/register')
     .send({ email: coachEmail, password: 'Test12345!', name: 'Coach Feedback', role: 'COACH' });
   coachToken = coachRes.body.accessToken;
 
   // Register athlete
   const athleteRes = await request(BASE)
-    .post('/api/auth/register')
+    .post('/api/v1/auth/register')
     .send({ email: athleteEmail, password: 'Test12345!', name: 'Athlete Feedback' });
   athleteToken = athleteRes.body.accessToken;
   athleteId = athleteRes.body.user.id;
 
   // Register another athlete (to test cross-ownership)
   const otherRes = await request(BASE)
-    .post('/api/auth/register')
+    .post('/api/v1/auth/register')
     .send({ email: otherAthleteEmail, password: 'Test12345!', name: 'Other Athlete' });
   otherAthleteToken = otherRes.body.accessToken;
 
@@ -50,7 +50,7 @@ beforeAll(async () => {
   future.setDate(future.getDate() + 7);
 
   const planRes = await request(BASE)
-    .post('/api/training-plans')
+    .post('/api/v1/training-plans')
     .set('Authorization', `Bearer ${coachToken}`)
     .send({
       athleteId,
@@ -64,7 +64,7 @@ beforeAll(async () => {
   if (!planId) return; // skip if API not available
 
   const workoutRes = await request(BASE)
-    .post('/api/workouts')
+    .post('/api/v1/workouts')
     .set('Authorization', `Bearer ${coachToken}`)
     .send({
       planId,
@@ -77,12 +77,12 @@ beforeAll(async () => {
   workoutId = workoutRes.body?.id;
 });
 
-describe('Workout Feedback — PATCH /api/workouts/:id/feedback', () => {
+describe('Workout Feedback — PATCH /api/v1/workouts/:id/feedback', () => {
   describe('Input validation', () => {
     it('should return 400 for RPE below minimum (< 1)', async () => {
       if (!workoutId) return;
       await request(BASE)
-        .patch(`/api/workouts/${workoutId}/feedback`)
+        .patch(`/api/v1/workouts/${workoutId}/feedback`)
         .set('Authorization', `Bearer ${athleteToken}`)
         .send({ rpe: 0 })
         .expect(400);
@@ -91,7 +91,7 @@ describe('Workout Feedback — PATCH /api/workouts/:id/feedback', () => {
     it('should return 400 for RPE above maximum (> 10)', async () => {
       if (!workoutId) return;
       await request(BASE)
-        .patch(`/api/workouts/${workoutId}/feedback`)
+        .patch(`/api/v1/workouts/${workoutId}/feedback`)
         .set('Authorization', `Bearer ${athleteToken}`)
         .send({ rpe: 11 })
         .expect(400);
@@ -100,7 +100,7 @@ describe('Workout Feedback — PATCH /api/workouts/:id/feedback', () => {
     it('should return 400 for sensationScore below minimum (< 1)', async () => {
       if (!workoutId) return;
       await request(BASE)
-        .patch(`/api/workouts/${workoutId}/feedback`)
+        .patch(`/api/v1/workouts/${workoutId}/feedback`)
         .set('Authorization', `Bearer ${athleteToken}`)
         .send({ sensationScore: 0 })
         .expect(400);
@@ -109,7 +109,7 @@ describe('Workout Feedback — PATCH /api/workouts/:id/feedback', () => {
     it('should return 400 for sensationScore above maximum (> 5)', async () => {
       if (!workoutId) return;
       await request(BASE)
-        .patch(`/api/workouts/${workoutId}/feedback`)
+        .patch(`/api/v1/workouts/${workoutId}/feedback`)
         .set('Authorization', `Bearer ${athleteToken}`)
         .send({ sensationScore: 6 })
         .expect(400);
@@ -118,7 +118,7 @@ describe('Workout Feedback — PATCH /api/workouts/:id/feedback', () => {
     it('should return 400 for athleteFeedback exceeding 500 characters', async () => {
       if (!workoutId) return;
       await request(BASE)
-        .patch(`/api/workouts/${workoutId}/feedback`)
+        .patch(`/api/v1/workouts/${workoutId}/feedback`)
         .set('Authorization', `Bearer ${athleteToken}`)
         .send({ athleteFeedback: 'x'.repeat(501) })
         .expect(400);
@@ -127,13 +127,13 @@ describe('Workout Feedback — PATCH /api/workouts/:id/feedback', () => {
     it('should accept valid RPE boundary values (1 and 10)', async () => {
       if (!workoutId) return;
       await request(BASE)
-        .patch(`/api/workouts/${workoutId}/feedback`)
+        .patch(`/api/v1/workouts/${workoutId}/feedback`)
         .set('Authorization', `Bearer ${athleteToken}`)
         .send({ rpe: 1 })
         .expect((res) => expect([200, 201]).toContain(res.status));
 
       await request(BASE)
-        .patch(`/api/workouts/${workoutId}/feedback`)
+        .patch(`/api/v1/workouts/${workoutId}/feedback`)
         .set('Authorization', `Bearer ${athleteToken}`)
         .send({ rpe: 10 })
         .expect((res) => expect([200, 201]).toContain(res.status));
@@ -142,7 +142,7 @@ describe('Workout Feedback — PATCH /api/workouts/:id/feedback', () => {
     it('should accept a complete valid feedback payload', async () => {
       if (!workoutId) return;
       const res = await request(BASE)
-        .patch(`/api/workouts/${workoutId}/feedback`)
+        .patch(`/api/v1/workouts/${workoutId}/feedback`)
         .set('Authorization', `Bearer ${athleteToken}`)
         .send({
           rpe: 7,
@@ -160,7 +160,7 @@ describe('Workout Feedback — PATCH /api/workouts/:id/feedback', () => {
     it('should accept feedback with only rpe (other fields optional)', async () => {
       if (!workoutId) return;
       const res = await request(BASE)
-        .patch(`/api/workouts/${workoutId}/feedback`)
+        .patch(`/api/v1/workouts/${workoutId}/feedback`)
         .set('Authorization', `Bearer ${athleteToken}`)
         .send({ rpe: 5 });
 
@@ -172,7 +172,7 @@ describe('Workout Feedback — PATCH /api/workouts/:id/feedback', () => {
     it('should return 401 without token', async () => {
       if (!workoutId) return;
       await request(BASE)
-        .patch(`/api/workouts/${workoutId}/feedback`)
+        .patch(`/api/v1/workouts/${workoutId}/feedback`)
         .send({ rpe: 5 })
         .expect(401);
     });
@@ -180,7 +180,7 @@ describe('Workout Feedback — PATCH /api/workouts/:id/feedback', () => {
     it('should return 403 when coach tries to submit athlete feedback', async () => {
       if (!workoutId) return;
       await request(BASE)
-        .patch(`/api/workouts/${workoutId}/feedback`)
+        .patch(`/api/v1/workouts/${workoutId}/feedback`)
         .set('Authorization', `Bearer ${coachToken}`)
         .send({ rpe: 5 })
         .expect((res) => {
@@ -192,7 +192,7 @@ describe('Workout Feedback — PATCH /api/workouts/:id/feedback', () => {
     it('should return 403 or 404 when other athlete tries to submit feedback on someone else\'s workout', async () => {
       if (!workoutId) return;
       await request(BASE)
-        .patch(`/api/workouts/${workoutId}/feedback`)
+        .patch(`/api/v1/workouts/${workoutId}/feedback`)
         .set('Authorization', `Bearer ${otherAthleteToken}`)
         .send({ rpe: 8 })
         .expect((res) => {

@@ -1,5 +1,5 @@
 /**
- * E2E tests for /api/auth endpoints.
+ * E2E tests for /api/v1/auth endpoints.
  *
  * Requires a running API + accessible database.
  * Set TEST_API_URL env var (default: http://localhost:3000).
@@ -16,11 +16,11 @@ const testEmail = `e2e_${Date.now()}@test.com`;
 let accessToken: string;
 let refreshToken: string;
 
-describe('Auth E2E — /api/auth', () => {
-  describe('POST /api/auth/register', () => {
+describe('Auth E2E — /api/v1/auth', () => {
+  describe('POST /api/v1/auth/register', () => {
     it('should create a new athlete account', async () => {
       const res = await request(BASE)
-        .post('/api/auth/register')
+        .post('/api/v1/auth/register')
         .send({ email: testEmail, password: 'Test12345!', name: 'E2E User' })
         .expect(201);
 
@@ -34,23 +34,23 @@ describe('Auth E2E — /api/auth', () => {
 
     it('should return 409 for duplicate email', async () => {
       await request(BASE)
-        .post('/api/auth/register')
+        .post('/api/v1/auth/register')
         .send({ email: testEmail, password: 'Test12345!', name: 'Duplicate' })
         .expect(409);
     });
 
     it('should return 400 for missing required fields', async () => {
       await request(BASE)
-        .post('/api/auth/register')
+        .post('/api/v1/auth/register')
         .send({ email: 'only-email@test.com' })
         .expect(400);
     });
   });
 
-  describe('POST /api/auth/login', () => {
+  describe('POST /api/v1/auth/login', () => {
     it('should return tokens for valid credentials', async () => {
       const res = await request(BASE)
-        .post('/api/auth/login')
+        .post('/api/v1/auth/login')
         .send({ email: testEmail, password: 'Test12345!' })
         .expect(200);
 
@@ -62,23 +62,23 @@ describe('Auth E2E — /api/auth', () => {
 
     it('should return 401 for wrong password', async () => {
       await request(BASE)
-        .post('/api/auth/login')
+        .post('/api/v1/auth/login')
         .send({ email: testEmail, password: 'WrongPassword!' })
         .expect(401);
     });
 
     it('should return 401 for unknown email', async () => {
       await request(BASE)
-        .post('/api/auth/login')
+        .post('/api/v1/auth/login')
         .send({ email: 'nobody@test.com', password: 'Test12345!' })
         .expect(401);
     });
   });
 
-  describe('POST /api/auth/refresh', () => {
+  describe('POST /api/v1/auth/refresh', () => {
     it('should return a new access token with valid refresh token', async () => {
       const res = await request(BASE)
-        .post('/api/auth/refresh')
+        .post('/api/v1/auth/refresh')
         .send({ refreshToken })
         .expect(200);
 
@@ -88,16 +88,16 @@ describe('Auth E2E — /api/auth', () => {
 
     it('should return 401 for invalid refresh token', async () => {
       await request(BASE)
-        .post('/api/auth/refresh')
+        .post('/api/v1/auth/refresh')
         .send({ refreshToken: 'invalid.token.here' })
         .expect(401);
     });
   });
 
-  describe('GET /api/users/me', () => {
+  describe('GET /api/v1/users/me', () => {
     it('should return current user with valid token', async () => {
       const res = await request(BASE)
-        .get('/api/users/me')
+        .get('/api/v1/users/me')
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
@@ -106,7 +106,7 @@ describe('Auth E2E — /api/auth', () => {
 
     it('should return 401 without token', async () => {
       await request(BASE)
-        .get('/api/users/me')
+        .get('/api/v1/users/me')
         .expect(401);
     });
   });

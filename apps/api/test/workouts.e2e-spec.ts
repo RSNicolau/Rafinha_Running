@@ -22,27 +22,27 @@ let workoutId: string;
 beforeAll(async () => {
   // Register coach
   const coachRes = await request(BASE)
-    .post('/api/auth/register')
+    .post('/api/v1/auth/register')
     .send({ email: coachEmail, password: 'Test12345!', name: 'Coach E2E', role: 'COACH' });
   coachToken = coachRes.body.accessToken;
   coachId = coachRes.body.user.id;
 
   // Register athlete
   const athleteRes = await request(BASE)
-    .post('/api/auth/register')
+    .post('/api/v1/auth/register')
     .send({ email: athleteEmail, password: 'Test12345!', name: 'Athlete E2E' });
   athleteToken = athleteRes.body.accessToken;
   athleteId = athleteRes.body.user.id;
 });
 
 describe('Training Plans & Workouts E2E', () => {
-  describe('POST /api/training-plans', () => {
+  describe('POST /api/v1/training-plans', () => {
     it('should create a plan as coach', async () => {
       const future = new Date();
       future.setDate(future.getDate() + 30);
 
       const res = await request(BASE)
-        .post('/api/training-plans')
+        .post('/api/v1/training-plans')
         .set('Authorization', `Bearer ${coachToken}`)
         .send({
           athleteId,
@@ -62,40 +62,40 @@ describe('Training Plans & Workouts E2E', () => {
 
     it('should return 401 for unauthenticated request', async () => {
       await request(BASE)
-        .post('/api/training-plans')
+        .post('/api/v1/training-plans')
         .send({ name: 'No Auth Plan' })
         .expect(401);
     });
   });
 
-  describe('GET /api/training-plans', () => {
+  describe('GET /api/v1/training-plans', () => {
     it('should list plans for coach', async () => {
       const res = await request(BASE)
-        .get('/api/training-plans')
+        .get('/api/v1/training-plans')
         .set('Authorization', `Bearer ${coachToken}`)
         .expect(200);
 
-      expect(Array.isArray(res.body)).toBe(true);
-      expect(res.body.some((p: any) => p.id === planId)).toBe(true);
+      expect(Array.isArray(res.body.data)).toBe(true);
+      expect(res.body.data.some((p: any) => p.id === planId)).toBe(true);
     });
 
     it('should list plans for athlete', async () => {
       const res = await request(BASE)
-        .get('/api/training-plans')
+        .get('/api/v1/training-plans')
         .set('Authorization', `Bearer ${athleteToken}`)
         .expect(200);
 
-      expect(Array.isArray(res.body)).toBe(true);
+      expect(Array.isArray(res.body.data)).toBe(true);
     });
   });
 
-  describe('POST /api/workouts', () => {
+  describe('POST /api/v1/workouts', () => {
     it('should create a workout in the plan', async () => {
       const scheduledDate = new Date();
       scheduledDate.setDate(scheduledDate.getDate() + 2);
 
       const res = await request(BASE)
-        .post('/api/workouts')
+        .post('/api/v1/workouts')
         .set('Authorization', `Bearer ${coachToken}`)
         .send({
           planId,
@@ -113,10 +113,10 @@ describe('Training Plans & Workouts E2E', () => {
     });
   });
 
-  describe('POST /api/workouts/:id/result', () => {
+  describe('POST /api/v1/workouts/:id/result', () => {
     it('should submit a result for the workout', async () => {
       const res = await request(BASE)
-        .post(`/api/workouts/${workoutId}/result`)
+        .post(`/api/v1/workouts/${workoutId}/result`)
         .set('Authorization', `Bearer ${athleteToken}`)
         .send({
           distanceMeters: 8200,
@@ -133,7 +133,7 @@ describe('Training Plans & Workouts E2E', () => {
 
     it('should update workout status to COMPLETED', async () => {
       const res = await request(BASE)
-        .get(`/api/workouts/${workoutId}`)
+        .get(`/api/v1/workouts/${workoutId}`)
         .set('Authorization', `Bearer ${athleteToken}`)
         .expect(200);
 
@@ -141,10 +141,10 @@ describe('Training Plans & Workouts E2E', () => {
     });
   });
 
-  describe('GET /api/training-plans/:id', () => {
+  describe('GET /api/v1/training-plans/:id', () => {
     it('should include completion percentage', async () => {
       const res = await request(BASE)
-        .get(`/api/training-plans/${planId}`)
+        .get(`/api/v1/training-plans/${planId}`)
         .set('Authorization', `Bearer ${coachToken}`)
         .expect(200);
 
@@ -154,7 +154,7 @@ describe('Training Plans & Workouts E2E', () => {
 
     it('should return 403 for wrong coach', async () => {
       await request(BASE)
-        .get(`/api/training-plans/${planId}`)
+        .get(`/api/v1/training-plans/${planId}`)
         .set('Authorization', `Bearer ${athleteToken}`)
         // athlete can access their own plan
         .expect(200);
