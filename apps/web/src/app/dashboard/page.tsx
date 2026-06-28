@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/lib/api';
-import { useDemo, MOCK_ATHLETES, MOCK_STATS, MOCK_ALERTS } from '@/contexts/demo-mode';
 import { getNiche } from '@/lib/niches';
 import NicheSetupBanner from '@/components/NicheSetupBanner';
 
@@ -44,7 +43,6 @@ function AthleteSkeleton() {
 
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
-  const { isDemoMode } = useDemo();
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -54,18 +52,6 @@ export default function DashboardPage() {
   const niche = getNiche(user?.branding?.niche);
 
   const loadData = () => {
-    if (isDemoMode) {
-      setAthletes(MOCK_ATHLETES.map((a) => ({
-        id: a.id,
-        level: 'INTERMEDIATE',
-        weeklyGoalKm: a.athleteProfile.weeklyDistance,
-        user: { id: a.id, name: a.name, email: a.email },
-      })));
-      setCoachStats({ totalAthletes: MOCK_STATS.totalAthletes, alertCount: MOCK_ALERTS.length, adherencePercent: MOCK_STATS.completionRate });
-      setAlerts(MOCK_ALERTS.map((a) => ({ athleteId: a.id, name: a.athlete.name, missedCount: 1, lastMissedDate: new Date().toISOString() })));
-      setLoading(false);
-      return;
-    }
     setLoadError(false);
     setLoading(true);
     Promise.all([
@@ -86,7 +72,7 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadData(); }, [isDemoMode]);
+  useEffect(() => { loadData(); }, []);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';

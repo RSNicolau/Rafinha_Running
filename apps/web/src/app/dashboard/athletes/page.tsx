@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
-import { useDemo, MOCK_ATHLETES } from '@/contexts/demo-mode';
 
 interface Athlete {
   id: string;
@@ -21,7 +20,6 @@ interface Invite {
 }
 
 export default function AthletesPage() {
-  const { isDemoMode } = useDemo();
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -39,16 +37,6 @@ export default function AthletesPage() {
   const [pendingOnboardingCount, setPendingOnboardingCount] = useState(0);
 
   const loadAthletes = () => {
-    if (isDemoMode) {
-      setAthletes(MOCK_ATHLETES.map((a) => ({
-        id: a.id,
-        level: a.athleteProfile.currentPlan === 'ATIVO' ? 'INTERMEDIÁRIO' : 'INICIANTE',
-        weeklyGoalKm: a.athleteProfile.weeklyDistance,
-        user: { id: a.id, name: a.name, email: a.email },
-      })));
-      setLoading(false);
-      return;
-    }
     setLoadError(false);
     api.get('/users/athletes')
       .then(({ data }) => {
@@ -60,7 +48,6 @@ export default function AthletesPage() {
   };
 
   const loadInvites = () => {
-    if (isDemoMode) return;
     api.get('/invites')
       .then(({ data }) => setPendingInvites(data.filter((i: Invite) => i.status === 'PENDING')))
       .catch(() => {});
@@ -69,12 +56,10 @@ export default function AthletesPage() {
   useEffect(() => {
     loadAthletes();
     loadInvites();
-    if (!isDemoMode) {
-      api.get('/onboarding/pending').then(res => {
-        setPendingOnboardingCount(Array.isArray(res.data) ? res.data.length : 0);
-      }).catch(() => {});
-    }
-  }, [isDemoMode]);
+    api.get('/onboarding/pending').then(res => {
+      setPendingOnboardingCount(Array.isArray(res.data) ? res.data.length : 0);
+    }).catch(() => {});
+  }, []);
 
   const filtered = athletes.filter((a) =>
     (a?.user?.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
@@ -232,7 +217,7 @@ export default function AthletesPage() {
       </div>
 
       {/* Pending Invites */}
-      {!isDemoMode && pendingInvites.length > 0 && (
+      {pendingInvites.length > 0 && (
         <div className="mt-8">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Convites pendentes</h2>
 

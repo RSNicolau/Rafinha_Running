@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/stores/auth.store';
-import { DemoModeProvider, useDemo } from '@/contexts/demo-mode';
 import { api } from '@/lib/api';
 
 const navItems = [
@@ -175,24 +174,6 @@ function NavIcon({ name, className }: { name: string; className?: string }) {
     ),
   };
   return <>{icons[name]}</>;
-}
-
-function DemoToggle() {
-  const { isDemoMode, toggleDemoMode } = useDemo();
-  return (
-    <button
-      onClick={toggleDemoMode}
-      title={isDemoMode ? 'Desativar modo demo' : 'Ativar modo demo'}
-      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
-        isDemoMode
-          ? 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
-          : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
-      }`}
-    >
-      <span className={`w-2 h-2 rounded-full ${isDemoMode ? 'bg-amber-400 animate-pulse' : 'bg-gray-300'}`} />
-      {isDemoMode ? 'Demo ON' : 'Demo'}
-    </button>
-  );
 }
 
 function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -398,15 +379,7 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
             </div>
           )}
           <div className="flex-1" />
-          {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && <DemoToggle />}
         </div>
-
-        {/* Desktop demo toggle — ADMIN only */}
-        {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
-          <div className="hidden md:flex justify-end px-6 pt-4">
-            <DemoToggle />
-          </div>
-        )}
 
         <div className="max-w-[1200px] mx-auto px-4 py-6 sm:px-6 sm:py-8 md:p-8">
           {children}
@@ -417,9 +390,5 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
 }
 
 export default function DashboardLayoutWrapper({ children }: { children: React.ReactNode }) {
-  return (
-    <DemoModeProvider>
-      <DashboardLayout>{children}</DashboardLayout>
-    </DemoModeProvider>
-  );
+  return <DashboardLayout>{children}</DashboardLayout>;
 }
