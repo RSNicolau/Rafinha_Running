@@ -557,4 +557,76 @@ export class SchedulerService {
       this.logger.error(`Upcoming race check failed: ${err}`);
     }
   }
+
+  /** Friday 8h — newsletter de eventos futuros para atletas ainda não inscritos */
+  @Cron('0 8 * * 5', { name: 'upcoming-events-newsletter' })
+  async sendUpcomingEventsNewsletter() {
+    this.logger.log('Running upcoming events newsletter...');
+    try {
+      const now = new Date();
+      const horizon = new Date();
+      horizon.setDate(horizon.getDate() + 60);
+
+      const events = await this.prisma.event.findMany({
+        where: {
+          status: 'PUBLISHED',
+          eventDate: { gte: now, lte: horizon },
+        },
+        orderBy: { eventDate: 'asc' },
+        select: { id: true, title: true, eventDate: true, location: true, city: true, modality: true, price: true },
+      });
+      if (events.length === 0) {
+        this.logger.log('No upcoming published events — newsletter skipped');
+        return;
+      }
+
+      const athletes = await this.prisma.user.findMany({
+        where: {
+          role: 'ATHLETE',
+          deletedAt: null,
+          email: { not: '' },
+          athleteProfile: { coachId: { not: null } },
+        },
+        select: { id: true, email: true, name: true },
+      });
+
+      // Inscrições existentes desses atletas nos eventos do período (uma query)
+      const registrations = await this.prisma.eventRegistration.findMany({
+        where: {
+          eventId: { in: events.map((e) => e.id) },
+          userId: { in: athletes.map((a) => a.id) },
+          status: { not: 'CANCELED' },
+        },
+        select: { eventId: true, userId: true },
+      });
+      const registered = new Set(registrations.map((r) => `${r.userId}:${r.eventId}`));
+
+      let sent = 0;
+      for (const athlete of athletes) {
+        const pending = events.filter((e) => !registered.has(`${athlete.id}:${e.id}`));
+        if (pending.length === 0 || !athlete.email) continue;
+        try {
+          await this.email.sendUpcomingEventsNewsletter(
+            athlete.email,
+            athlete.name,
+            pending.map((e) => ({
+              title: e.title,
+              eventDate: e.eventDate,
+              location: e.location,
+              city: e.city,
+              modality: e.modality,
+              priceCents: e.price,
+            })),
+          );
+          sent++;
+        } catch (err) {
+          this.logger.warn(`Events newsletter failed for ${athlete.email}: ${err}`);
+        }
+      }
+
+      this.logger.log(`Upcoming events newsletter sent to ${sent}/${athletes.length} athletes (${events.length} events)`);
+    } catch (err) {
+      this.logger.error(`Upcoming events newsletter failed: ${err}`);
+    }
+  }
 }

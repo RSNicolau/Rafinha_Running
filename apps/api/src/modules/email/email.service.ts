@@ -402,4 +402,50 @@ export class EmailService {
       </div>`,
     );
   }
+
+  /** Newsletter de eventos futuros — enviada periodicamente aos atletas */
+  async sendUpcomingEventsNewsletter(
+    to: string,
+    name: string,
+    events: Array<{ title: string; eventDate: Date; location?: string | null; city?: string | null; modality?: string | null; priceCents: number }>,
+  ): Promise<void> {
+    const fmtDate = (d: Date) =>
+      d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+    const fmtPrice = (c: number) => (c > 0 ? `R$ ${(c / 100).toFixed(2).replace('.', ',')}` : 'Gratuito');
+
+    const rows = events
+      .map(
+        (e) => `
+        <div style="background: white; border-radius: 8px; padding: 16px; margin-bottom: 12px; border-left: 4px solid #DC2626;">
+          <p style="font-size: 16px; font-weight: bold; color: #111827; margin: 0 0 4px;">${e.title}</p>
+          <p style="color: #6b7280; font-size: 13px; margin: 0;">
+            📅 ${fmtDate(e.eventDate)}${e.modality ? ` &bull; 🏃 ${e.modality}` : ''}
+          </p>
+          ${e.location ? `<p style="color: #6b7280; font-size: 13px; margin: 4px 0 0;">📍 ${e.location}${e.city ? ` — ${e.city}` : ''}</p>` : ''}
+          <p style="color: #DC2626; font-size: 13px; font-weight: bold; margin: 6px 0 0;">${fmtPrice(e.priceCents)}</p>
+        </div>`,
+      )
+      .join('');
+
+    await this.send(
+      to,
+      `🏁 Próximas corridas da assessoria — garanta sua vaga!`,
+      `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h1 style="color: #DC2626;">Próximos eventos, ${name}! 🏁</h1>
+      <p style="color: #374151;">Estas são as corridas abertas da assessoria em que você ainda não está inscrito:</p>
+      <div style="background: #f8fafc; border-radius: 12px; padding: 20px; margin: 20px 0;">
+        ${rows}
+      </div>
+      <p style="text-align: center; margin-top: 24px;">
+        <a href="${this.appUrl}" style="background: #DC2626; color: white; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-weight: bold;">
+          Ver eventos e se inscrever
+        </a>
+      </p>
+      <p style="color: #9ca3af; font-size: 12px; text-align: center; margin-top: 24px;">
+        Você recebe este e-mail por ser atleta da assessoria. Equipe RR Rafinha Running.
+      </p>
+    </div>`,
+    );
+  }
 }
