@@ -9,6 +9,15 @@
         "export PATH=\"/Users/rodrigonicolau/.nvm/versions/node/v20.20.1/bin:$PATH\"; cd apps/web && API_URL=http://localhost:3001 exec npx next dev -p 3005"
       ],
       "port": 3005
+    },
+    {
+      "name": "mobile-web",
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": [
+        "-c",
+        "export PATH=\"/Users/rodrigonicolau/.nvm/versions/node/v20.20.1/bin:$PATH\"; cd apps/mobile && EXPO_PUBLIC_API_URL=http://localhost:3001/api/v1 CI=1 exec npx expo start --web --port 8081"
+      ],
+      "port": 8081
     }
   ]
 }

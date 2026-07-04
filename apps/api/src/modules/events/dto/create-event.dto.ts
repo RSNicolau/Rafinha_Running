@@ -90,6 +90,28 @@ export class CreateEventDto {
   @IsOptional()
   kitDescription?: string;
 
+  @ApiPropertyOptional({ description: 'Preco do Kit Completo em centavos (0 = incluso na inscricao)', example: 0 })
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  kitCompletePrice?: number;
+
+  @ApiPropertyOptional({ description: 'Preco do Kit Premium em centavos', example: 4500 })
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  kitPremiumPrice?: number;
+
+  @ApiPropertyOptional({ description: 'Endereco de retirada do kit' })
+  @IsString()
+  @IsOptional()
+  kitPickupLocation?: string;
+
+  @ApiPropertyOptional({ description: 'Data/hora de retirada do kit (ISO 8601)' })
+  @IsDateString()
+  @IsOptional()
+  kitPickupDate?: string;
+
   @ApiPropertyOptional({ description: 'URL do mapa do percurso' })
   @IsString()
   @IsOptional()

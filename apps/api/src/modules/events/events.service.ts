@@ -122,6 +122,10 @@ export class EventsService {
         tags: dto.tags ?? [],
         rules: dto.rules,
         kitDescription: dto.kitDescription,
+        kitCompletePrice: dto.kitCompletePrice,
+        kitPremiumPrice: dto.kitPremiumPrice,
+        kitPickupLocation: dto.kitPickupLocation,
+        kitPickupDate: dto.kitPickupDate ? new Date(dto.kitPickupDate) : undefined,
         routeMapUrl: dto.routeMapUrl,
       },
     });
@@ -148,6 +152,10 @@ export class EventsService {
     if (dto.tags !== undefined) data.tags = dto.tags;
     if (dto.rules !== undefined) data.rules = dto.rules;
     if (dto.kitDescription !== undefined) data.kitDescription = dto.kitDescription;
+    if (dto.kitCompletePrice !== undefined) data.kitCompletePrice = dto.kitCompletePrice;
+    if (dto.kitPremiumPrice !== undefined) data.kitPremiumPrice = dto.kitPremiumPrice;
+    if (dto.kitPickupLocation !== undefined) data.kitPickupLocation = dto.kitPickupLocation;
+    if (dto.kitPickupDate !== undefined) data.kitPickupDate = new Date(dto.kitPickupDate);
     if (dto.routeMapUrl !== undefined) data.routeMapUrl = dto.routeMapUrl;
 
     return this.prisma.event.update({ where: { id: eventId }, data });
