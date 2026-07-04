@@ -8,11 +8,15 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { UserRole, PlatformPlanType, CoachSubscriptionStatus } from '@prisma/client';
 import { PlatformService } from './platform.service';
+import { AdminService } from '../admin/admin.service';
 
 @ApiTags('Platform')
 @Controller('platform')
 export class PlatformController {
-  constructor(private readonly platformService: PlatformService) {}
+  constructor(
+    private readonly platformService: PlatformService,
+    private readonly adminService: AdminService,
+  ) {}
 
   // ─── Public ──────────────────────────────────────────────────────────────
 
@@ -20,6 +24,12 @@ export class PlatformController {
   @ApiOperation({ summary: 'Listar planos disponíveis (público)' })
   async listPlans() {
     return this.platformService.listPlans();
+  }
+
+  @Get('plans-config')
+  @ApiOperation({ summary: 'Planos e preços (coach + atleta) para landing/checkout (público)' })
+  async plansConfig() {
+    return this.adminService.getPlansConfig();
   }
 
   // ─── Coach ───────────────────────────────────────────────────────────────

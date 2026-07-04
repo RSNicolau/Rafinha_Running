@@ -135,6 +135,7 @@ export function HeroSection({ audience = 'coach' }: { audience?: Audience }) {
                   ))}
                 </div>
               </div>
+              <p className="text-center text-[10px] text-gray-300 mt-4">Ilustração do produto — dados de exemplo</p>
             </div>
           </div>
         </div>
