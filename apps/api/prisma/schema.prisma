@@ -263,6 +263,9 @@ model User {
   // Partners (patrocinadores/parceiros da assessoria)
   partners              Partner[]              @relation("CoachPartners")
 
+  // Supplements (suplementação do atleta)
+  supplements           AthleteSupplement[]    @relation("AthleteSupplements")
+
   @@map("users")
 }
 
@@ -1430,6 +1433,38 @@ enum ReferralStatus {
   PAID          // referee paid, both rewards earned
   CREDITED      // referrer's reward applied to subscription
   CANCELLED     // referee cancelled before paying
+}
+
+model AthleteSupplement {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  name      String
+  dose      String?               // "30g", "2 cápsulas"
+  timeOfDay String?  @map("time_of_day") // "Pós-treino", "Com refeição"
+  color     String?               // cor de destaque (hex)
+  icon      String?               // nome do ícone Ionicons
+  sortOrder Int      @default(0) @map("sort_order")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user    User               @relation("AthleteSupplements", fields: [userId], references: [id], onDelete: Cascade)
+  intakes SupplementIntake[]
+
+  @@index([userId])
+  @@map("athlete_supplements")
+}
+
+model SupplementIntake {
+  id           String   @id @default(uuid())
+  supplementId String   @map("supplement_id")
+  date         DateTime @db.Date
+  takenAt      DateTime @default(now()) @map("taken_at")
+
+  supplement AthleteSupplement @relation(fields: [supplementId], references: [id], onDelete: Cascade)
+
+  @@unique([supplementId, date])
+  @@map("supplement_intakes")
 }
 
 model Partner {

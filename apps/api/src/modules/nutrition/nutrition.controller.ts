@@ -44,6 +44,39 @@ export class NutritionController {
     return this.nutritionService.updateWater(userId, dto);
   }
 
+  // ── Supplements ──────────────────────────────────────────────────────────────
+
+  /** GET /nutrition/supplements?date=YYYY-MM-DD — lista com estado "tomado" do dia */
+  @Get('supplements')
+  getSupplements(@CurrentUser('id') userId: string, @Query('date') date: string) {
+    const today = new Date().toISOString().slice(0, 10);
+    return this.nutritionService.getSupplements(userId, date || today);
+  }
+
+  @Post('supplements')
+  createSupplement(
+    @CurrentUser('id') userId: string,
+    @Body() body: { name: string; dose?: string; timeOfDay?: string; color?: string; icon?: string },
+  ) {
+    return this.nutritionService.createSupplement(userId, body);
+  }
+
+  @Delete('supplements/:id')
+  deleteSupplement(@CurrentUser('id') userId: string, @Param('id') id: string) {
+    return this.nutritionService.deleteSupplement(userId, id);
+  }
+
+  /** POST /nutrition/supplements/:id/toggle — marca/desmarca ingestão do dia */
+  @Post('supplements/:id/toggle')
+  toggleSupplement(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+    @Body() body: { date?: string },
+  ) {
+    const today = new Date().toISOString().slice(0, 10);
+    return this.nutritionService.toggleSupplementIntake(userId, id, body?.date || today);
+  }
+
   // ── New standardized endpoints ───────────────────────────────────────────────
 
   /** GET /nutrition/my — athlete fetches their own logs (day + week) */

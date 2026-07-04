@@ -184,4 +184,61 @@ Formato OBRIGATÓRIO (apenas JSON, sem texto extra):
 
     return Object.entries(byDate).map(([date, data]) => ({ date, ...data }));
   }
+
+  // ── Supplements ──────────────────────────────────────────────────────────────
+
+  async getSupplements(userId: string, date: string) {
+    const supplements = await this.prisma.athleteSupplement.findMany({
+      where: { userId, active: true },
+      include: { intakes: { where: { date: new Date(date) } } },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    return supplements.map(({ intakes, ...s }) => ({ ...s, taken: intakes.length > 0 }));
+  }
+
+  async createSupplement(
+    userId: string,
+    dto: { name: string; dose?: string; timeOfDay?: string; color?: string; icon?: string },
+  ) {
+    if (!dto.name?.trim()) throw new NotFoundException('Nome do suplemento é obrigatório');
+    return this.prisma.athleteSupplement.create({
+      data: {
+        userId,
+        name: dto.name.trim(),
+        dose: dto.dose,
+        timeOfDay: dto.timeOfDay,
+        color: dto.color,
+        icon: dto.icon,
+      },
+    });
+  }
+
+  async deleteSupplement(userId: string, id: string) {
+    const supplement = await this.prisma.athleteSupplement.findUnique({ where: { id } });
+    if (!supplement || supplement.userId !== userId) {
+      throw new NotFoundException('Suplemento não encontrado');
+    }
+    await this.prisma.athleteSupplement.delete({ where: { id } });
+    return { deleted: true };
+  }
+
+  async toggleSupplementIntake(userId: string, id: string, date: string) {
+    const supplement = await this.prisma.athleteSupplement.findUnique({ where: { id } });
+    if (!supplement || supplement.userId !== userId) {
+      throw new NotFoundException('Suplemento não encontrado');
+    }
+
+    const dateObj = new Date(date);
+    const existing = await this.prisma.supplementIntake.findUnique({
+      where: { supplementId_date: { supplementId: id, date: dateObj } },
+    });
+
+    if (existing) {
+      await this.prisma.supplementIntake.delete({ where: { id: existing.id } });
+      return { taken: false };
+    }
+    await this.prisma.supplementIntake.create({ data: { supplementId: id, date: dateObj } });
+    return { taken: true };
+  }
 }
