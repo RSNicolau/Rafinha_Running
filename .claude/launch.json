@@ -4,8 +4,11 @@
     {
       "name": "web",
       "runtimeExecutable": "/bin/bash",
-      "runtimeArgs": ["start-web.sh"],
-      "port": 3001
+      "runtimeArgs": [
+        "-c",
+        "export PATH=\"/Users/rodrigonicolau/.nvm/versions/node/v20.20.1/bin:$PATH\"; cd apps/web && API_URL=http://localhost:3001 exec npx next dev -p 3005"
+      ],
+      "port": 3005
     }
   ]
 }

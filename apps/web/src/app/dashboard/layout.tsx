@@ -23,6 +23,7 @@ const navItems = [
   { href: '/dashboard/settings', label: 'Configurações', icon: 'settings', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/onboarding-guide', label: 'Primeiros Passos', icon: 'guide', roles: ['COACH'] },
   { href: '/dashboard/testimonials', label: 'Depoimentos', icon: 'star', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
+  { href: '/dashboard/partners', label: 'Parceiros', icon: 'gift', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/admin/plans', label: 'Planos & Preços', icon: 'plans', roles: ['ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/admin/branding', label: 'White-label', icon: 'brand', roles: ['ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/admin/platform', label: 'Plataforma', icon: 'platform', roles: ['SUPER_ADMIN'] },

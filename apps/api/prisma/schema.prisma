@@ -260,6 +260,9 @@ model User {
   referralsAsReferrer   Referral[]             @relation("ReferralReferrer")
   referralAsReferee     Referral?              @relation("ReferralReferee")
 
+  // Partners (patrocinadores/parceiros da assessoria)
+  partners              Partner[]              @relation("CoachPartners")
+
   @@map("users")
 }
 
@@ -1427,4 +1430,26 @@ enum ReferralStatus {
   PAID          // referee paid, both rewards earned
   CREDITED      // referrer's reward applied to subscription
   CANCELLED     // referee cancelled before paying
+}
+
+model Partner {
+  id          String   @id @default(uuid())
+  coachId     String   @map("coach_id")
+  name        String
+  category    String?               // Bebidas, Calçados, Tecnologia...
+  description String?
+  logoUrl     String?  @map("logo_url")
+  emoji       String?               // fallback visual quando não há logo
+  color       String?               // cor de destaque (hex)
+  linkUrl     String?  @map("link_url")
+  sortOrder   Int      @default(0) @map("sort_order")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  coach User @relation("CoachPartners", fields: [coachId], references: [id], onDelete: Cascade)
+
+  @@index([coachId])
+  @@index([isActive])
+  @@map("partners")
 }
