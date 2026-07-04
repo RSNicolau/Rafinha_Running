@@ -74,26 +74,54 @@ function MacroRing({ calories, goalCalories, colors }: { calories: number; goalC
   );
 }
 
-// ─── Add Meal Modal (real: POST /nutrition/meal) ──────────────────────────────
+// ─── Add Meal Modal (real: POST /nutrition/analyze + /nutrition/meal) ─────────
+// O atleta descreve o que comeu → IA calcula kcal/proteína/carbo/gordura
+// automaticamente (campos continuam editáveis para ajuste fino).
 function AddMealModal({ visible, onClose, onSaved, dateStr }: {
   visible: boolean; onClose: () => void; onSaved: () => void; dateStr: string;
 }) {
   const { colors } = useTheme();
   const [name, setName] = useState('');
   const [time, setTime] = useState('');
+  const [items, setItems] = useState('');
   const [calories, setCalories] = useState('');
   const [protein, setProtein] = useState('');
   const [carbs, setCarbs] = useState('');
   const [fat, setFat] = useState('');
-  const [items, setItems] = useState('');
+  const [analysis, setAnalysis] = useState('');
+  const [analyzing, setAnalyzing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (visible) {
-      setName(''); setTime(''); setCalories(''); setProtein(''); setCarbs(''); setFat(''); setItems(''); setError('');
+      setName(''); setTime(''); setItems(''); setCalories(''); setProtein(''); setCarbs(''); setFat('');
+      setAnalysis(''); setError('');
     }
   }, [visible]);
+
+  const analyze = async () => {
+    if (!items.trim()) { setError('Descreva o que você comeu para calcular'); return; }
+    setAnalyzing(true);
+    setError('');
+    setAnalysis('');
+    try {
+      const { data } = await api.post('/nutrition/analyze', { description: items.trim() });
+      if (data?.calories > 0) {
+        setCalories(String(data.calories));
+        setProtein(String(Math.round(data.protein)));
+        setCarbs(String(Math.round(data.carbs)));
+        setFat(String(Math.round(data.fat)));
+        setAnalysis(data.analysis || '');
+      } else {
+        setError(data?.analysis || 'Não foi possível estimar — preencha manualmente.');
+      }
+    } catch {
+      setError('Não foi possível estimar agora — preencha manualmente.');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   const save = async () => {
     if (!name.trim()) { setError('Dê um nome à refeição'); return; }
@@ -125,6 +153,8 @@ function AddMealModal({ visible, onClose, onSaved, dateStr }: {
     backgroundColor: colors.text + '04',
   } as const;
 
+  const hasMacros = !!(calories || protein || carbs || fat);
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' }}>
@@ -134,18 +164,62 @@ function AddMealModal({ visible, onClose, onSaved, dateStr }: {
             <Pressable onPress={onClose} hitSlop={10}><Ionicons name="close" size={22} color={colors.textSecondary} /></Pressable>
           </View>
           <View style={{ gap: 10 }}>
-            <TextInput placeholder="Nome (ex.: Almoço)" placeholderTextColor={colors.textTertiary} value={name} onChangeText={setName} style={inputStyle} />
-            <TextInput placeholder="Horário (ex.: 12:30)" placeholderTextColor={colors.textTertiary} value={time} onChangeText={setTime} style={inputStyle} />
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TextInput placeholder="kcal" placeholderTextColor={colors.textTertiary} value={calories} onChangeText={setCalories} keyboardType="numeric" style={{ ...inputStyle, flex: 1 }} />
-              <TextInput placeholder="Prot. (g)" placeholderTextColor={colors.textTertiary} value={protein} onChangeText={setProtein} keyboardType="numeric" style={{ ...inputStyle, flex: 1 }} />
-              <TextInput placeholder="Carb. (g)" placeholderTextColor={colors.textTertiary} value={carbs} onChangeText={setCarbs} keyboardType="numeric" style={{ ...inputStyle, flex: 1 }} />
-              <TextInput placeholder="Gord. (g)" placeholderTextColor={colors.textTertiary} value={fat} onChangeText={setFat} keyboardType="numeric" style={{ ...inputStyle, flex: 1 }} />
+              <TextInput placeholder="Nome (ex.: Almoço)" placeholderTextColor={colors.textTertiary} value={name} onChangeText={setName} style={{ ...inputStyle, flex: 2 }} />
+              <TextInput placeholder="Horário" placeholderTextColor={colors.textTertiary} value={time} onChangeText={setTime} style={{ ...inputStyle, flex: 1 }} />
             </View>
-            <TextInput placeholder="Alimentos (separados por vírgula)" placeholderTextColor={colors.textTertiary} value={items} onChangeText={setItems} style={inputStyle} />
+            <TextInput
+              placeholder="O que você comeu? (ex.: 2 ovos mexidos, 2 fatias de pão integral, 1 banana, café com leite)"
+              placeholderTextColor={colors.textTertiary}
+              value={items}
+              onChangeText={setItems}
+              multiline
+              style={{ ...inputStyle, minHeight: 64, textAlignVertical: 'top' as any }}
+            />
+
+            {/* IA calcula os macros a partir da descrição */}
+            <Pressable
+              disabled={analyzing || !items.trim()}
+              onPress={analyze}
+              style={{ borderRadius: 12, paddingVertical: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, backgroundColor: '#8B5CF6' + (analyzing || !items.trim() ? '30' : ''), opacity: analyzing ? 0.8 : 1 }}
+            >
+              {analyzing ? (
+                <ActivityIndicator color="#FFF" size="small" />
+              ) : (
+                <Ionicons name="sparkles" size={16} color="#FFF" />
+              )}
+              <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFF' }}>
+                {analyzing ? 'Calculando…' : 'Calcular calorias e macros com IA'}
+              </Text>
+            </Pressable>
+
+            {!!analysis && (
+              <View style={{ borderRadius: 12, padding: 12, backgroundColor: '#8B5CF6' + '10', borderWidth: 1, borderColor: '#8B5CF6' + '25' }}>
+                <Text style={{ fontSize: 12, color: colors.textSecondary }}>✨ {analysis}</Text>
+              </View>
+            )}
+
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textTertiary, marginBottom: 4 }}>KCAL</Text>
+                <TextInput placeholder="0" placeholderTextColor={colors.textTertiary} value={calories} onChangeText={setCalories} keyboardType="numeric" style={inputStyle} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textTertiary, marginBottom: 4 }}>PROT. (G)</Text>
+                <TextInput placeholder="0" placeholderTextColor={colors.textTertiary} value={protein} onChangeText={setProtein} keyboardType="numeric" style={inputStyle} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textTertiary, marginBottom: 4 }}>CARB. (G)</Text>
+                <TextInput placeholder="0" placeholderTextColor={colors.textTertiary} value={carbs} onChangeText={setCarbs} keyboardType="numeric" style={inputStyle} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textTertiary, marginBottom: 4 }}>GORD. (G)</Text>
+                <TextInput placeholder="0" placeholderTextColor={colors.textTertiary} value={fat} onChangeText={setFat} keyboardType="numeric" style={inputStyle} />
+              </View>
+            </View>
           </View>
           {!!error && <Text style={{ fontSize: 13, color: '#DC2626', marginTop: 10 }}>{error}</Text>}
-          <Pressable disabled={saving} onPress={save} style={{ marginTop: 16, borderRadius: 14, paddingVertical: 15, alignItems: 'center', backgroundColor: colors.primary, opacity: saving ? 0.7 : 1 }}>
+          <Pressable disabled={saving} onPress={save} style={{ marginTop: 16, borderRadius: 14, paddingVertical: 15, alignItems: 'center', backgroundColor: hasMacros ? colors.primary : colors.text + '25', opacity: saving ? 0.7 : 1 }}>
             {saving ? <ActivityIndicator color="#FFF" /> : <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFF' }}>Salvar refeição</Text>}
           </Pressable>
         </View>
