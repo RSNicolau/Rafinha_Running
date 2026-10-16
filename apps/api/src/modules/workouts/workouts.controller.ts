@@ -3,10 +3,12 @@ import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { UserRole } from '@prisma/client';
 import { WorkoutsService } from './workouts.service';
 import { TrainingLoadService } from './training-load.service';
 import { CoachWorkoutsService } from './coach-workouts.service';
+import { WeeklyPlanEmailService, currentOrUpcomingWeekRange } from './weekly-plan-email.service';
 import { CreateWorkoutDto, SubmitResultDto, SubmitFeedbackDto, HealthWorkoutDto, ChangeWorkoutTypeDto } from './dto/workout.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { assertCoachOwnsAthlete } from '../../common/utils/ownership';
@@ -31,6 +33,7 @@ export class WorkoutsController {
     private trainingLoadService: TrainingLoadService,
     private prisma: PrismaService,
     private coachWorkouts: CoachWorkoutsService,
+    private weeklyPlanEmail: WeeklyPlanEmailService,
   ) {}
 
   @Post()
@@ -120,6 +123,28 @@ export class WorkoutsController {
   @ApiOperation({ summary: 'Estatísticas de um atleta (coach): total, km no mês, pace médio, sequência, km/semana' })
   async getAthleteStatsForCoach(@Param('athleteId') athleteId: string, @CurrentUser() user: any) {
     return this.coachWorkouts.statsForAthlete(user, athleteId);
+  }
+
+  @Post('athlete/:athleteId/weekly-plan-email')
+  @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @Throttle({ medium: { limit: 10, ttl: 60000 } })
+  @ApiOperation({
+    summary: 'Reenviar ao atleta, por e-mail, os treinos da semana (semana atual; aos domingos, a próxima)',
+  })
+  async resendWeeklyPlanEmail(@Param('athleteId') athleteId: string, @CurrentUser() user: any) {
+    await assertCoachOwnsAthlete(this.prisma, user, athleteId, { allowSelf: false });
+    const range = currentOrUpcomingWeekRange(new Date());
+    const result = await this.weeklyPlanEmail.sendForAthlete(athleteId, range);
+    if (result.status === 'skipped') {
+      const msg: Record<string, string> = {
+        'not-found': 'Atleta não encontrado',
+        inactive: 'Atleta inativo',
+        'no-email': 'Atleta sem e-mail cadastrado',
+        'no-workouts': 'Nenhum treino programado para esta semana (planilha ativa)',
+      };
+      throw new BadRequestException(msg[result.reason] ?? 'Não foi possível enviar o e-mail');
+    }
+    return { sent: true, workouts: result.workouts, weekStart: range.start.toISOString(), weekEnd: range.end.toISOString() };
   }
 
   @Get('group-comparison')

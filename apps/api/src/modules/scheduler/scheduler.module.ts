@@ -6,9 +6,10 @@ import { RankingsModule } from '../rankings/rankings.module';
 import { CoachBrainModule } from '../coach-brain/coach-brain.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { MembershipsModule } from '../memberships/memberships.module';
+import { WorkoutsModule } from '../workouts/workouts.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), PrismaModule, RankingsModule, CoachBrainModule, PaymentsModule, MembershipsModule],
+  imports: [ScheduleModule.forRoot(), PrismaModule, RankingsModule, CoachBrainModule, PaymentsModule, MembershipsModule, WorkoutsModule],
   providers: [SchedulerService],
 })
 export class SchedulerModule {}

@@ -7,6 +7,7 @@ import { RankingsService } from '../rankings/rankings.service';
 import { CoachBrainService } from '../coach-brain/coach-brain.service';
 import { CheckoutService } from '../payments/checkout/checkout.service';
 import { MembershipsService } from '../memberships/memberships.service';
+import { WeeklyPlanEmailService } from '../workouts/weekly-plan-email.service';
 import { SubscriptionStatus, WorkoutStatus, InviteStatus, NotificationType, PlanStatus } from '@prisma/client';
 
 @Injectable()
@@ -21,11 +22,30 @@ export class SchedulerService {
     private readonly coachBrain: CoachBrainService,
     @Optional() private readonly checkout?: CheckoutService,
     @Optional() private readonly memberships?: MembershipsService,
+    @Optional() private readonly weeklyPlan?: WeeklyPlanEmailService,
   ) {}
 
   private expiring = false;
   private membershipDailyRunning = false;
   private membershipReconcileRunning = false;
+  private weeklyPlanRunning = false;
+
+  /**
+   * Domingo 19h (SP) — e-mail "Seus treinos da semana" com os treinos programados (não realizados) de
+   * segunda a domingo seguintes, para cada atleta ativo com e-mail. Lotes + erro isolado por atleta.
+   */
+  @Cron('0 19 * * 0', { name: 'athlete-weekly-plan-email', timeZone: 'America/Sao_Paulo' })
+  async sendWeeklyPlanEmails() {
+    if (!this.weeklyPlan || this.weeklyPlanRunning) return;
+    this.weeklyPlanRunning = true;
+    try {
+      await this.weeklyPlan.sendAllForUpcomingWeek(new Date());
+    } catch (err) {
+      this.logger.error(`Weekly plan e-mail cron failed: ${err}`);
+    } finally {
+      this.weeklyPlanRunning = false;
+    }
+  }
 
   /**
    * Diário 9h15 (SP) — mensalidades: gera a próxima cobrança FAKE (dev/test) e marca PAST_DUE
@@ -244,94 +264,10 @@ export class SchedulerService {
     }
   }
 
-  /** Sunday 18h — weekly summary email for each active athlete */
-  @Cron('0 18 * * 0', { name: 'weekly-athlete-summary' })
-  async sendWeeklySummary() {
-    this.logger.log('Running weekly athlete summary...');
-    try {
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-      // Find athletes that have an active training plan
-      const athletes = await this.prisma.user.findMany({
-        where: {
-          role: 'ATHLETE',
-          deletedAt: null,
-          athleteProfile: { coachId: { not: null } },
-          athletePlans: {
-            some: { status: PlanStatus.ACTIVE },
-          },
-        },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          athleteProfile: {
-            select: { coachId: true },
-          },
-        },
-      });
-
-      for (const athlete of athletes) {
-        try {
-          // Workouts completed this week
-          const workoutsThisWeek = await this.prisma.workout.findMany({
-            where: {
-              athleteId: athlete.id,
-              status: WorkoutStatus.COMPLETED,
-              completedAt: { gte: sevenDaysAgo },
-            },
-            include: { result: true },
-          });
-
-          const totalWorkouts = workoutsThisWeek.length;
-          if (totalWorkouts === 0) continue;
-
-          const totalKm = workoutsThisWeek.reduce((acc, w) => {
-            return acc + (w.result ? w.result.distanceMeters / 1000 : 0);
-          }, 0);
-
-          // Find coach name
-          let coachName = 'Seu Coach';
-          if (athlete.athleteProfile?.coachId) {
-            const coach = await this.prisma.user.findUnique({
-              where: { id: athlete.athleteProfile.coachId },
-              select: { name: true },
-            });
-            if (coach?.name) coachName = coach.name;
-          }
-
-          // Calculate streak (consecutive days with workouts)
-          const workoutDates = new Set(
-            workoutsThisWeek.map(w => w.completedAt?.toDateString()).filter(Boolean),
-          );
-          const streak = workoutDates.size;
-
-          // Best avg pace from results
-          const paces = workoutsThisWeek
-            .map(w => w.result?.avgPace)
-            .filter((p): p is string => !!p);
-          const avgPace = paces.length > 0 ? paces[0] : undefined;
-
-          await this.email.sendWeeklySummary(athlete.email ?? '', athlete.name, {
-            totalKm: Math.round(totalKm * 10) / 10,
-            totalWorkouts,
-            avgPace,
-            streak,
-            coachName,
-          });
-        } catch (athleteErr) {
-          this.logger.warn(`Weekly summary failed for athlete ${athlete.id}: ${athleteErr}`);
-        }
-      }
-
-      this.logger.log(`Sent weekly summaries to ${athletes.length} athletes`);
-    } catch (err) {
-      this.logger.error(`Weekly summary cron failed: ${err}`);
-    }
-  }
-
-  /** Sunday 18h BRT — athlete weekly summary email (new template with bestPace & streak) */
+  /**
+   * Domingo 18h BRT (21h UTC) — resumo da semana do atleta (template com melhor pace e sequência).
+   * Único e-mail de resumo semanal do atleta (o antigo `weekly-athlete-summary` duplicado foi removido).
+   */
   @Cron('0 21 * * 0', { name: 'athlete-weekly-summary-v2' })
   async sendAthleteWeeklySummaries() {
     this.logger.log('Sending athlete weekly summary emails...');

@@ -38,6 +38,8 @@ interface Workout {
   coachNotes?: string | null;
   status: string;
   completedAt?: string | null;
+  /** Preenchido quando o treino já foi enviado ao Garmin Connect do atleta. */
+  garminWorkoutId?: string | null;
   result?: WorkoutResult | null;
 }
 
@@ -291,6 +293,56 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
   );
 }
 
+// ─── Baixar treino para o relógio (.FIT) ─────────────────────────────────────
+
+function fitFileNameFrom(header: unknown, w: Workout): string {
+  const m = /filename="?([^";]+)"?/i.exec(typeof header === 'string' ? header : '');
+  return m?.[1] || `${String(w.scheduledDate).slice(0, 10)}-treino.fit`;
+}
+
+function FitDownloadSection({ workout }: { workout: Workout }) {
+  const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState('');
+
+  const download = async () => {
+    setDownloading(true);
+    setError('');
+    try {
+      // Via cliente da API (Bearer + refresh automático do token)
+      const res = await api.get(`/workouts/${workout.id}/fit`, { responseType: 'blob' });
+      const blob = res.data instanceof Blob ? res.data : new Blob([res.data], { type: 'application/vnd.ant.fit' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fitFileNameFrom(res.headers?.['content-disposition'], workout);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch {
+      setError('Não foi possível baixar o arquivo do treino. Tente novamente.');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4 space-y-2">
+      {workout.garminWorkoutId && (
+        <p className="text-xs font-bold text-emerald-700">Enviado ao Garmin ✓</p>
+      )}
+      <button onClick={download} disabled={downloading}
+        className="w-full py-3 rounded-2xl border border-gray-200 bg-white text-gray-800 text-sm font-bold hover:bg-gray-100 transition cursor-pointer disabled:opacity-60 disabled:cursor-wait">
+        {downloading ? 'Gerando arquivo…' : 'Baixar para o relógio (.FIT)'}
+      </button>
+      <p className="text-[11px] text-gray-500 leading-relaxed">
+        Garmin: copie para a pasta GARMIN/NewFiles via USB ou importe no Garmin Connect. Coros/Suunto: importe pelo app do relógio.
+      </p>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
 function WorkoutDetailModal({ workout, onClose, onFeedback, onResult }: {
   workout: Workout; onClose: () => void; onFeedback: (w: Workout) => void; onResult: (w: Workout) => void;
 }) {
@@ -344,6 +396,8 @@ function WorkoutDetailModal({ workout, onClose, onFeedback, onResult }: {
               <p className="text-sm text-amber-900 leading-relaxed whitespace-pre-wrap">{workout.coachNotes}</p>
             </div>
           )}
+
+          {workout.status === 'SCHEDULED' && workout.type !== 'REST' && <FitDownloadSection workout={workout} />}
 
           {hasResult && (
             <div>

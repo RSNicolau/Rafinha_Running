@@ -450,6 +450,78 @@ export class EmailService {
   }
 
   /**
+   * "Seus treinos da semana" — e-mail transacional (serviço) com os treinos programados da semana.
+   * Todo texto vindo de usuário (nome, título, descrição, recado do treinador, marca) é escapado aqui.
+   */
+  async sendWeeklyPlan(
+    to: string,
+    data: {
+      name: string;
+      brandName: string;
+      weekLabel: string;
+      workouts: Array<{
+        workoutId: string;
+        dayLabel: string;
+        title: string;
+        typeLabel?: string | null;
+        targets: string[];
+        description?: string | null;
+        coachNotes?: string | null;
+        /** Token assinado do link de download do .FIT (sem login). */
+        fitToken?: string | null;
+      }>;
+    },
+  ): Promise<void> {
+    const e = (v: unknown) => this.esc(v);
+    const multiline = (v: string) => e(v).replace(/\r?\n/g, '<br/>');
+    const weekUrl = `${this.appUrl}/athlete?tab=treinos`;
+    // Download via rota web (o front faz proxy de /api/* para a API)
+    const fitUrl = (w: { workoutId: string; fitToken?: string | null }) =>
+      w.fitToken
+        ? `${this.appUrl}/api/v1/workouts/${encodeURIComponent(w.workoutId)}/fit?t=${encodeURIComponent(w.fitToken)}`
+        : null;
+    const rows = data.workouts
+      .map(
+        (w) => `
+        <div style="background:#fff;border:1px solid #E5E7EB;border-left:4px solid #DC2626;border-radius:10px;padding:14px 16px;margin-bottom:12px">
+          <p style="margin:0 0 2px;font-size:12px;font-weight:700;color:#DC2626;text-transform:uppercase;letter-spacing:.04em">${e(w.dayLabel)}</p>
+          <p style="margin:0;font-size:16px;font-weight:700;color:#111827">${e(w.title)}${
+            w.typeLabel ? ` <span style="font-size:12px;font-weight:600;color:#6B7280">· ${e(w.typeLabel)}</span>` : ''
+          }</p>
+          ${w.targets.length ? `<p style="margin:6px 0 0;font-size:13px;color:#374151">${w.targets.map(e).join(' &bull; ')}</p>` : ''}
+          ${w.description ? `<p style="margin:8px 0 0;font-size:13px;color:#374151;line-height:1.5">${multiline(w.description)}</p>` : ''}
+          ${
+            w.coachNotes
+              ? `<p style="margin:8px 0 0;padding:8px 10px;background:#FFFBEB;border-radius:6px;font-size:13px;color:#92400E;line-height:1.5"><strong>Recado do treinador:</strong> ${multiline(w.coachNotes)}</p>`
+              : ''
+          }
+          ${
+            fitUrl(w)
+              ? `<p style="margin:10px 0 0"><a href="${e(fitUrl(w))}" style="font-size:13px;font-weight:600;color:#DC2626;text-decoration:none">⌚ Baixar para o relógio (.FIT)</a></p>`
+              : ''
+          }
+        </div>`,
+      )
+      .join('');
+
+    const subjectBrand = String(data.brandName ?? '').replace(/[\r\n]+/g, ' ').trim() || 'Rafinha Running';
+    await this.send(
+      to,
+      `Seus treinos da semana — ${subjectBrand}`,
+      `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;background:#F9FAFB">
+        <h2 style="color:#DC2626;margin:0 0 4px">Seus treinos da semana</h2>
+        <p style="color:#6B7280;font-size:14px;margin:0 0 16px">${e(data.weekLabel)}</p>
+        <p style="color:#374151;font-size:14px">Olá, <strong>${e(data.name)}</strong>! Estes são os treinos que seu treinador programou para você:</p>
+        ${rows}
+        ${this.button(weekUrl, 'Abrir a semana no app')}
+        <p style="color:#6B7280;font-size:12px;line-height:1.5">Arquivo .FIT — Garmin: copie para a pasta GARMIN/NewFiles via USB ou importe no Garmin Connect. Coros/Suunto: importe pelo app do relógio. Os links de download valem por 14 dias.</p>
+        <hr style="border:none;border-top:1px solid #E5E7EB;margin:20px 0"/>
+        <p style="color:#9CA3AF;font-size:12px">${e(subjectBrand)} &bull; Você recebe este e-mail porque tem treinos programados na assessoria.</p>
+      </div>`,
+    );
+  }
+
+  /**
    * Envio genérico de e-mail transacional (ex.: avisos LGPD). O HTML deve ser montado
    * pelo chamador com dados já escapados.
    */

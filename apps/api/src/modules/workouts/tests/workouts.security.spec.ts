@@ -36,7 +36,7 @@ describe('H2 — GET /workouts/training-load/:athleteId', () => {
   it('coach não acessa carga de atleta alheio', async () => {
     const prisma: any = { athleteProfile: { findUnique: jest.fn().mockResolvedValue({ coachId: 'other' }) } };
     const tl = { getTrainingLoad: jest.fn() };
-    const ctrl = new WorkoutsController({} as any, tl as any, prisma, {} as any);
+    const ctrl = new WorkoutsController({} as any, tl as any, prisma, {} as any, {} as any);
     await expect(ctrl.getAthleteTrainingLoad('victim', { id: 'coach-1', role: 'COACH' }, 30)).rejects.toBeInstanceOf(NotFoundException);
     expect(tl.getTrainingLoad).not.toHaveBeenCalled();
   });

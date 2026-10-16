@@ -17,6 +17,9 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.82.0
         version: 0.82.0
+      '@garmin/fitsdk':
+        specifier: 21.218.0
+        version: 21.218.0
       '@google/generative-ai':
         specifier: ^0.24.1
         version: 0.24.1
@@ -1555,6 +1558,9 @@ packages:
 
   '@formatjs/intl-localematcher@0.8.2':
     resolution: {integrity: sha512-q05KMYGJLyqFNFtIb8NhWLF5X3aK/k0wYt7dnRFuy6aLQL+vUwQ1cg5cO4qawEiINybeCPXAWlprY2mSBjSXAQ==}
+
+  '@garmin/fitsdk@21.218.0':
+    resolution: {integrity: sha512-Jbhedp3AJ/xJBSuiPBlPpwH5QISXd+GYtfnAUZ3u68hUqkzHiRWUhla8xj4tW/05w6gKsErEt+7GQCFap+a2kQ==}
 
   '@google/generative-ai@0.24.1':
     resolution: {integrity: sha512-MqO+MLfM6kjxcKoy0p1wRzG3b4ZZXtPI+z2IE26UogS2Cm/XHO+7gGRBh6gcJsOiIVoH93UwKvW4HdgiOZCy9Q==}
@@ -11005,6 +11011,8 @@ snapshots:
   '@formatjs/intl-localematcher@0.8.2':
     dependencies:
       '@formatjs/fast-memoize': 3.1.1
+
+  '@garmin/fitsdk@21.218.0': {}
 
   '@google/generative-ai@0.24.1': {}
 

@@ -55,7 +55,14 @@ import { MembershipsModule } from './modules/memberships/memberships.module';
           : undefined,
         level: process.env.NODE_ENV !== 'production' ? 'debug' : 'info',
         autoLogging: true,
-        redact: ['req.headers.authorization'],
+        redact: ['req.headers.authorization', 'req.query.t'],
+        serializers: {
+          // Link assinado de download do .FIT (?t=) não pode ir para os logs
+          req: (req: any) =>
+            typeof req?.url === 'string' && req.url.includes('/fit?')
+              ? { ...req, url: req.url.replace(/([?&]t=)[^&]*/g, '$1[Redacted]') }
+              : req,
+        },
       },
     }),
     ThrottlerModule.forRoot({

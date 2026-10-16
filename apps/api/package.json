@@ -18,6 +18,7 @@
     "@anthropic-ai/sdk": "^0.82.0",
     "@swc/cli": "^0.6.0",
     "@swc/core": "^1.10.0",
+    "@garmin/fitsdk": "21.218.0",
     "@google/generative-ai": "^0.24.1",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
@@ -96,8 +97,21 @@
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
+      "node_modules/@garmin/fitsdk/.+\\.js$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "allowJs": true,
+            "module": "commonjs"
+          },
+          "diagnostics": false
+        }
+      ],
       "^.+\\.(t|j)s$": "ts-jest"
     },
+    "transformIgnorePatterns": [
+      "/node_modules/(?!@garmin/fitsdk/)"
+    ],
     "collectCoverageFrom": [
       "**/*.(t|j)s"
     ],

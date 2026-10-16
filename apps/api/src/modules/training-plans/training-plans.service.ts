@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Optional } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   assertCoachOwnsAthlete,
@@ -9,6 +9,7 @@ import {
 } from '../../common/utils/ownership';
 import { addCalendarDays, toCalendarDate } from '../../common/utils/date-only';
 import { NotificationsService } from '../notifications/notifications.service';
+import { GarminAutoSyncService } from '../integrations/garmin/garmin-auto-sync.service';
 import {
   CreatePlanDto,
   DuplicatePlanDto,
@@ -50,6 +51,7 @@ export class TrainingPlansService {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationsService,
+    @Optional() private garminSync?: GarminAutoSyncService,
   ) {}
 
   // ── Acesso ──────────────────────────────────────────────────────────────
@@ -275,6 +277,8 @@ export class TrainingPlansService {
         `Sua planilha "${updated.name}" está ativa. Bons treinos!`,
         { planId: id },
       ).catch(() => {});
+      // Planilha publicada: envia ao Garmin os treinos futuros ainda não enviados (fire-and-forget)
+      this.garminSync?.onPlanActivated(id);
     }
     return updated;
   }
@@ -286,6 +290,15 @@ export class TrainingPlansService {
   async remove(id: string, userArg: AuthUserLike | string) {
     const user = toUser(userArg);
     await this.loadPlanForWrite(id, user);
+    // Treinos que já estão no Garmin e serão removidos (não realizados) → remover lá também (best-effort)
+    const onGarmin = this.garminSync?.enabled
+      ? await this.prisma.workout
+          .findMany({
+            where: { planId: id, garminWorkoutId: { not: null }, status: { not: WorkoutStatus.COMPLETED }, result: { is: null } },
+            select: { id: true, athleteId: true, garminWorkoutId: true, garminScheduleId: true },
+          })
+          .catch(() => [])
+      : [];
     const withHistory = await this.prisma.workout.count({
       where: { planId: id, OR: [{ status: WorkoutStatus.COMPLETED }, { result: { isNot: null } }] },
     });
@@ -297,9 +310,11 @@ export class TrainingPlansService {
         where: { id },
         data: { deletedAt: new Date(), status: PlanStatus.COMPLETED },
       });
+      this.garminSync?.onWorkoutsDeleted(onGarmin);
       return { deleted: true, soft: true, preservedWorkouts: withHistory };
     }
     await this.prisma.trainingPlan.delete({ where: { id } }); // treinos em cascata
+    this.garminSync?.onWorkoutsDeleted(onGarmin);
     return { deleted: true, soft: false };
   }
 
@@ -381,6 +396,8 @@ export class TrainingPlansService {
         { workoutId: workout.id, type: dto.type },
       ).catch(() => {});
     }
+    // Envio automático ao Garmin (só se a planilha estiver ativa e o atleta tiver Garmin conectado)
+    this.garminSync?.onWorkoutSaved(workout.id);
     return workout;
   }
 
@@ -402,7 +419,10 @@ export class TrainingPlansService {
       if (dto[k] !== undefined) data[k] = dto[k];
     }
     if (dto.targetPace !== undefined) data.targetPace = dto.targetPace ? dto.targetPace.replace(/\s*\/\s*km$/, '') : null;
-    return this.prisma.workout.update({ where: { id: workoutId }, data });
+    const updated = await this.prisma.workout.update({ where: { id: workoutId }, data });
+    // Edição/reagendamento: substitui o treino no Garmin (fire-and-forget)
+    this.garminSync?.onWorkoutSaved(workoutId);
+    return updated;
   }
 
   async deleteWorkout(planId: string, workoutId: string, userArg: AuthUserLike | string) {
@@ -413,6 +433,11 @@ export class TrainingPlansService {
       throw new BadRequestException('Treino já realizado não pode ser excluído (faz parte do histórico do atleta)');
     }
     await this.prisma.workout.delete({ where: { id: workoutId } });
+    if (workout.garminWorkoutId) {
+      this.garminSync?.onWorkoutsDeleted([
+        { id: workout.id, athleteId: workout.athleteId, garminWorkoutId: workout.garminWorkoutId, garminScheduleId: workout.garminScheduleId },
+      ]);
+    }
     return { deleted: true };
   }
 }

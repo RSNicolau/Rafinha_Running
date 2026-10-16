@@ -173,6 +173,50 @@ export class GarminService {
     };
   }
 
+  /**
+   * Remove (best-effort) um treino do Garmin Connect do atleta: agenda + treino.
+   * Nunca lança — devolve true se o treino foi removido (ou já não existia lá).
+   */
+  async deleteWorkoutFromGarmin(
+    athleteId: string,
+    garminWorkoutId: string,
+    garminScheduleId?: string | null,
+  ): Promise<boolean> {
+    try {
+      const integration = await this.prisma.fitnessIntegration.findFirst({
+        where: { userId: athleteId, provider: IntegrationProvider.GARMIN, isActive: true },
+      });
+      if (!integration) return false;
+      const accessToken = await this.ensureValidToken(integration);
+      const headers = { Authorization: `Bearer ${accessToken}` };
+
+      if (garminScheduleId) {
+        const res = await fetch(`${GARMIN_SCHEDULE_API}/${encodeURIComponent(garminScheduleId)}`, {
+          method: 'DELETE',
+          headers,
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!res.ok && res.status !== 404) {
+          this.logger.warn(`Garmin delete schedule ${garminScheduleId} failed: ${res.status} (non-fatal)`);
+        }
+      }
+
+      const res = await fetch(`${GARMIN_TRAINING_API}/${encodeURIComponent(garminWorkoutId)}`, {
+        method: 'DELETE',
+        headers,
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok && res.status !== 404) {
+        this.logger.warn(`Garmin delete workout ${garminWorkoutId} failed: ${res.status}`);
+        return false;
+      }
+      return true;
+    } catch (err: any) {
+      this.logger.warn(`Garmin delete workout ${garminWorkoutId} failed: ${err?.message ?? err}`);
+      return false;
+    }
+  }
+
   /** Push all workouts in a training plan to Garmin */
   async pushPlanToGarmin(planId: string) {
     const plan = await this.prisma.trainingPlan.findUnique({

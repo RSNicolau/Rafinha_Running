@@ -3,9 +3,15 @@
  *
  * Reference: Garmin Connect Developer Program - Training API
  * Workout JSON spec reverse-engineered from community tools + official docs.
+ *
+ * REGRA: nunca inventar passos que o treinador não definiu. A estrutura (aquecimento / repetições /
+ * recuperação / desaquecimento) só existe quando está ESCRITA de forma explícita e interpretável na
+ * descrição (ex.: "aquecimento 15min", "6x800m", "2min de trote", "desaquecimento 10min").
+ * Caso contrário: UM passo com a distância/duração alvo (aberto se nenhuma), com alvo de pace/FC só se
+ * o treinador definiu. O mesmo modelo (buildWorkoutStructure) alimenta o push Garmin e o arquivo .FIT.
  */
 
-import { Workout, WorkoutType, HeartRateZone } from '@prisma/client';
+import { Workout, HeartRateZone } from '@prisma/client';
 
 // --- Garmin JSON Types ---
 
@@ -172,10 +178,251 @@ function makeStep(
   };
 }
 
+// --- Modelo de passos compartilhado (Garmin push + arquivo .FIT) ---
+
+export type RRStepKind = 'warmup' | 'active' | 'rest' | 'cooldown';
+
+export type RRStepDuration =
+  | { type: 'time'; seconds: number }
+  | { type: 'distance'; meters: number }
+  | { type: 'open' };
+
+export interface RRStep {
+  kind: RRStepKind;
+  name: string;
+  duration: RRStepDuration;
+  /** Alvo — só 'pace'/'hr' quando o treinador definiu targetPace / heartRateZone. */
+  target: 'pace' | 'hr' | 'none';
+  /** Instruções do treinador (descrição) anexadas ao passo principal. */
+  notes?: string;
+}
+
+export interface RRRepeat {
+  repeat: number;
+  steps: RRStep[];
+}
+
+export type RRStructureItem = RRStep | RRRepeat;
+
+export function isRepeat(item: RRStructureItem): item is RRRepeat {
+  return (item as RRRepeat).repeat !== undefined;
+}
+
+export interface RRWorkoutStructure {
+  /** true quando a estrutura veio de texto explícito da descrição. */
+  explicit: boolean;
+  items: RRStructureItem[];
+}
+
+type StructureInput = Pick<
+  Workout,
+  'title' | 'description' | 'targetDistanceMeters' | 'targetDurationSeconds' | 'targetPace' | 'heartRateZone'
+>;
+
+const NUM = '(\\d+(?:[.,]\\d+)?)';
+
+function toNumber(v: string): number {
+  return parseFloat(v.replace(',', '.'));
+}
+
+/** "15" + "min" → duração; "2" + "km" → distância. Null se não interpretável. */
+function toDuration(value: string, unitRaw: string): RRStepDuration | null {
+  const n = toNumber(value);
+  if (!(n > 0)) return null;
+  const unit = unitRaw.toLowerCase();
+  if (unit === 'min' || unit === "'") return { type: 'time', seconds: Math.round(n * 60) };
+  if (unit === 's' || unit === 'seg' || unit === '"') return { type: 'time', seconds: Math.round(n) };
+  if (unit === 'km') return { type: 'distance', meters: Math.round(n * 1000) };
+  if (unit === 'm') return { type: 'distance', meters: Math.round(n) };
+  return null;
+}
+
+function durationLabel(d: RRStepDuration): string {
+  if (d.type === 'distance') return d.meters >= 1000 ? `${d.meters / 1000} km` : `${d.meters} m`;
+  if (d.type === 'time') return d.seconds % 60 === 0 ? `${d.seconds / 60} min` : `${d.seconds} s`;
+  return '';
+}
+
+function normalize(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/×/g, 'x');
+}
+
+function matchFirst(text: string, patterns: RegExp[]): RegExpExecArray | null {
+  for (const re of patterns) {
+    const m = re.exec(text);
+    if (m) return m;
+  }
+  return null;
+}
+
+/** Quantidade + unidade antes/depois de uma palavra-chave (ex.: "aquecimento 15min" | "15min de aquecimento"). */
+function keywordDuration(text: string, keyword: string): RRStepDuration | null {
+  const unit = "(min|km|m|s|seg)\\b";
+  const m = matchFirst(text, [
+    new RegExp(`${keyword}\\w*\\s*(?:de\\s*|:\\s*)?${NUM}\\s*${unit}`),
+    new RegExp(`${NUM}\\s*${unit}\\s*(?:de\\s*)?${keyword}`),
+  ]);
+  return m ? toDuration(m[1], m[2]) : null;
+}
+
+/**
+ * Lê estrutura EXPLÍCITA da descrição do treinador. Reconhece:
+ *  - aquecimento: "aquecimento 15min", "15min de aquecimento", "aquecer 2km";
+ *  - desaquecimento: "desaquecimento 10min", "10min de desaquecimento", "volta a calma 5min";
+ *  - repetições: "6x800m", "5 x 1km", "8x1min", "10x30s";
+ *  - recuperação entre repetições: "2min de trote", "pausa 90s", "recuperação 200m", "descanso de 1min".
+ * Devolve null se nada disso estiver escrito.
+ */
+export function parseExplicitStructure(description: string | null | undefined): {
+  warmup?: RRStepDuration;
+  cooldown?: RRStepDuration;
+  repeat?: { reps: number; work: RRStepDuration; rest?: RRStepDuration };
+} | null {
+  if (!description || !description.trim()) return null;
+  const text = normalize(description);
+
+  // "(?<!des)" evita que "desaquecimento" conte como aquecimento
+  const warmup = keywordDuration(text, '(?<!des)aquec') ?? undefined;
+  const cooldown =
+    keywordDuration(text, 'desaquec') ?? keywordDuration(text, 'volta a calma') ?? undefined;
+
+  let repeat: { reps: number; work: RRStepDuration; rest?: RRStepDuration } | undefined;
+  const rep = new RegExp(`(\\d{1,2})\\s*x\\s*${NUM}\\s*(km|m|min|s|seg|'|")(?![a-z])`).exec(text);
+  if (rep) {
+    const reps = parseInt(rep[1], 10);
+    const work = toDuration(rep[2], rep[3]);
+    if (work && reps >= 1 && reps <= 50) {
+      const afterRep = text.slice(rep.index + rep[0].length);
+      const restKw = '(?:pausa|intervalo|recupera\\w*|descanso|trote|rec\\b)';
+      const restM = matchFirst(afterRep, [
+        new RegExp(`${restKw}\\s*(?:de\\s*|:\\s*)?${NUM}\\s*(min|s|seg|m|km)\\b`),
+        new RegExp(`${NUM}\\s*(min|s|seg|m|km)\\s*(?:de\\s*)?${restKw}`),
+      ]);
+      const rest = restM ? toDuration(restM[1], restM[2]) ?? undefined : undefined;
+      repeat = { reps, work, ...(rest ? { rest } : {}) };
+    }
+  }
+
+  if (!warmup && !cooldown && !repeat) return null;
+  return { warmup, cooldown, repeat };
+}
+
+/** Estrutura de passos do treino — explícita (descrição) ou passo único com os alvos do treinador. */
+export function buildWorkoutStructure(workout: StructureInput): RRWorkoutStructure {
+  const target: RRStep['target'] = paceToSecondsPerMeter(workout.targetPace)
+    ? 'pace'
+    : workout.heartRateZone
+      ? 'hr'
+      : 'none';
+  const notes = workout.description?.trim() || undefined;
+  const parsed = parseExplicitStructure(workout.description);
+
+  if (!parsed) {
+    let duration: RRStepDuration = { type: 'open' };
+    if (workout.targetDistanceMeters && workout.targetDistanceMeters > 0) {
+      duration = { type: 'distance', meters: workout.targetDistanceMeters };
+    } else if (workout.targetDurationSeconds && workout.targetDurationSeconds > 0) {
+      duration = { type: 'time', seconds: workout.targetDurationSeconds };
+    }
+    return {
+      explicit: false,
+      items: [{ kind: 'active', name: workout.title, duration, target, ...(notes ? { notes } : {}) }],
+    };
+  }
+
+  const items: RRStructureItem[] = [];
+  if (parsed.warmup) {
+    items.push({ kind: 'warmup', name: 'Aquecimento', duration: parsed.warmup, target: 'none' });
+  }
+  if (parsed.repeat) {
+    const steps: RRStep[] = [
+      {
+        kind: 'active',
+        name: `${parsed.repeat.reps}x ${durationLabel(parsed.repeat.work)}`,
+        duration: parsed.repeat.work,
+        target,
+        ...(notes ? { notes } : {}),
+      },
+    ];
+    if (parsed.repeat.rest) {
+      steps.push({ kind: 'rest', name: 'Recuperação', duration: parsed.repeat.rest, target: 'none' });
+    }
+    items.push({ repeat: parsed.repeat.reps, steps });
+  } else {
+    // Só aquecimento/desaquecimento escritos: o bloco principal fica aberto (botão de volta), com os alvos do treinador
+    items.push({ kind: 'active', name: workout.title, duration: { type: 'open' }, target, ...(notes ? { notes } : {}) });
+  }
+  if (parsed.cooldown) {
+    items.push({ kind: 'cooldown', name: 'Desaquecimento', duration: parsed.cooldown, target: 'none' });
+  }
+  return { explicit: true, items };
+}
+
 // --- Main Converter ---
 
 export function convertWorkoutToGarmin(workout: Workout): GarminWorkoutPayload {
-  const steps = buildStepsForWorkoutType(workout);
+  const structure = buildWorkoutStructure(workout);
+  const hrZone = hrZoneToNumber(workout.heartRateZone);
+  const paceTarget = paceToSecondsPerMeter(workout.targetPace);
+
+  const toGarminStep = (step: RRStep, order: number): GarminExecutableStep => {
+    const stepType =
+      step.kind === 'warmup' ? STEP_TYPES.warmup
+        : step.kind === 'cooldown' ? STEP_TYPES.cooldown
+          : step.kind === 'rest' ? STEP_TYPES.rest
+            : STEP_TYPES.interval;
+
+    let endCondition: GarminCondition = { ...CONDITIONS.lapButton };
+    let endConditionValue = '0';
+    const extra: Partial<GarminExecutableStep> = {};
+    if (step.duration.type === 'time') {
+      endCondition = { ...CONDITIONS.time };
+      endConditionValue = `${step.duration.seconds}.0`;
+    } else if (step.duration.type === 'distance') {
+      endCondition = { ...CONDITIONS.distance };
+      endConditionValue = `${step.duration.meters}.0`;
+      extra.preferredEndConditionUnit = { ...METER_UNIT };
+    }
+
+    const garminStep = makeStep(
+      order,
+      stepType as any,
+      endCondition,
+      endConditionValue,
+      step.name.slice(0, 100),
+      TARGETS.noTarget as any,
+      extra,
+    );
+    if (step.target === 'pace' && paceTarget) {
+      garminStep.targetType = { ...TARGETS.pace } as any;
+      garminStep.targetValueOne = paceTarget.low;
+      garminStep.targetValueTwo = paceTarget.high;
+    } else if (step.target === 'hr' && hrZone) {
+      garminStep.targetType = { ...TARGETS.heartRateZone } as any;
+      garminStep.zoneNumber = hrZone;
+    }
+    return garminStep;
+  };
+
+  const steps: GarminStep[] = structure.items.map((item, i) => {
+    if (isRepeat(item)) {
+      return {
+        type: 'RepeatGroupDTO',
+        stepOrder: i + 1,
+        stepType: { ...STEP_TYPES.repeat } as any,
+        childStepId: 1,
+        numberOfIterations: item.repeat,
+        workoutSteps: item.steps.map((s, j) => toGarminStep(s, j + 1)),
+        endConditionValue: `${item.repeat}.0`,
+        endCondition: { ...CONDITIONS.iterations } as any,
+      } as GarminRepeatGroup;
+    }
+    return toGarminStep(item, i + 1);
+  });
 
   return {
     workoutId: null,
@@ -194,265 +441,4 @@ export function convertWorkoutToGarmin(workout: Workout): GarminWorkoutPayload {
     estimatedDistanceUnit: { unitId: null, unitKey: null, factor: null },
     shared: false,
   };
-}
-
-function buildStepsForWorkoutType(workout: Workout): GarminStep[] {
-  const hrZone = hrZoneToNumber(workout.heartRateZone);
-  const paceTarget = paceToSecondsPerMeter(workout.targetPace);
-
-  switch (workout.type) {
-    case WorkoutType.EASY_RUN:
-      return buildEasyRun(workout, hrZone);
-
-    case WorkoutType.TEMPO:
-      return buildTempo(workout, hrZone, paceTarget);
-
-    case WorkoutType.INTERVAL:
-      return buildInterval(workout, hrZone, paceTarget);
-
-    case WorkoutType.LONG_RUN:
-      return buildLongRun(workout, hrZone);
-
-    case WorkoutType.RECOVERY:
-      return buildRecovery(workout);
-
-    case WorkoutType.RACE:
-      return buildRace(workout);
-
-    case WorkoutType.CROSS_TRAINING:
-    case WorkoutType.REST:
-    default:
-      return buildSimpleRun(workout, hrZone);
-  }
-}
-
-/** Easy Run: single step with HR zone 2 target or time-based */
-function buildEasyRun(workout: Workout, hrZone?: string): GarminStep[] {
-  const duration = workout.targetDurationSeconds || 2400; // default 40min
-  const target = hrZone
-    ? (TARGETS.heartRateZone as any)
-    : (TARGETS.noTarget as any);
-
-  return [
-    makeStep(1, STEP_TYPES.warmup as any, CONDITIONS.time as any, '300.0', 'Aquecimento leve'),
-    makeStep(
-      2,
-      STEP_TYPES.interval as any,
-      CONDITIONS.time as any,
-      `${duration - 600}.0`,
-      'Corrida leve',
-      target,
-      hrZone ? { zoneNumber: hrZone || '2' } : {},
-    ),
-    makeStep(3, STEP_TYPES.cooldown as any, CONDITIONS.time as any, '300.0', 'Desaquecimento'),
-  ];
-}
-
-/** Tempo: warmup + tempo block (pace target) + cooldown */
-function buildTempo(
-  workout: Workout,
-  hrZone?: string,
-  paceTarget?: { low: number; high: number } | null,
-): GarminStep[] {
-  const duration = workout.targetDurationSeconds || 2400;
-  const tempoDuration = Math.max(duration - 900, 600); // subtract warmup+cooldown
-
-  const step = makeStep(
-    2,
-    STEP_TYPES.interval as any,
-    CONDITIONS.time as any,
-    `${tempoDuration}.0`,
-    'Ritmo forte sustentado',
-    hrZone ? (TARGETS.heartRateZone as any) : (TARGETS.noTarget as any),
-    hrZone ? { zoneNumber: hrZone || '4' } : {},
-  );
-
-  if (paceTarget) {
-    step.targetType = { ...TARGETS.pace } as any;
-    step.targetValueOne = paceTarget.low;
-    step.targetValueTwo = paceTarget.high;
-  }
-
-  return [
-    makeStep(1, STEP_TYPES.warmup as any, CONDITIONS.time as any, '600.0', 'Aquecimento 10min'),
-    step,
-    makeStep(3, STEP_TYPES.cooldown as any, CONDITIONS.time as any, '300.0', 'Desaquecimento 5min'),
-  ];
-}
-
-/** Interval: warmup + repeat(interval + rest) + cooldown */
-function buildInterval(
-  workout: Workout,
-  hrZone?: string,
-  paceTarget?: { low: number; high: number } | null,
-): GarminStep[] {
-  // Parse interval details from description or use defaults
-  const { reps, intervalDistance, restSeconds } = parseIntervalDetails(workout);
-
-  const intervalStep = makeStep(
-    1,
-    STEP_TYPES.interval as any,
-    CONDITIONS.distance as any,
-    `${intervalDistance}.0`,
-    `${intervalDistance}m forte`,
-    hrZone ? (TARGETS.heartRateZone as any) : (TARGETS.noTarget as any),
-    {
-      preferredEndConditionUnit: { ...METER_UNIT },
-      ...(hrZone ? { zoneNumber: hrZone || '4' } : {}),
-    },
-  );
-
-  if (paceTarget) {
-    intervalStep.targetType = { ...TARGETS.pace } as any;
-    intervalStep.targetValueOne = paceTarget.low;
-    intervalStep.targetValueTwo = paceTarget.high;
-  }
-
-  const restStep = makeStep(
-    2,
-    STEP_TYPES.rest as any,
-    CONDITIONS.fixedRest as any,
-    `${restSeconds}.0`,
-    'Recuperação',
-  );
-
-  const repeatGroup: GarminRepeatGroup = {
-    type: 'RepeatGroupDTO',
-    stepOrder: 2,
-    stepType: { ...STEP_TYPES.repeat } as any,
-    childStepId: 1,
-    numberOfIterations: reps,
-    workoutSteps: [intervalStep, restStep],
-    endConditionValue: `${reps}.0`,
-    endCondition: { ...CONDITIONS.iterations } as any,
-  };
-
-  return [
-    makeStep(1, STEP_TYPES.warmup as any, CONDITIONS.time as any, '600.0', 'Aquecimento 10min'),
-    repeatGroup,
-    makeStep(3, STEP_TYPES.cooldown as any, CONDITIONS.time as any, '300.0', 'Desaquecimento 5min'),
-  ];
-}
-
-/** Long Run: single long step with distance target, HR zone 2 */
-function buildLongRun(workout: Workout, hrZone?: string): GarminStep[] {
-  if (workout.targetDistanceMeters) {
-    return [
-      makeStep(1, STEP_TYPES.warmup as any, CONDITIONS.time as any, '600.0', 'Aquecimento 10min'),
-      makeStep(
-        2,
-        STEP_TYPES.interval as any,
-        CONDITIONS.distance as any,
-        `${workout.targetDistanceMeters}.0`,
-        'Corrida longa',
-        hrZone ? (TARGETS.heartRateZone as any) : (TARGETS.noTarget as any),
-        {
-          preferredEndConditionUnit: { ...METER_UNIT },
-          ...(hrZone ? { zoneNumber: hrZone || '2' } : {}),
-        },
-      ),
-      makeStep(3, STEP_TYPES.cooldown as any, CONDITIONS.time as any, '300.0', 'Desaquecimento'),
-    ];
-  }
-
-  // Fallback to time-based
-  const duration = workout.targetDurationSeconds || 5400; // default 90min
-  return [
-    makeStep(1, STEP_TYPES.warmup as any, CONDITIONS.time as any, '600.0', 'Aquecimento'),
-    makeStep(
-      2,
-      STEP_TYPES.interval as any,
-      CONDITIONS.time as any,
-      `${duration - 900}.0`,
-      'Corrida longa',
-      hrZone ? (TARGETS.heartRateZone as any) : (TARGETS.noTarget as any),
-      hrZone ? { zoneNumber: hrZone || '2' } : {},
-    ),
-    makeStep(3, STEP_TYPES.cooldown as any, CONDITIONS.time as any, '300.0', 'Desaquecimento'),
-  ];
-}
-
-/** Recovery: easy pace, low HR, shorter duration */
-function buildRecovery(workout: Workout): GarminStep[] {
-  const duration = workout.targetDurationSeconds || 1800; // default 30min
-  return [
-    makeStep(
-      1,
-      STEP_TYPES.interval as any,
-      CONDITIONS.time as any,
-      `${duration}.0`,
-      'Recuperação ativa - ritmo bem leve',
-      TARGETS.heartRateZone as any,
-      { zoneNumber: '1' },
-    ),
-  ];
-}
-
-/** Race: distance-based, no specific target */
-function buildRace(workout: Workout): GarminStep[] {
-  if (workout.targetDistanceMeters) {
-    return [
-      makeStep(1, STEP_TYPES.warmup as any, CONDITIONS.time as any, '600.0', 'Aquecimento'),
-      makeStep(
-        2,
-        STEP_TYPES.interval as any,
-        CONDITIONS.distance as any,
-        `${workout.targetDistanceMeters}.0`,
-        'Prova',
-        TARGETS.noTarget as any,
-        { preferredEndConditionUnit: { ...METER_UNIT } },
-      ),
-      makeStep(3, STEP_TYPES.cooldown as any, CONDITIONS.lapButton as any, '0', 'Desaquecimento livre'),
-    ];
-  }
-  return buildSimpleRun(workout);
-}
-
-/** Generic simple run fallback */
-function buildSimpleRun(workout: Workout, hrZone?: string): GarminStep[] {
-  const duration = workout.targetDurationSeconds || 1800;
-  return [
-    makeStep(
-      1,
-      STEP_TYPES.interval as any,
-      CONDITIONS.time as any,
-      `${duration}.0`,
-      workout.title,
-      hrZone ? (TARGETS.heartRateZone as any) : (TARGETS.noTarget as any),
-      hrZone ? { zoneNumber: hrZone || '2' } : {},
-    ),
-  ];
-}
-
-/** Parse interval details from workout description or use sensible defaults */
-function parseIntervalDetails(workout: Workout): {
-  reps: number;
-  intervalDistance: number;
-  restSeconds: number;
-} {
-  const desc = (workout.description || '').toLowerCase();
-
-  // Try to parse "5x1000m" or "8x400m" pattern
-  const match = desc.match(/(\d+)\s*x\s*(\d+)\s*m/);
-  if (match) {
-    return {
-      reps: parseInt(match[1]),
-      intervalDistance: parseInt(match[2]),
-      restSeconds: parseInt(match[2]) <= 400 ? 60 : 120, // shorter rest for shorter intervals
-    };
-  }
-
-  // Default based on target distance
-  if (workout.targetDistanceMeters) {
-    const totalDist = workout.targetDistanceMeters;
-    if (totalDist <= 4000) {
-      return { reps: 8, intervalDistance: 400, restSeconds: 60 };
-    } else if (totalDist <= 8000) {
-      return { reps: 5, intervalDistance: 1000, restSeconds: 120 };
-    } else {
-      return { reps: 4, intervalDistance: 2000, restSeconds: 180 };
-    }
-  }
-
-  return { reps: 5, intervalDistance: 1000, restSeconds: 120 };
 }

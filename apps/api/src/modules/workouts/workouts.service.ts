@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger, Optional } from '@nestjs/common';
 import { endOfPeriod, localDateParts, localMidnight, startOfPeriod } from '../../common/utils/sp-period';
 import Anthropic from '@anthropic-ai/sdk';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUserLike, isPlatformAdmin, assertCoachOwnsAthlete } from '../../common/utils/ownership';
 import { NotificationsService } from '../notifications/notifications.service';
 import { BadgesService } from '../badges/badges.service';
+import { GarminAutoSyncService } from '../integrations/garmin/garmin-auto-sync.service';
 import { CreateWorkoutDto, SubmitResultDto, SubmitFeedbackDto } from './dto/workout.dto';
 import { WorkoutStatus, NotificationType } from '@prisma/client';
 
@@ -16,6 +17,7 @@ export class WorkoutsService {
     private prisma: PrismaService,
     private notifications: NotificationsService,
     private badges: BadgesService,
+    @Optional() private garminSync?: GarminAutoSyncService,
   ) {}
 
   async create(coachId: string, dto: CreateWorkoutDto) {
@@ -49,6 +51,9 @@ export class WorkoutsService {
       `${dto.title} — ${new Date(dto.scheduledDate).toLocaleDateString('pt-BR')}`,
       { workoutId: workout.id, type: dto.type },
     ).catch(() => {}); // Fire-and-forget
+
+    // Envio automático ao Garmin do atleta (fire-and-forget; nunca falha a requisição)
+    this.garminSync?.onWorkoutSaved(workout.id);
 
     return workout;
   }
@@ -586,6 +591,8 @@ export class WorkoutsService {
       `O tipo do seu treino de hoje foi alterado para ${newType}`,
       { workoutId, newType },
     ).catch(() => {});
+
+    this.garminSync?.onWorkoutSaved(workoutId);
 
     return updated;
   }

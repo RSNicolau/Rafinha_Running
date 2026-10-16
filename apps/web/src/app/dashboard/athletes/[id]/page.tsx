@@ -9,6 +9,7 @@ import dynamic from 'next/dynamic';
 import AiUnavailableNotice from '@/components/coach/AiUnavailableNotice';
 import { formatCalendarDate, formatInstant, formatPaceSeconds, isAiNotConfigured, WORKOUT_TYPE_LABELS, formatKm } from '@/lib/coach-format';
 import { friendlyError } from '@/lib/api';
+import { toast } from 'sonner';
 
 const GarminRecoveryCard = dynamic(() => import('../_components/GarminRecoveryCard'), { ssr: false });
 const TrainingLoadChart = dynamic(() => import('./TrainingLoadChart'), { ssr: false });
@@ -642,6 +643,20 @@ export default function AthleteDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [pushingGarmin, setPushingGarmin] = useState(false);
   const [garminPushMsg, setGarminPushMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [sendingWeekEmail, setSendingWeekEmail] = useState(false);
+
+  const resendWeeklyPlanEmail = async () => {
+    setSendingWeekEmail(true);
+    try {
+      const { data } = await api.post(`/workouts/athlete/${id}/weekly-plan-email`);
+      const n = Number(data?.workouts ?? 0);
+      toast.success(`E-mail enviado com ${n} treino${n === 1 ? '' : 's'} da semana`);
+    } catch (e) {
+      toast.error(friendlyError(e, 'Não foi possível enviar o e-mail dos treinos da semana'));
+    } finally {
+      setSendingWeekEmail(false);
+    }
+  };
   // Sincronização direta com Garmin desativada no lançamento (Strava é a ponte) — só exibe se a API liberar
   const garminAvailable = useProviderAvailable('GARMIN');
   const [activeTab, setActiveTab] = useState<'overview' | 'nutrition' | 'documents'>('overview');
@@ -980,6 +995,17 @@ export default function AthleteDetailPage() {
                 {pushingGarmin ? 'Enviando ao Garmin...' : 'Enviar planilha ao Garmin'}
               </button>
               )}
+
+              <button
+                onClick={resendWeeklyPlanEmail}
+                disabled={sendingWeekEmail}
+                className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition mb-3 disabled:opacity-50 cursor-pointer w-full justify-center"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+                </svg>
+                {sendingWeekEmail ? 'Enviando e-mail...' : 'Reenviar treinos da semana por e-mail'}
+              </button>
 
               <Link
                 href={`/dashboard/plans/${plan.id}`}
