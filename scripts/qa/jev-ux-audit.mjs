@@ -556,6 +556,7 @@ export function parseArgs(argv) {
       case '--roles': o.roles = val().split(',').map((s) => s.trim()).filter(Boolean); break;
       case '--viewports': o.viewports = val().split(',').map((s) => s.trim()).filter(Boolean); break;
       case '--base-url': o.baseUrl = val().replace(/\/+$/, ''); break;
+      case '--testar-chave': o.testKey = true; break;
       case '-h': case '--help': o.help = true; break;
       default: throw new Error(`Opção desconhecida: ${a}`);
     }
@@ -793,7 +794,7 @@ async function pool(items, n, fn) {
 
 function avg(xs) { return xs.length ? Math.round(xs.reduce((s, x) => s + x, 0) / xs.length) : 0; }
 
-const HELP = `Uso: node scripts/qa/jev-ux-audit.mjs [--dry-run] [--max-pages N] [--concurrency N]
+const HELP = `Uso: node scripts/qa/jev-ux-audit.mjs [--testar-chave] [--dry-run] [--max-pages N] [--concurrency N]
        [--roles public,athlete,coach,owner] [--viewports mobile-390,desktop-1366]
        [--base-url http://localhost] [--config arquivo.json] [--out pasta]`;
 
@@ -808,6 +809,20 @@ export async function main(argv = process.argv.slice(2)) {
   if (!opts.dryRun && !apiKey) {
     console.error('✗ TYPESAFE_API_KEY não definido. Coloque no .env da raiz ou rode com --dry-run. Veja docs/QA-JEV.md');
     return 2;
+  }
+  if (opts.testKey) {
+    if (!apiKey) { console.error('✗ TYPESAFE_API_KEY vazio em .env.qa'); return 2; }
+    const state = buildState({ role: 'public', audience: 'visitante', route: '/login', finalPath: '/login', viewport: 'mobile', title: 'Entrar', headings: ['Entrar'], buttons: ['Entrar'], links: ['Esqueci minha senha', 'Criar conta'], fields: [{ label: 'E-mail', type: 'email' }, { label: 'Senha', type: 'password' }], visibleText: 'Entrar. E-mail. Senha. Esqueci minha senha. Criar conta.' });
+    try {
+      const { response } = await callJev(buildRequestBody(state, { model: cfg.model || DEFAULT_MODEL }), { apiKey, apiUrl: cfg.apiUrl || DEFAULT_API_URL, maxRetries: 2 });
+      const u = response?.usage ? ` · tokens: ${JSON.stringify(response.usage)}` : '';
+      console.log(`✔ Chave TypeSafe OK — o Jev respondeu (${Object.keys(response || {}).join(', ')})${u}`);
+      return 0;
+    } catch (e) {
+      console.error(`✗ ${e.message}`);
+      if (/fetch failed|ENOTFOUND|ECONN/i.test(e.message)) console.error('  (sem acesso à internet até api.typesafe.ai — confira Wi-Fi/VPN/firewall)');
+      return 1;
+    }
   }
   await mkdir(opts.out, { recursive: true });
 

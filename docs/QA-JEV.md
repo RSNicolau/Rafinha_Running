@@ -8,6 +8,7 @@
 3. No Terminal, na pasta do projeto:
 
 ```bash
+node scripts/qa/jev-ux-audit.mjs --testar-chave   # 1 chamada: confirma que a chave funciona
 ./scripts/qa/rodar-jev.sh --so-ensaio   # prepara tudo e faz o ensaio grátis
 ./scripts/qa/rodar-jev.sh               # roda a auditoria completa (gasta crédito)
 ```
