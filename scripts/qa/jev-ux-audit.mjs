@@ -528,7 +528,7 @@ export function renderMarkdown(results, meta = {}) {
 // Configuração, ambiente e argumentos
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Carrega TYPESAFE_API_KEY, QA_* e PW_CHROMIUM_PATH do .env da raiz (sem sobrescrever o ambiente). */
+/** Carrega TYPESAFE_API_KEY, QA_* e PW_CHROMIUM_PATH do .env.qa e do .env da raiz (sem sobrescrever o ambiente). */
 export function loadDotEnv(file = join(REPO_ROOT, '.env'), env = process.env) {
   if (!existsSync(file)) return [];
   const parsed = parseEnv(readFileSync(file, 'utf8'));
@@ -800,6 +800,7 @@ const HELP = `Uso: node scripts/qa/jev-ux-audit.mjs [--dry-run] [--max-pages N] 
 export async function main(argv = process.argv.slice(2)) {
   const opts = parseArgs(argv);
   if (opts.help) { console.log(HELP); return 0; }
+  loadDotEnv(join(REPO_ROOT, '.env.qa'));
   loadDotEnv();
   const cfg = JSON.parse(await readFile(opts.config, 'utf8'));
   const baseUrl = (opts.baseUrl || process.env.QA_BASE_URL || cfg.baseUrl || 'http://localhost').replace(/\/+$/, '');

@@ -1,5 +1,21 @@
 # Auditoria de UX com o Jev (TypeSafe)
 
+
+## Atalho: um comando só
+
+1. Abra o Docker Desktop.
+2. Cole a chave da TypeSafe: `open -e .env.qa` → depois de `TYPESAFE_API_KEY=` → Cmd+S.
+3. No Terminal, na pasta do projeto:
+
+```bash
+./scripts/qa/rodar-jev.sh --so-ensaio   # prepara tudo e faz o ensaio grátis
+./scripts/qa/rodar-jev.sh               # roda a auditoria completa (gasta crédito)
+```
+
+O script cria o `.env` do app se faltar, sobe o Docker, cria as contas demo com senhas aleatórias
+(gravadas em `.env.qa`), instala o navegador do robô e roda o Jev. O relatório abre sozinho
+(`scripts/qa/out/jev-report.md`). As seções abaixo explicam cada passo em detalhe.
+
 ## O que é
 
 Um robô que **abre todas as páginas do app** (como visitante, atleta, treinador e dono da equipe), em **tela de celular (390px) e de computador (1366px)**, copia o que aparece na tela e pergunta a um modelo de IA, o **Jev** da TypeSafe, sete coisas sobre cada página:
@@ -23,9 +39,9 @@ Além disso, o próprio script marca duas coisas sem usar IA: **página que mand
 1. Entre em **https://console.typesafe.ai/keys**, crie uma conta e gere uma chave.
 2. **Atenção:** um relato de terceiros diz que **os cadastros novos foram pausados em 22/09/2026**. Se não conseguir criar conta, esse mesmo relato cita o **Vercel AI Gateway** como outro caminho de acesso ao Jev. Neste caso o endereço e o formato da chave podem ser diferentes (não informado na documentação que consultei). O script hoje fala direto com `https://api.typesafe.ai/v1/systemone`. O endereço pode ser trocado no campo `apiUrl` da configuração, mas confirme antes se o gateway aceita o mesmo formato de requisição.
 
-## 2. Colocar a chave e as contas de teste no `.env`
+## 2. Colocar a chave e as contas de teste no `.env.qa` (ou `.env`)
 
-No arquivo `.env` da **raiz do projeto** (ele já é ignorado pelo git e nunca vai para o GitHub), acrescente:
+No arquivo `.env.qa` (ou `.env`) da **raiz do projeto** (ele já é ignorado pelo git e nunca vai para o GitHub), acrescente:
 
 ```bash
 TYPESAFE_API_KEY=cole_a_chave_aqui
