@@ -10,14 +10,40 @@
  *   modelos reais (nenhum dado chumbado em tela).
  *
  * Uso:  DATABASE_URL=... npx tsx prisma/seed-demo.ts
- * Login demo: rafinha@rafinharunning.com.br / rafinha123
- *             atleta01@demo.rafinharunning.com .. atleta24@... / Atleta2026!
+ * Senhas: nunca fixas no código. Use SEED_COACH_PASSWORD (coach, só se for criado agora) e
+ * SEED_DEMO_ATHLETE_PASSWORD (atletas demo). Sem as envs, uma senha aleatória de 20 caracteres
+ * é gerada e impressa UMA vez para as contas criadas nesta execução.
  */
 
-import { PrismaClient, UserRole, AthleteLevel, PlanStatus, WorkoutType, WorkoutStatus, EventStatus, EventRegistrationStatus, PaymentStatus, KitType, NotificationType } from '@prisma/client';
+import { PrismaClient, UserRole, AthleteLevel, PlanStatus, WorkoutType, WorkoutStatus, EventStatus, EventRegistrationStatus, PaymentStatus, KitType, NotificationType, TeamRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { randomBytes } from 'crypto';
+import { PRIVACY_VERSION, TERMS_VERSION } from '../src/modules/legal/legal.constants';
+import { ensureRafinhaTeam, ensureTeamMember } from './seed-team';
+import { BadgesService } from '../src/modules/badges/badges.service';
 
 const prisma = new PrismaClient();
+
+function randomPassword(): string {
+  return randomBytes(30).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 20).padEnd(20, 'x');
+}
+
+/** Senha da env (se existir) ou aleatória; `generated` indica que deve ser exibida uma vez. */
+function passwordFromEnv(envVar: string): { plain: string; generated: boolean } {
+  const fromEnv = process.env[envVar];
+  if (fromEnv) {
+    if (fromEnv.length < 8) throw new Error(`${envVar} deve ter no mínimo 8 caracteres`);
+    return { plain: fromEnv, generated: false };
+  }
+  return { plain: randomPassword(), generated: true };
+}
+
+// Usuários demo já aceitam a versão vigente dos Termos/Política (sem modal de consentimento na demo)
+const consentFields = () => ({
+  termsVersion: TERMS_VERSION,
+  privacyVersion: PRIVACY_VERSION,
+  termsAcceptedAt: new Date(),
+});
 
 // RNG determinístico (LCG) — reprodutível a cada execução
 let rngState = 20260704;
@@ -65,15 +91,23 @@ async function main() {
   console.log('🌱 Seed DEMO — assessoria em operação\n');
 
   // ── Coach Rafinha (mesmo do seed base; garante existência) ────────────────
-  const coachPassword = await bcrypt.hash('rafinha123', 12);
+  const generatedCredentials: string[] = [];
+  const coachEmail = 'rafinha@rafinharunning.com.br';
+  const coachExists = await prisma.user.findUnique({ where: { email: coachEmail }, select: { id: true } });
+  const coachPw = passwordFromEnv('SEED_COACH_PASSWORD');
+  if (!coachExists && coachPw.generated) {
+    generatedCredentials.push(`   Coach:  ${coachEmail} / ${coachPw.plain}`);
+  }
+  const coachPassword = await bcrypt.hash(coachPw.plain, 12);
   const coach = await prisma.user.upsert({
-    where: { email: 'rafinha@rafinharunning.com.br' },
-    update: {},
+    where: { email: coachEmail },
+    update: { ...consentFields() },
     create: {
-      email: 'rafinha@rafinharunning.com.br',
+      email: coachEmail,
       passwordHash: coachPassword,
+      ...consentFields(),
       name: 'Rafinha Silva',
-      role: UserRole.ADMIN,
+      role: UserRole.COACH,
       coachProfile: {
         create: {
           slug: 'rafinha',
@@ -88,15 +122,19 @@ async function main() {
   console.log(`✅ Coach: ${coach.email}`);
 
   // ── Atletas ────────────────────────────────────────────────────────────────
-  const athletePassword = await bcrypt.hash('Atleta2026!', 12);
+  const athletePw = passwordFromEnv('SEED_DEMO_ATHLETE_PASSWORD');
+  const athletePassword = await bcrypt.hash(athletePw.plain, 12);
+  let athletesCreated = 0;
   const athletes: { id: string; name: string; email: string; level: string }[] = [];
   for (let i = 0; i < ATHLETES.length; i++) {
     const [name, level] = ATHLETES[i];
     const email = `atleta${String(i + 1).padStart(2, '0')}@demo.rafinharunning.com`;
+    const existed = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+    if (!existed) athletesCreated++;
     const user = await prisma.user.upsert({
       where: { email },
-      update: {},
-      create: { email, passwordHash: athletePassword, name, role: UserRole.ATHLETE },
+      update: { ...consentFields() },
+      create: { email, passwordHash: athletePassword, name, role: UserRole.ATHLETE, ...consentFields() },
     });
     const existingProfile = await prisma.athleteProfile.findUnique({ where: { userId: user.id } });
     if (!existingProfile) {
@@ -118,6 +156,36 @@ async function main() {
     athletes.push({ id: user.id, name, email, level });
   }
   console.log(`✅ Atletas: ${athletes.length}`);
+
+  // ── Equipe + segundo treinador (testa o escopo COACH: só vê os atletas atribuídos a ele) ──
+  const team = await ensureRafinhaTeam(prisma, coach.id);
+  const assistantEmail = 'assistente@demo.rafinharunning.com';
+  const assistantExists = await prisma.user.findUnique({ where: { email: assistantEmail }, select: { id: true } });
+  const assistantPw = passwordFromEnv('SEED_DEMO_COACH_PASSWORD');
+  if (!assistantExists && assistantPw.generated) {
+    generatedCredentials.push(`   Coach Assistente:  ${assistantEmail} / ${assistantPw.plain}`);
+  }
+  const assistant = await prisma.user.upsert({
+    where: { email: assistantEmail },
+    update: { ...consentFields(), role: UserRole.COACH },
+    create: {
+      email: assistantEmail,
+      passwordHash: await bcrypt.hash(assistantPw.plain, 12),
+      name: 'Coach Assistente',
+      role: UserRole.COACH,
+      ...consentFields(),
+      coachProfile: { create: { bio: 'Treinador assistente da equipe Rafinha Running.', specializations: ['5km', '10km'], maxAthletes: 20 } },
+    },
+  });
+  await ensureTeamMember(prisma, team.id, assistant.id, TeamRole.COACH);
+  // Os 6 últimos atletas demo ficam com o assistente; os demais com o Rafinha. Todos na equipe.
+  const assistantAthletes = athletes.slice(-6).map((a) => a.id);
+  await prisma.athleteProfile.updateMany({ where: { userId: { in: athletes.map((a) => a.id) } }, data: { teamId: team.id } });
+  await prisma.athleteProfile.updateMany({ where: { userId: { in: assistantAthletes } }, data: { coachId: assistant.id } });
+  console.log(`✅ Coach Assistente (${assistantEmail}) — COACH da equipe com ${assistantAthletes.length} atletas`);
+  if (athletesCreated > 0 && athletePw.generated) {
+    generatedCredentials.push(`   Atletas demo criados agora (atleta01..${String(ATHLETES.length).padStart(2, '0')}@demo.rafinharunning.com): ${athletePw.plain}`);
+  }
 
   // ── Planos de treino + treinos (6 semanas passadas + 10 dias futuros) ─────
   let plansCreated = 0;
@@ -286,7 +354,7 @@ async function main() {
           eventId: ev.id,
           userId: ath.id,
           status: EventRegistrationStatus.CONFIRMED,
-          paymentStatus: PaymentStatus.PAID,
+          paymentStatus: PaymentStatus.SUCCEEDED,
           bibNumber: String(bibCount).padStart(4, '0'),
           shirtSize: pick(['P', 'M', 'M', 'G', 'GG']),
           kitType: ev.id === evMain.id ? (rand() < 0.3 ? KitType.PREMIUM : KitType.COMPLETO) : null,
@@ -465,9 +533,24 @@ async function main() {
   }
   console.log('✅ Notificações do coach: 5');
 
+  // ── Badges: backfill para atletas com histórico (o check normal só roda ao registrar treino) ──
+  const badges = new BadgesService(prisma as any);
+  await badges.seedBadges();
+  let awardedTotal = 0;
+  for (const ath of athletes) {
+    const awarded = await badges.checkAndAwardBadges(ath.id).catch(() => [] as string[]);
+    awardedTotal += awarded.length;
+  }
+  console.log(`✅ Badges: ${awardedTotal} conquistas novas para ${athletes.length} atletas (idempotente)`);
+
   console.log('\n🎉 Seed demo concluído!');
-  console.log('   Coach:  rafinha@rafinharunning.com.br (senha do seed base; rafinha123 se criado agora)');
-  console.log('   Atleta: atleta01@demo.rafinharunning.com / Atleta2026! (01..24)');
+  console.log('   Coach (OWNER da equipe):  rafinha@rafinharunning.com.br');
+  console.log('   Coach Assistente (COACH): assistente@demo.rafinharunning.com');
+  console.log('   Atletas: atleta01..24@demo.rafinharunning.com');
+  if (generatedCredentials.length) {
+    console.log('\n🔐 Senhas geradas nesta execução (exibidas apenas uma vez — guarde-as):');
+    generatedCredentials.forEach((line) => console.log(line));
+  }
 }
 
 main()

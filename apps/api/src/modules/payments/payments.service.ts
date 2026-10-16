@@ -1,4 +1,14 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+  HttpException,
+  ServiceUnavailableException,
+  Logger,
+} from '@nestjs/common';
+import { isPlatformAdmin, teamIdsWithRoles, TEAM_MANAGER_ROLES } from '../../common/utils/ownership';
+import { UpdatePaymentSettingsDto } from './dto/payment-settings.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StripeService } from './stripe/stripe.service';
 import { MercadoPagoService } from './mercadopago/mercadopago.service';
@@ -10,7 +20,7 @@ import { createHash } from 'crypto';
 // ITEM 2 — No fallback key; throws at call-time if env var is missing
 function getEncryptionKey(): Buffer {
   const encKey = process.env.API_KEY_ENCRYPTION_SECRET;
-  if (!encKey) throw new Error('API_KEY_ENCRYPTION_SECRET not configured');
+  if (!encKey) throw new ServiceUnavailableException('Criptografia de chaves não configurada no servidor — fale com o suporte');
   return crypto.scryptSync(encKey, 'salt', 32);
 }
 
@@ -32,6 +42,7 @@ function decryptKey(ciphertext: string): string {
 
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
   constructor(
     private prisma: PrismaService,
     private stripeService: StripeService,
@@ -100,41 +111,45 @@ export class PaymentsService {
 
   // ─── Per-coach payment gateway settings ──────────────────────────────────
 
+  /** Só ADMIN da plataforma ou OWNER/ADMIN ativo de uma equipe gerencia o gateway próprio (o RolesGuard já exige COACH). */
+  async assertCanManagePaymentSettings(user: { id: string; role?: string | null }) {
+    if (isPlatformAdmin(user)) return;
+    if (user.role !== 'COACH') throw new ForbiddenException('Acesso negado');
+    const teams = await teamIdsWithRoles(this.prisma, user.id, TEAM_MANAGER_ROLES);
+    if (!teams.length) {
+      throw new ForbiddenException('Somente o dono ou um gestor da equipe altera as configurações de pagamento');
+    }
+  }
+
   async getPaymentSettings(coachId: string) {
     const profile = await this.prisma.coachProfile.findUnique({ where: { userId: coachId } });
-    if (!profile) throw new NotFoundException('Perfil de coach não encontrado');
-
+    // Sem perfil ainda: devolve os padrões (nada é criado num GET)
     return {
-      provider: profile.paymentProvider ?? 'pagarme',
-      paymentEnabled: profile.paymentEnabled,
-      hasPagarmeKey: !!profile.pagarmeApiKey,
-      hasPagarmeWebhook: !!profile.pagarmeWebhookSecret,
-      hasStripeKey: !!profile.stripeSecretKey,
-      hasStripeWebhook: !!profile.stripeWebhookSecret,
+      provider: profile?.paymentProvider ?? 'pagarme',
+      paymentEnabled: profile?.paymentEnabled ?? false,
+      hasPagarmeKey: !!profile?.pagarmeApiKey,
+      hasPagarmeWebhook: !!profile?.pagarmeWebhookSecret,
+      hasStripeKey: !!profile?.stripeSecretKey,
+      hasStripeWebhook: !!profile?.stripeWebhookSecret,
     };
   }
 
-  async updatePaymentSettings(
-    coachId: string,
-    dto: {
-      provider: string;
-      paymentEnabled: boolean;
-      pagarmeApiKey?: string;
-      pagarmeWebhookSecret?: string;
-      stripeSecretKey?: string;
-      stripeWebhookSecret?: string;
-    },
-  ) {
+  async updatePaymentSettings(coachId: string, dto: UpdatePaymentSettingsDto) {
     const data: any = {
       paymentProvider: dto.provider,
       paymentEnabled: dto.paymentEnabled,
     };
 
-    if (dto.pagarmeApiKey) data.pagarmeApiKey = encryptKey(dto.pagarmeApiKey);
-    if (dto.pagarmeWebhookSecret) data.pagarmeWebhookSecret = encryptKey(dto.pagarmeWebhookSecret);
-    if (dto.stripeSecretKey) data.stripeSecretKey = encryptKey(dto.stripeSecretKey);
-    if (dto.stripeWebhookSecret) data.stripeWebhookSecret = encryptKey(dto.stripeWebhookSecret);
+    if (dto.pagarmeApiKey) data.pagarmeApiKey = encryptKey(dto.pagarmeApiKey.trim());
+    if (dto.pagarmeWebhookSecret) data.pagarmeWebhookSecret = encryptKey(dto.pagarmeWebhookSecret.trim());
+    if (dto.stripeSecretKey) data.stripeSecretKey = encryptKey(dto.stripeSecretKey.trim());
+    if (dto.stripeWebhookSecret) data.stripeWebhookSecret = encryptKey(dto.stripeWebhookSecret.trim());
 
+    // Só treinadores chegam aqui (RolesGuard + assertCanManagePaymentSettings); conta sem perfil de coach → 404
+    const user = await this.prisma.user.findUnique({ where: { id: coachId }, select: { role: true } });
+    if (!user || (user.role !== 'COACH' && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN')) {
+      throw new NotFoundException('Perfil de treinador não encontrado');
+    }
     await this.prisma.coachProfile.upsert({
       where: { userId: coachId },
       update: data,
@@ -144,27 +159,45 @@ export class PaymentsService {
     return { updated: true };
   }
 
+  /** Testa a chave do gateway. Erros do usuário → 400; gateway fora/recusou → 503. Nunca 500. */
   async testPaymentConnection(coachId: string): Promise<{ ok: boolean; provider: string; latencyMs: number }> {
     const profile = await this.prisma.coachProfile.findUnique({ where: { userId: coachId } });
-    if (!profile) throw new NotFoundException('Perfil não encontrado');
-
-    const provider = profile.paymentProvider ?? 'pagarme';
+    const provider = profile?.paymentProvider ?? 'pagarme';
+    const label = provider === 'stripe' ? 'Stripe' : 'Pagar.me';
     const start = Date.now();
 
-    if (provider === 'pagarme') {
-      if (!profile.pagarmeApiKey) throw new Error('API Key do Pagar.me não configurada');
-      const apiKey = decryptKey(profile.pagarmeApiKey);
-      const res = await fetch('https://api.pagar.me/core/v5/merchants', {
-        headers: { Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}` },
-      });
-      if (!res.ok) throw new Error(`Pagar.me retornou ${res.status}`);
-    } else {
-      if (!profile.stripeSecretKey) throw new Error('Secret Key do Stripe não configurada');
-      const apiKey = decryptKey(profile.stripeSecretKey);
-      const res = await fetch('https://api.stripe.com/v1/balance', {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
-      if (!res.ok) throw new Error(`Stripe retornou ${res.status}`);
+    const encrypted = provider === 'stripe' ? profile?.stripeSecretKey : profile?.pagarmeApiKey;
+    if (!encrypted) {
+      throw new BadRequestException(
+        provider === 'stripe' ? 'Secret Key do Stripe não configurada' : 'API Key do Pagar.me não configurada',
+      );
+    }
+
+    let apiKey: string;
+    try {
+      apiKey = decryptKey(encrypted);
+    } catch (e) {
+      if (e instanceof HttpException) throw e;
+      throw new BadRequestException(`Não foi possível ler a chave salva do ${label}. Salve a chave novamente.`);
+    }
+
+    let res: { ok: boolean; status: number };
+    try {
+      res =
+        provider === 'stripe'
+          ? await fetch('https://api.stripe.com/v1/balance', { headers: { Authorization: `Bearer ${apiKey}` } })
+          : await fetch('https://api.pagar.me/core/v5/merchants', {
+              headers: { Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}` },
+            });
+    } catch (e: any) {
+      this.logger.warn(`Teste de conexão ${label} (coach ${coachId}) falhou: ${e?.message ?? e}`);
+      throw new ServiceUnavailableException(`Não foi possível conectar ao ${label} agora. Tente novamente em instantes.`);
+    }
+    if (res.status === 401 || res.status === 403) {
+      throw new BadRequestException(`O ${label} recusou a chave (HTTP ${res.status}). Confira se a chave está correta.`);
+    }
+    if (!res.ok) {
+      throw new ServiceUnavailableException(`O ${label} respondeu com erro (HTTP ${res.status}). Tente novamente em instantes.`);
     }
 
     return { ok: true, provider, latencyMs: Date.now() - start };

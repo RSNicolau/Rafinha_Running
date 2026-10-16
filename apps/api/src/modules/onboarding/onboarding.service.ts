@@ -1,12 +1,22 @@
 import {
-  Injectable, NotFoundException, Logger,
+  Injectable, NotFoundException, Logger, BadRequestException, Optional,
 } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
+import { LegalService, ConsentContext } from '../legal/legal.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { PaymentsService } from '../payments/payments.service';
 import { ReferralsService } from '../referrals/referrals.service';
 import { OnboardingStatus, QuestionType, PaymentProvider, SubscriptionPlanType } from '@prisma/client';
+import { defaultTeamIdForUser, resolveTeamBySlugOrCoach } from '../teams/team-scope';
+import { MembershipsService } from '../memberships/memberships.service';
+
+export interface OnboardingCheckoutOptions {
+  planId?: string;
+  billingType?: 'PIX' | 'BOLETO' | 'CREDIT_CARD' | 'UNDEFINED';
+  buyer?: { name?: string; email?: string; cpf?: string; phone?: string };
+}
 
 const DEFAULT_QUESTIONS = [
   { order: 1, question: 'Costuma fazer atividade física? Com que frequência por semana?', type: QuestionType.SELECT, options: ['Nunca', '1-2x por semana', '3-4x por semana', '5x ou mais'], required: true },
@@ -48,7 +58,59 @@ export class OnboardingService {
     private emailService: EmailService,
     private paymentsService: PaymentsService,
     private referralsService: ReferralsService,
+    private legal: LegalService,
+    @Optional() private memberships?: MembershipsService,
   ) {}
+
+  // ──────────────────────────────────────
+  // Onboarding token (opaco, AES-256-GCM, 24h) — substitui o athleteId na resposta pública
+  // ──────────────────────────────────────
+
+  private static readonly TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+  private tokenKey(): Buffer {
+    const secret = process.env.ONBOARDING_TOKEN_SECRET || process.env.JWT_SECRET;
+    if (!secret) throw new Error('JWT_SECRET não configurado');
+    return createHash('sha256').update(`onboarding-token:${secret}`).digest();
+  }
+
+  issueOnboardingToken(athleteId: string, coachId: string): string {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', this.tokenKey(), iv);
+    const payload = JSON.stringify({ a: athleteId, c: coachId, e: Date.now() + OnboardingService.TOKEN_TTL_MS });
+    const enc = Buffer.concat([cipher.update(payload, 'utf8'), cipher.final()]);
+    return Buffer.concat([iv, cipher.getAuthTag(), enc]).toString('base64url');
+  }
+
+  verifyOnboardingToken(token: string): { athleteId: string; coachId: string } {
+    try {
+      const raw = Buffer.from(token, 'base64url');
+      if (raw.length < 29) throw new Error('short');
+      const decipher = createDecipheriv('aes-256-gcm', this.tokenKey(), raw.subarray(0, 12));
+      decipher.setAuthTag(raw.subarray(12, 28));
+      const json = Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8');
+      const p = JSON.parse(json);
+      if (typeof p?.a !== 'string' || typeof p?.c !== 'string' || typeof p?.e !== 'number' || p.e < Date.now()) {
+        throw new Error('expired');
+      }
+      return { athleteId: p.a, coachId: p.c };
+    } catch {
+      throw new BadRequestException('Sessão de cadastro inválida ou expirada. Faça login para concluir o pagamento.');
+    }
+  }
+
+  /**
+   * slug pode ser o slug da EQUIPE (→ dono da equipe), o slug legado do treinador ou o id do treinador.
+   */
+  async resolveSlugTarget(slug: string): Promise<{ coachId: string; teamId: string | null }> {
+    const target = await resolveTeamBySlugOrCoach(this.prisma, slug);
+    if (!target) throw new NotFoundException('Coach não encontrado');
+    return { coachId: target.coachId, teamId: target.teamId };
+  }
+
+  async resolveCoachIdBySlug(slug: string): Promise<string> {
+    return (await this.resolveSlugTarget(slug)).coachId;
+  }
 
   // ──────────────────────────────────────
   // Coach: get or create their onboarding form
@@ -76,9 +138,13 @@ export class OnboardingService {
   }
 
   async updateForm(coachId: string, data: { title?: string; description?: string; isActive?: boolean }) {
+    const update: Record<string, any> = {};
+    if (data.title !== undefined) update.title = data.title;
+    if (data.description !== undefined) update.description = data.description;
+    if (data.isActive !== undefined) update.isActive = data.isActive;
     return this.prisma.onboardingForm.update({
       where: { coachId },
-      data,
+      data: update,
     });
   }
 
@@ -160,6 +226,23 @@ export class OnboardingService {
     const form = await this.prisma.onboardingForm.findUnique({ where: { coachId } });
     if (!form) throw new NotFoundException('Formulário não encontrado');
 
+    // Pergunta nunca respondida → exclusão definitiva; já respondida → desativa (preserva o histórico das respostas)
+    let answered = true;
+    const raw = (this.prisma as any).$queryRaw;
+    if (typeof raw === 'function') {
+      try {
+        const rows: Array<{ c: number }> = await (this.prisma as any).$queryRaw`
+          SELECT COUNT(*)::int AS c FROM onboarding_profiles WHERE coach_id = ${coachId} AND answers ? ${questionId}`;
+        answered = Number(rows?.[0]?.c ?? 1) > 0;
+      } catch {
+        answered = true;
+      }
+    }
+    if (!answered) {
+      await this.prisma.onboardingQuestion.delete({ where: { id: questionId, formId: form.id } });
+      return { deleted: true, removed: true };
+    }
+
     await this.prisma.onboardingQuestion.update({
       where: { id: questionId, formId: form.id },
       data: { isActive: false },
@@ -173,15 +256,16 @@ export class OnboardingService {
   // ──────────────────────────────────────
 
   async getPublicForm(slug: string): Promise<any> {
-    // slug can be: coachProfile.slug, or coach userId directly
+    // slug: slug da equipe (→ formulário do dono), coachProfile.slug ou id do treinador
+    const target = await resolveTeamBySlugOrCoach(this.prisma, slug).catch(() => null);
+    const team = target?.teamId && (this.prisma as any).team?.findUnique
+      ? await this.prisma.team.findUnique({ where: { id: target.teamId }, select: { name: true, slug: true, logoUrl: true, primaryColor: true } })
+      : null;
     const coach = await this.prisma.user.findFirst({
       where: {
         role: { in: ['COACH', 'ADMIN', 'SUPER_ADMIN'] as any },
         coachProfile: { isNot: null },
-        OR: [
-          { coachProfile: { slug } },
-          { id: slug },
-        ],
+        ...(target ? { id: target.coachId } : { OR: [{ coachProfile: { slug } }, { id: slug }] }),
       },
       include: {
         coachProfile: true,
@@ -211,9 +295,11 @@ export class OnboardingService {
     return {
       coachId: coach.id,
       coachName: coach.name,
-      brandName: coach.tenantBranding?.tenantName ?? coach.name,
-      primaryColor: coach.tenantBranding?.primaryColor ?? '#DC2626',
-      logoUrl: coach.tenantBranding?.logoUrl,
+      teamName: team?.name ?? null,
+      teamSlug: team?.slug ?? null,
+      brandName: coach.tenantBranding?.tenantName ?? team?.name ?? coach.name,
+      primaryColor: coach.tenantBranding?.primaryColor ?? team?.primaryColor ?? '#DC2626',
+      logoUrl: coach.tenantBranding?.logoUrl ?? team?.logoUrl ?? null,
       form: {
         id: coach.onboardingForm.id,
         title: coach.onboardingForm.title,
@@ -227,90 +313,114 @@ export class OnboardingService {
   // Public: submit form answers
   // ──────────────────────────────────────
 
-  /** Resolve coachId from slug first, then delegate to submitForm */
-  async submitFormBySlug(slug: string, data: {
-    athleteName: string;
-    athleteEmail: string;
-    athletePhone?: string;
-    answers: Record<string, any>;
-    referralCode?: string;
-  }) {
-    const coach = await this.prisma.user.findFirst({
-      where: {
-        role: { in: ['COACH', 'ADMIN', 'SUPER_ADMIN'] as any },
-        coachProfile: { isNot: null },
-        OR: [{ coachProfile: { slug } }, { id: slug }],
-      },
-      select: { id: true },
+  /** Perguntas obrigatórias (ativas) do formulário do treinador precisam de resposta não vazia. */
+  private async assertRequiredAnswers(coachId: string, answers: Record<string, any> | undefined) {
+    const form = await (this.prisma as any).onboardingForm?.findUnique?.({
+      where: { coachId },
+      select: { questions: { where: { isActive: true, required: true }, select: { id: true } } },
     });
-    if (!coach) throw new NotFoundException('Coach não encontrado');
-    return this.submitForm(coach.id, data);
+    const required: Array<{ id: string }> = Array.isArray(form?.questions) ? form.questions : [];
+    if (!required.length) return;
+    const a = answers && typeof answers === 'object' ? answers : {};
+    const blank = (v: unknown) =>
+      v === undefined || v === null || (typeof v === 'string' && v.trim() === '') || (Array.isArray(v) && v.length === 0);
+    const missing = required.filter((q) => blank(a[q.id]));
+    if (missing.length) {
+      throw new BadRequestException(
+        missing.length === 1
+          ? 'Responda a pergunta obrigatória do questionário.'
+          : `Responda todas as perguntas obrigatórias do questionário (${missing.length} sem resposta).`,
+      );
+    }
   }
 
-  async submitForm(coachId: string, data: {
-    athleteName: string;
-    athleteEmail: string;
-    athletePhone?: string;
-    answers: Record<string, any>;
-    referralCode?: string;
-  }) {
-    // Create or find athlete user
-    let athlete = await this.prisma.user.findUnique({ where: { email: data.athleteEmail } });
-    let isNewAthlete = false;
-    let tempPassword: string | undefined;
+  /** Resolve coachId from slug first, then delegate to submitForm */
+  async submitFormBySlug(slug: string, data: SubmitOnboardingInput, ctx: ConsentContext = {}) {
+    const { coachId, teamId } = await this.resolveSlugTarget(slug);
+    return this.submitForm(coachId, data, ctx, teamId);
+  }
 
-    if (!athlete) {
-      isNewAthlete = true;
-      tempPassword = Math.random().toString(36).slice(-10);
-      const bcrypt = await import('bcrypt');
-      const passwordHash = await bcrypt.hash(tempPassword, 10);
-      athlete = await this.prisma.user.create({
+  /**
+   * Público (sem autenticação). Regras de segurança:
+   *  - Se o e-mail já pertence a uma conta: NADA é alterado (respostas/status/vínculo); resposta genérica
+   *    { ok: true, existingAccount: true } e e-mail com link de login para o dono da conta.
+   *  - Conta nova: cria atleta + anamnese + registro de consentimento LGPD (inclui dados de saúde, art. 11).
+   *  - Nunca retorna athleteId; retorna onboardingToken opaco (24h) para o checkout público.
+   */
+  async submitForm(coachId: string, data: SubmitOnboardingInput, ctx: ConsentContext = {}, teamIdArg?: string | null) {
+    this.legal.assertCurrentVersions(data);
+    if (data.acceptTerms !== true || data.healthDataConsent !== true) {
+      throw new BadRequestException('É necessário aceitar os termos e consentir com o tratamento dos dados de saúde');
+    }
+    await this.assertRequiredAnswers(coachId, data.answers);
+    const email = data.athleteEmail.trim().toLowerCase();
+
+    const existing = await this.prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
+      select: { id: true, name: true, email: true },
+    });
+    if (existing) {
+      this.sendExistingAccountEmail(existing.email ?? email, existing.name).catch(err =>
+        this.logger.error(`Failed to send existing-account email: ${err.message}`),
+      );
+      return { ok: true as const, existingAccount: true, requiresPayment: false };
+    }
+
+    // Atleta entra na equipe (slug da equipe ou equipe padrão do treinador); responsável = treinador/dono
+    const teamId = teamIdArg !== undefined && teamIdArg !== null ? teamIdArg : await defaultTeamIdForUser(this.prisma, coachId);
+
+    // Senha temporária criptograficamente segura
+    const tempPassword = randomBytes(12).toString('base64url');
+    const bcrypt = await import('bcrypt');
+    const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+    const { athlete, profile } = await this.prisma.$transaction(async (tx) => {
+      const athlete = await tx.user.create({
         data: {
-          email: data.athleteEmail,
+          email,
           passwordHash,
           name: data.athleteName,
           role: 'ATHLETE',
           phone: data.athletePhone,
           athleteProfile: {
-            create: { coachId },
+            create: { coachId, teamId },
           },
         },
       });
-    }
+      const profile = await tx.onboardingProfile.create({
+        data: {
+          athleteId: athlete.id,
+          coachId,
+          answers: data.answers,
+          status: OnboardingStatus.PENDING_REVIEW,
+          completedAt: new Date(),
+        },
+      });
+      await this.legal.recordConsent(
+        athlete.id,
+        {
+          termsVersion: data.termsVersion,
+          privacyVersion: data.privacyVersion,
+          marketingOptIn: !!data.marketingOptIn,
+          healthDataConsent: true,
+        },
+        ctx,
+        tx,
+      );
+      return { athlete, profile };
+    });
 
     // Send welcome email with credentials to new athletes
-    if (isNewAthlete && tempPassword) {
-      this.emailService.sendAthleteCredentials(athlete.email ?? '', athlete.name, tempPassword).catch(err =>
-        this.logger.error(`Failed to send athlete credentials email: ${err.message}`),
-      );
-    }
+    this.emailService.sendAthleteCredentials(athlete.email ?? '', athlete.name, tempPassword).catch(err =>
+      this.logger.error(`Failed to send athlete credentials email: ${err.message}`),
+    );
 
     // Link referral if code provided (PENDING — credit on first payment)
-    if (isNewAthlete && data.referralCode) {
-      this.referralsService.linkRefereeOnSignup(athlete.id, data.athleteEmail, data.referralCode).catch(err =>
+    if (data.referralCode) {
+      this.referralsService.linkRefereeOnSignup(athlete.id, email, data.referralCode).catch(err =>
         this.logger.error(`Failed to link referral: ${err.message}`),
       );
     }
-
-    // Create or update onboarding profile
-    const profile = await this.prisma.onboardingProfile.upsert({
-      where: { athleteId: athlete.id },
-      create: {
-        athleteId: athlete.id,
-        coachId,
-        answers: data.answers,
-        status: OnboardingStatus.PENDING_REVIEW,
-        completedAt: new Date(),
-      },
-      update: {
-        answers: data.answers,
-        status: OnboardingStatus.PENDING_REVIEW,
-        completedAt: new Date(),
-        parsedProfile: undefined,
-        aiSummary: undefined,
-        reviewedAt: undefined,
-      },
-    });
 
     // Immediate coach in-app notification (don't wait for AI analysis)
     this.prisma.notification.create({
@@ -332,7 +442,7 @@ export class OnboardingService {
             coachUser.email,
             coachUser.name,
             data.athleteName,
-            data.athleteEmail,
+            email,
             dashboardUrl,
           ).catch(err => this.logger.error(`Failed to send coach alert email: ${err.message}`));
         }
@@ -344,7 +454,25 @@ export class OnboardingService {
       this.logger.error(`AI onboarding analysis failed: ${err.message}`),
     );
 
-    return { profileId: profile.id, athleteId: athlete.id };
+    return {
+      ok: true as const,
+      existingAccount: false,
+      onboardingToken: this.issueOnboardingToken(athlete.id, coachId),
+      requiresPayment: true,
+    };
+  }
+
+  private async sendExistingAccountEmail(to: string, name: string) {
+    const loginUrl = `${process.env.FRONTEND_URL || 'https://rr-rafinha-running.vercel.app'}/athlete-login`;
+    const safeName = String(name ?? '').replace(/[<>&"']/g, '');
+    await this.emailService.sendTransactional(
+      to,
+      'Você já tem uma conta — faça login',
+      `<p>Olá, ${safeName}!</p>
+       <p>Recebemos um questionário de cadastro com este e-mail, mas você já possui uma conta. Nenhum dado foi alterado.</p>
+       <p>Para continuar, faça login: <a href="${loginUrl}">${loginUrl}</a></p>
+       <p>Se não foi você, ignore este e-mail.</p>`,
+    );
   }
 
   // ──────────────────────────────────────
@@ -478,37 +606,115 @@ Responda APENAS em JSON válido com a estrutura: { "summary": "...", "level": ".
   // Public: create checkout for athlete
   // ──────────────────────────────────────
 
-  async createAthleteCheckout(athleteId: string, planType?: string) {
+  /**
+   * Checkout público do onboarding: identificado pelo onboardingToken (emitido no submit), validado contra o slug.
+   * Cria a MENSALIDADE (AthleteMembership) no plano da equipe via MembershipsService (Asaas/FAKE — o mesmo
+   * fluxo de /athlete-subscribe) e devolve o caminho /pedido/<id> para pagar. Também devolve o link
+   * "Defina sua senha" (token do reset-password) — a conta criada no onboarding não tem senha conhecida.
+   */
+  async createCheckoutWithToken(slug: string, onboardingToken: string, planType?: string, opts: OnboardingCheckoutOptions = {}) {
+    const { athleteId, coachId } = this.verifyOnboardingToken(onboardingToken);
+    const target = await this.resolveSlugTarget(slug);
+    if (target.coachId !== coachId) throw new BadRequestException('Sessão de cadastro inválida para este treinador');
+    return this.createAthleteCheckout(athleteId, planType, opts, true);
+  }
+
+  /** Interno — NÃO exposto com athleteId vindo do cliente. Use createCheckoutWithToken ou a rota autenticada. */
+  async createAthleteCheckout(athleteId: string, planType?: string, opts: OnboardingCheckoutOptions = {}, issueSetPassword = false) {
     const athlete = await this.prisma.user.findUnique({ where: { id: athleteId } });
-    if (!athlete) throw new NotFoundException('Atleta não encontrado');
+    if (!athlete || athlete.role !== 'ATHLETE') throw new NotFoundException('Atleta não encontrado');
+    if (!this.memberships) throw new BadRequestException('Mensalidades indisponíveis no momento');
 
-    // Map frontend plan IDs to SubscriptionPlanType enum values
-    const planTypeMap: Record<string, SubscriptionPlanType> = {
-      mensal:     SubscriptionPlanType.MONTHLY,
-      trimestral: SubscriptionPlanType.QUARTERLY,
-      semestral:  SubscriptionPlanType.SEMIANNUAL,
-      MONTHLY:    SubscriptionPlanType.MONTHLY,
-      QUARTERLY:  SubscriptionPlanType.QUARTERLY,
-      SEMIANNUAL: SubscriptionPlanType.SEMIANNUAL,
+    const team = await this.memberships.teamForAthlete(athleteId);
+    if (!team) throw new BadRequestException('Seu cadastro ainda não está vinculado a uma equipe — fale com o treinador');
+    const plan = await this.pickTeamPlan(team.id, opts.planId, planType);
+    if (!plan) throw new BadRequestException('Esta equipe ainda não tem planos de mensalidade ativos — fale com o treinador');
+
+    // Indicação: o desconto de R$30 do indicado entra na 1ª cobrança (MembershipsService.subscribe →
+    // 1ª cobrança avulsa com desconto + assinatura a partir do ciclo seguinte). Saldo de crédito é só exibido.
+    const referralCreditCents = athlete.referralCreditCents ?? 0;
+
+    const checkout = await this.memberships.subscribe(
+      { id: athleteId },
+      {
+        planId: plan.id,
+        billingType: opts.billingType,
+        buyer: {
+          name: opts.buyer?.name || athlete.name,
+          email: opts.buyer?.email || athlete.email || '',
+          cpf: opts.buyer?.cpf ?? '',
+          phone: opts.buyer?.phone ?? athlete.phone ?? undefined,
+        },
+      } as any,
+    );
+
+    const setPassword = issueSetPassword ? await this.issueSetPasswordLink(athlete).catch((e) => {
+      this.logger.warn(`Falha ao gerar link de definição de senha: ${e?.message ?? e}`);
+      return null;
+    }) : null;
+
+    return {
+      ...checkout,
+      plan: { id: plan.id, name: plan.name, interval: plan.interval, priceInCents: plan.priceInCents },
+      teamName: team.name,
+      discountApplied: (checkout as any).referralDiscountCents ?? 0,
+      referralCreditCents,
+      setPasswordPath: setPassword?.path ?? null,
     };
-    const resolvedPlanType = planType ? (planTypeMap[planType] ?? SubscriptionPlanType.MONTHLY) : SubscriptionPlanType.MONTHLY;
+  }
 
-    // (C) Apply referral credit as one-time first-cycle discount; consume it now so it doesn't double-apply
-    const discountCents = athlete.referralCreditCents ?? 0;
-    if (discountCents > 0) {
-      await this.prisma.user.update({
-        where: { id: athleteId },
-        data: { referralCreditCents: 0 },
-      });
-    }
-
-    const result = await this.paymentsService.createSubscription(athleteId, {
-      provider: PaymentProvider.MERCADO_PAGO,
-      planType: resolvedPlanType,
-      discountCents,
+  /** Plano da equipe: planId explícito; senão o do intervalo pedido (mensal/trimestral/semestral); senão o 1º ativo. */
+  private async pickTeamPlan(teamId: string, planId?: string, planType?: string) {
+    const plans = await this.prisma.teamPlan.findMany({
+      where: { teamId, isActive: true, priceInCents: { gt: 0 } },
+      orderBy: [{ sortOrder: 'asc' }, { priceInCents: 'asc' }],
     });
+    if (!plans.length) return null;
+    if (planId) {
+      const p = plans.find((x) => x.id === planId);
+      if (!p) throw new BadRequestException('Plano não encontrado nesta equipe');
+      return p;
+    }
+    const intervalMap: Record<string, string> = {
+      mensal: 'MONTHLY', trimestral: 'QUARTERLY', semestral: 'SEMIANNUAL',
+      MONTHLY: 'MONTHLY', QUARTERLY: 'QUARTERLY', SEMIANNUAL: 'SEMIANNUAL',
+    };
+    const wanted = planType ? intervalMap[planType] : undefined;
+    return (wanted && plans.find((p) => p.interval === wanted)) || plans[0];
+  }
 
-    return { ...result, discountApplied: discountCents };
+  /**
+   * M14: token de definição de senha no mesmo formato do /reset-password (AppConfig password_reset:<id>,
+   * hash bcrypt, uso único) com validade de 72 h; enviado por e-mail e devolvido para a tela de sucesso.
+   */
+  private async issueSetPasswordLink(athlete: { id: string; email: string | null; name: string }) {
+    if (!athlete.email) return null;
+    const token = randomBytes(32).toString('hex');
+    const bcrypt = await import('bcrypt');
+    const tokenHash = await bcrypt.hash(token, 10);
+    const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
+    const key = `password_reset:${athlete.id}`;
+    await this.prisma.appConfig.upsert({
+      where: { key },
+      create: { key, value: { tokenHash, expiresAt } },
+      update: { value: { tokenHash, expiresAt } },
+    });
+    const path = `/reset-password?token=${token}&email=${encodeURIComponent(athlete.email)}&welcome=1`;
+    const appUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:3001';
+    const safeName = String(athlete.name ?? '').replace(/[<>&"']/g, '');
+    this.emailService
+      .sendTransactional(
+        athlete.email,
+        'Defina sua senha de acesso',
+        `<div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px">
+          <h2 style="margin-bottom:8px">Bem-vindo(a), ${safeName}!</h2>
+          <p>Seu cadastro foi criado. Defina sua senha para acessar o app e acompanhar seus treinos:</p>
+          <a href="${appUrl}${path}" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#DC2626;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">Definir minha senha</a>
+          <p style="color:#6B7280;font-size:13px">O link vale por 72 horas. Depois disso use "Esqueci minha senha" na tela de login.</p>
+        </div>`,
+      )
+      .catch((err: any) => this.logger.error(`Falha ao enviar e-mail de definição de senha: ${err?.message ?? err}`));
+    return { path, expiresAt };
   }
 
   // ──────────────────────────────────────
@@ -520,4 +726,17 @@ Responda APENAS em JSON válido com a estrutura: { "summary": "...", "level": ".
       where: { athleteId },
     });
   }
+}
+
+export interface SubmitOnboardingInput {
+  athleteName: string;
+  athleteEmail: string;
+  athletePhone?: string;
+  answers: Record<string, any>;
+  referralCode?: string;
+  acceptTerms: boolean;
+  termsVersion: string;
+  privacyVersion: string;
+  healthDataConsent: boolean;
+  marketingOptIn?: boolean;
 }

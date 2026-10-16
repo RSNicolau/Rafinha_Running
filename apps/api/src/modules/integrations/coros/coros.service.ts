@@ -11,10 +11,10 @@
  */
 
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { randomBytes } from 'crypto';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { FitnessIntegration, IntegrationProvider, WorkoutSource, WorkoutStatus } from '@prisma/client';
 import { encrypt, decrypt } from '../../../common/utils/encryption';
+import { consumeOAuthState, createOAuthState, OAuthClient } from '../oauth-state';
 
 const COROS_AUTH_URL   = 'https://open.coros.com/oauth2/authorize';
 const COROS_TOKEN_URL  = 'https://open.coros.com/oauth2/accesstoken';
@@ -56,21 +56,14 @@ export class CorosService {
   // OAuth Flow
   // ──────────────────────────────────────
 
-  async getAuthUrl(userId: string) {
+  async getAuthUrl(userId: string, client: OAuthClient = 'web') {
     if (!this.clientId || !this.clientSecret) {
       throw new BadRequestException(
         'Integração com COROS ainda não configurada. Configure COROS_CLIENT_ID e COROS_CLIENT_SECRET.',
       );
     }
 
-    const state = randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-
-    await this.prisma.appConfig.upsert({
-      where:  { key: `oauth_state:coros:${state}` },
-      create: { key: `oauth_state:coros:${state}`, value: { userId, expiresAt } },
-      update: { value: { userId, expiresAt } },
-    });
+    const state = await createOAuthState(this.prisma, IntegrationProvider.COROS, userId, client);
 
     const params = new URLSearchParams({
       client_id:     this.clientId,
@@ -83,21 +76,12 @@ export class CorosService {
     return {
       url: `${COROS_AUTH_URL}?${params.toString()}`,
       provider: IntegrationProvider.COROS,
+      state,
     };
   }
 
-  async handleCallback(code: string, state: string) {
-    const stateRecord = await this.prisma.appConfig.findUnique({
-      where: { key: `oauth_state:coros:${state}` },
-    });
-    if (!stateRecord) throw new BadRequestException('Estado OAuth inválido ou expirado');
-
-    const { userId, expiresAt } = stateRecord.value as any;
-    if (new Date() > new Date(expiresAt)) {
-      await this.prisma.appConfig.delete({ where: { key: `oauth_state:coros:${state}` } });
-      throw new BadRequestException('Estado OAuth expirado. Tente novamente.');
-    }
-    await this.prisma.appConfig.delete({ where: { key: `oauth_state:coros:${state}` } });
+  async handleCallback(code: string, state: string, opts: { expectedUserId?: string } = {}) {
+    const { userId } = await consumeOAuthState(this.prisma, IntegrationProvider.COROS, state, opts.expectedUserId);
 
     const tokenData = await this.exchangeCodeForToken(code);
 

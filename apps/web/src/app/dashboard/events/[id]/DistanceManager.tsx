@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { centsToBRLInput, parseBRLToCents } from '../../../checkout/_lib/money';
 import { useAuthStore } from '@/stores/auth.store';
 
 interface EventDistance {
@@ -89,7 +90,7 @@ export default function DistanceManager({ eventId, eventPrice, onDistancesChange
     setForm({
       name: d.name,
       distanceKm: d.distanceKm != null ? String(d.distanceKm) : '',
-      price: d.price > 0 ? String(d.price / 100) : '',
+      price: d.price > 0 ? centsToBRLInput(d.price) : '',
       maxParticipants: d.maxParticipants != null ? String(d.maxParticipants) : '',
       description: d.description || '',
       ageGroup: d.ageGroup || '',
@@ -104,8 +105,9 @@ export default function DistanceManager({ eventId, eventPrice, onDistancesChange
       const payload = {
         name: form.name.trim(),
         distanceKm: form.distanceKm ? Number(form.distanceKm) : undefined,
-        price: form.price ? Math.round(Number(form.price) * 100) : 0,
-        maxParticipants: form.maxParticipants ? Number(form.maxParticipants) : undefined,
+        price: form.price ? parseBRLToCents(form.price) ?? 0 : 0,
+        // null limpa o limite ao editar
+        maxParticipants: form.maxParticipants ? Number(form.maxParticipants) : editingDistance ? null : undefined,
         description: form.description || undefined,
         ageGroup: form.ageGroup || undefined,
       };
@@ -299,9 +301,8 @@ export default function DistanceManager({ eventId, eventPrice, onDistancesChange
                 <div>
                   <label className={labelClass}>Valor (R$)</label>
                   <input
-                    type="number"
-                    min={0}
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={form.price}
                     onChange={(e) => setForm((p) => ({ ...p, price: e.target.value }))}
                     placeholder="0 = usa preço do evento"

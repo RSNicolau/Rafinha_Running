@@ -1,14 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { Portal, loginPathFor, portalFromUrl, rememberPortal } from '@/lib/portal';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [portal, setPortal] = useState<Portal | null>(null);
+
+  // ?portal=athlete (link do /athlete-login): lembrado para o link do e-mail voltar ao portal certo
+  useEffect(() => {
+    const p = portalFromUrl();
+    setPortal(p);
+    rememberPortal(p);
+  }, []);
+  const loginHref = loginPathFor(portal);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,7 +44,7 @@ export default function ForgotPasswordPage() {
           <div className="w-40 sm:w-52 mx-auto mb-5 rounded-2xl overflow-hidden shadow-lg">
             <img src="/logo.png" alt="Rafinha Running" className="w-full block" />
           </div>
-          <p className="text-sm text-gray-500 font-medium">Painel do Treinador</p>
+          <p className="text-sm text-gray-500 font-medium">{portal === 'athlete' ? 'Área do Atleta' : portal === 'coach' ? 'Painel do Treinador' : 'Recuperação de acesso'}</p>
         </div>
 
         <div className="glass-card p-6 sm:p-8">
@@ -50,7 +60,7 @@ export default function ForgotPasswordPage() {
                 Se o e-mail <strong>{email}</strong> estiver cadastrado, você receberá um link para redefinir sua senha em instantes.
               </p>
               <p className="text-xs text-gray-400 mb-6">Não recebeu? Verifique a pasta de spam ou tente novamente.</p>
-              <Link href="/login" className="text-sm text-[#DC2626] font-medium hover:text-red-800 transition">
+              <Link href={loginHref} className="text-sm text-[#DC2626] font-medium hover:text-red-800 transition">
                 ← Voltar ao login
               </Link>
             </div>
@@ -92,7 +102,7 @@ export default function ForgotPasswordPage() {
 
               <p className="text-center text-xs text-gray-400 mt-5">
                 Lembrou a senha?{' '}
-                <Link href="/login" className="text-[#DC2626] font-medium hover:text-red-800 transition">
+                <Link href={loginHref} className="text-[#DC2626] font-medium hover:text-red-800 transition">
                   Voltar ao login
                 </Link>
               </p>

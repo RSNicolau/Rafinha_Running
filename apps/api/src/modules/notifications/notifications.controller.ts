@@ -3,6 +3,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RegisterPushTokenDto } from './push-token.dto';
 
 @ApiTags('Notificações')
 @ApiBearerAuth()
@@ -14,7 +15,7 @@ export class NotificationsController {
   @Get()
   @ApiOperation({ summary: 'Listar notificações' })
   async list(@CurrentUser('id') userId: string, @Query('page') page?: number) {
-    return this.notificationsService.getUserNotifications(userId, page);
+    return this.notificationsService.getUserNotifications(userId, Math.max(1, Math.floor(Number(page)) || 1));
   }
 
   @Post(':id/read')
@@ -33,8 +34,8 @@ export class NotificationsController {
   @ApiOperation({ summary: 'Registrar token de push notification' })
   async registerPushToken(
     @CurrentUser('id') userId: string,
-    @Body('token') token: string,
+    @Body() dto: RegisterPushTokenDto,
   ) {
-    return this.notificationsService.registerPushToken(userId, token);
+    return this.notificationsService.registerPushToken(userId, dto.token);
   }
 }

@@ -45,9 +45,10 @@ export function FaqSection() {
               <button
                 className="w-full px-6 py-4 flex items-center justify-between text-left gap-4"
                 onClick={() => setOpen(open === i ? null : i)}
+                aria-expanded={open === i}
               >
                 <span className="font-semibold text-gray-900 text-sm">{faq.q}</span>
-                <ChevronDown className={`w-5 h-5 text-gray-400 flex-shrink-0 transition-transform duration-200 ${open === i ? 'rotate-180' : ''}`} />
+                <ChevronDown aria-hidden="true" className={`w-5 h-5 text-gray-400 flex-shrink-0 transition-transform duration-200 ${open === i ? 'rotate-180' : ''}`} />
               </button>
               {open === i && (
                 <div className="px-6 pb-5">

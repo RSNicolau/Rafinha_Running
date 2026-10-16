@@ -1,10 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
 import { EmailService } from '../email/email.service';
 import { RankingsService } from '../rankings/rankings.service';
 import { CoachBrainService } from '../coach-brain/coach-brain.service';
+import { CheckoutService } from '../payments/checkout/checkout.service';
+import { MembershipsService } from '../memberships/memberships.service';
 import { SubscriptionStatus, WorkoutStatus, InviteStatus, NotificationType, PlanStatus } from '@prisma/client';
 
 @Injectable()
@@ -17,7 +19,64 @@ export class SchedulerService {
     private readonly email: EmailService,
     private readonly rankings: RankingsService,
     private readonly coachBrain: CoachBrainService,
+    @Optional() private readonly checkout?: CheckoutService,
+    @Optional() private readonly memberships?: MembershipsService,
   ) {}
+
+  private expiring = false;
+  private membershipDailyRunning = false;
+  private membershipReconcileRunning = false;
+
+  /**
+   * Diário 9h15 (SP) — mensalidades: gera a próxima cobrança FAKE (dev/test) e marca PAST_DUE
+   * quem passou do vencimento + carência da equipe (e-mail ao atleta + resumo ao dono).
+   */
+  @Cron('15 9 * * *', { name: 'memberships-past-due', timeZone: 'America/Sao_Paulo' })
+  async handleMembershipsDaily() {
+    if (!this.memberships || this.membershipDailyRunning) return;
+    this.membershipDailyRunning = true;
+    try {
+      const now = new Date();
+      await this.memberships.generateFakeRenewals(now);
+      await this.memberships.markPastDue(now);
+    } catch (err) {
+      this.logger.error(`Memberships daily job failed: ${err}`);
+    } finally {
+      this.membershipDailyRunning = false;
+    }
+  }
+
+  /** A cada 5 min — reconcilia mensalidades em aberto com o Asaas (throttle interno MEMBERSHIP_RECONCILE_MINUTES). */
+  @Cron('*/5 * * * *', { name: 'memberships-reconcile' })
+  async handleMembershipsReconcile() {
+    if (!this.memberships || this.membershipReconcileRunning) return;
+    this.membershipReconcileRunning = true;
+    try {
+      await this.memberships.reconcileOpen(new Date());
+    } catch (err) {
+      this.logger.error(`Memberships reconcile failed: ${err}`);
+    } finally {
+      this.membershipReconcileRunning = false;
+    }
+  }
+
+  /**
+   * A cada minuto — expira pedidos da loja e inscrições pagas não quitadas em 30 min:
+   * libera estoque reservado / vaga do percurso / uso de cupom, cancela a cobrança no
+   * gateway e promove a lista de espera.
+   */
+  @Cron(CronExpression.EVERY_MINUTE, { name: 'checkout-expiration' })
+  async handleCheckoutExpiration() {
+    if (!this.checkout || this.expiring) return;
+    this.expiring = true;
+    try {
+      await this.checkout.expireStale(new Date());
+    } catch (err) {
+      this.logger.error(`Checkout expiration failed: ${err}`);
+    } finally {
+      this.expiring = false;
+    }
+  }
 
   /** Daily 9AM — remind users whose subscription expires within 3 days */
   @Cron('0 9 * * *', { name: 'subscription-renewal-reminders' })

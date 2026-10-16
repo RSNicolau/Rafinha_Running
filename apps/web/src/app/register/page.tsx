@@ -1,11 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/auth.store';
-import { api } from '@/lib/api';
+import { api, friendlyError } from '@/lib/api';
+import { passwordPolicyError, PASSWORD_POLICY_HINT } from '@/lib/password-policy';
+import { registerConsentPayload } from '@/lib/legal';
+import { ConsentCheckboxes, EMPTY_CONSENT, isConsentComplete, type ConsentState } from '@/components/legal/ConsentCheckboxes';
+import { LegalFooterLinks } from '@/components/legal/LegalFooterLinks';
+import { CookieNotice } from '@/components/legal/CookieNotice';
 
 interface FieldErrors {
   name?: string;
@@ -18,23 +23,78 @@ function validateRegisterForm(name: string, email: string, password: string): Fi
   if (!name.trim() || name.trim().length < 2) errors.name = 'Nome deve ter no mínimo 2 caracteres';
   if (!email.trim()) errors.email = 'E-mail é obrigatório';
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = 'E-mail inválido';
-  if (!password) errors.password = 'Senha é obrigatória';
-  else if (password.length < 6) errors.password = 'Senha deve ter no mínimo 6 caracteres';
+  const pwdError = passwordPolicyError(password);
+  if (pwdError) errors.password = pwdError;
   return Object.keys(errors).length > 0 ? errors : null;
 }
 
-export default function RegisterPage() {
+interface TeamInviteInfo {
+  email: string;
+  role: 'ADMIN' | 'COACH' | 'STAFF';
+  roleLabel: string;
+  team: { name: string; slug: string; logoUrl: string | null; primaryColor: string | null };
+  existingAccount: boolean;
+}
+
+function RegisterContent() {
   const router = useRouter();
-  const { loadUser, isAuthenticated, login } = useAuthStore();
+  const searchParams = useSearchParams();
+  const teamInviteToken = searchParams.get('teamInvite');
+  const { loadUser, isAuthenticated, login, user, refreshTeam, setSession } = useAuthStore();
+  const [invite, setInvite] = useState<TeamInviteInfo | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteLoading, setInviteLoading] = useState(!!teamInviteToken);
+  const [accepting, setAccepting] = useState(false);
+  const [teamName, setTeamName] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [consent, setConsent] = useState<ConsentState>(EMPTY_CONSENT);
+  const consentOk = isConsentComplete(consent, false);
 
   useEffect(() => { loadUser(); }, []);
-  useEffect(() => { if (isAuthenticated) router.replace('/subscribe'); }, [isAuthenticated]);
+  // Com convite de equipe a página continua (aceite com a conta logada); sem convite, segue para o plano
+  useEffect(() => { if (isAuthenticated && !teamInviteToken) router.replace('/subscribe'); }, [isAuthenticated, teamInviteToken]);
+
+  useEffect(() => {
+    if (!teamInviteToken) return;
+    api.get('/teams/invites/check', { params: { token: teamInviteToken } })
+      .then(({ data }) => { setInvite(data); setEmail(data.email); })
+      .catch((err) => {
+        const raw = err?.response?.data?.message;
+        setInviteError((Array.isArray(raw) ? raw.join(' ') : raw) ?? 'Convite inválido ou expirado');
+      })
+      .finally(() => setInviteLoading(false));
+  }, [teamInviteToken]);
+
+  /** Usuário já tem conta: entra (se preciso) e aceita o convite. */
+  const acceptWithAccount = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!teamInviteToken || !invite) return;
+    setAccepting(true);
+    try {
+      if (!isAuthenticated) {
+        if (!password) { toast.error('Informe sua senha'); return; }
+        const res = await login(invite.email, password);
+        if (res.mfaRequired) {
+          toast.message('Sua conta usa verificação em duas etapas. Entre pelo login e abra o link do convite novamente.');
+          router.replace('/login');
+          return;
+        }
+      }
+      await api.post('/teams/invites/accept', { token: teamInviteToken });
+      await refreshTeam();
+      toast.success(`Bem-vindo(a) à equipe ${invite.team.name}!`);
+      router.replace('/dashboard');
+    } catch (err: any) {
+      toast.error(friendlyError(err, 'Não foi possível aceitar o convite'));
+    } finally {
+      setAccepting(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,22 +105,35 @@ export default function RegisterPage() {
       setFieldErrors(errors);
       return;
     }
+    if (!consentOk) {
+      toast.error('Aceite os Termos de Uso e a Política de Privacidade para continuar.');
+      return;
+    }
 
     setLoading(true);
     try {
-      await api.post('/auth/register', { name: name.trim(), email, password, role: 'COACH' });
-      toast.success('Conta criada! Direcionando para escolher seu plano...');
-      // Auto-login and redirect direct to /subscribe (no double login)
+      const { data } = await api.post('/auth/register', {
+        name: name.trim(),
+        email,
+        password,
+        role: 'COACH',
+        ...(teamInviteToken
+          ? { teamInviteToken }
+          : teamName.trim() ? { teamName: teamName.trim() } : {}),
+        ...registerConsentPayload(consent.marketing),
+      });
+      toast.success(teamInviteToken ? 'Conta criada! Entrando na equipe...' : 'Conta criada! Direcionando para escolher seu plano...');
+      // Auto-login: dono de equipe nova → escolher plano; membro convidado → painel
       try {
-        await login(email, password);
-        router.replace('/subscribe');
+        if (data?.accessToken && data?.user) setSession(data);
+        else await login(email, password);
+        router.replace(teamInviteToken ? '/dashboard' : '/subscribe');
       } catch {
         // If auto-login fails, fallback to login page
         router.replace('/login?registered=1');
       }
     } catch (err: any) {
-      const msg = err?.response?.data?.message ?? 'Erro ao criar conta. Tente novamente.';
-      toast.error(msg);
+      toast.error(friendlyError(err, 'Erro ao criar conta. Tente novamente.'));
     } finally {
       setLoading(false);
     }
@@ -85,13 +158,63 @@ export default function RegisterPage() {
         </div>
 
         <div className="glass-card p-6 sm:p-8">
+          {teamInviteToken && inviteLoading && (
+            <div className="h-24 rounded-xl bg-gray-100 animate-pulse" />
+          )}
+          {teamInviteToken && inviteError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              {inviteError}. Peça um novo convite à gestão da equipe.
+            </div>
+          )}
+          {invite && (
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 mb-6">
+              <p className="text-xs font-semibold uppercase tracking-wider text-primary">Convite de equipe</p>
+              <p className="text-sm text-gray-900 mt-1">
+                Você foi convidado(a) para a equipe <strong>{invite.team.name}</strong> como <strong>{invite.roleLabel?.toLowerCase()}</strong>.
+              </p>
+            </div>
+          )}
+
+          {invite?.existingAccount ? (
+            <div className="space-y-4">
+              <h2 className="text-xl font-semibold text-gray-900">Aceitar convite</h2>
+              {isAuthenticated && user?.email?.toLowerCase() !== invite.email ? (
+                <p className="text-sm text-gray-600">
+                  Este convite foi enviado para <strong>{invite.email}</strong>, mas você está conectado(a) como {user?.email}.
+                  Saia e entre com a conta do convite.
+                </p>
+              ) : isAuthenticated ? (
+                <button onClick={() => acceptWithAccount()} disabled={accepting} className="w-full py-3.5 rounded-xl bg-primary hover:bg-red-700 text-white text-sm font-medium transition disabled:opacity-50 cursor-pointer">
+                  {accepting ? 'Entrando na equipe...' : `Entrar na equipe ${invite.team.name}`}
+                </button>
+              ) : (
+                <form onSubmit={acceptWithAccount} className="space-y-4" noValidate>
+                  <p className="text-sm text-gray-600">Você já tem conta com <strong>{invite.email}</strong>. Entre com sua senha para aceitar.</p>
+                  <input
+                    type="password"
+                    aria-label="Sua senha"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Sua senha"
+                    autoComplete="current-password"
+                    className="w-full px-4 py-3 rounded-xl bg-gray-50/80 border border-gray-200/60 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
+                  />
+                  <button type="submit" disabled={accepting} className="w-full py-3.5 rounded-xl bg-primary hover:bg-red-700 text-white text-sm font-medium transition disabled:opacity-50 cursor-pointer">
+                    {accepting ? 'Entrando...' : 'Entrar e aceitar convite'}
+                  </button>
+                </form>
+              )}
+            </div>
+          ) : (teamInviteToken && (inviteLoading || inviteError)) ? null : (
+          <>
           <h2 className="text-xl font-semibold text-gray-900 mb-1">Criar conta</h2>
-          <p className="text-sm text-gray-500 mb-6">Comece a gerenciar sua assessoria</p>
+          <p className="text-sm text-gray-500 mb-6">{invite ? 'Crie sua conta de treinador para entrar na equipe' : 'Comece a gerenciar sua assessoria'}</p>
 
           <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">Nome completo</label>
+              <label htmlFor="register-name" className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">Nome completo</label>
               <input
+                id="register-name"
                 type="text"
                 value={name}
                 onChange={(e) => { setName(e.target.value); setFieldErrors(p => ({ ...p, name: undefined })); }}
@@ -101,12 +224,32 @@ export default function RegisterPage() {
               />
               {fieldErrors.name && <p className="mt-1 text-xs text-red-500">{fieldErrors.name}</p>}
             </div>
+            {!invite && (
+              <div>
+                <label htmlFor="register-team" className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">
+                  Nome da assessoria/equipe <span className="normal-case tracking-normal text-gray-400">(opcional)</span>
+                </label>
+                <input
+                  id="register-team"
+                  type="text"
+                  value={teamName}
+                  maxLength={80}
+                  onChange={(e) => setTeamName(e.target.value)}
+                  placeholder="Ex.: Assessoria Corre Junto"
+                  className="w-full px-4 py-3 rounded-xl bg-gray-50/80 border border-gray-200/60 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition"
+                  autoComplete="organization"
+                />
+                <p className="mt-1 text-xs text-gray-400">Treina sozinho? Tudo bem — você é uma equipe de uma pessoa. Se deixar em branco, usamos o seu nome.</p>
+              </div>
+            )}
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">E-mail</label>
+              <label htmlFor="register-email" className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">E-mail</label>
               <input
+                id="register-email"
                 type="email"
                 value={email}
                 onChange={(e) => { setEmail(e.target.value); setFieldErrors(p => ({ ...p, email: undefined })); }}
+                readOnly={!!invite}
                 placeholder="seu@email.com"
                 className={`w-full px-4 py-3 rounded-xl bg-gray-50/80 border text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition ${fieldErrors.email ? 'border-red-400 bg-red-50/40' : 'border-gray-200/60'}`}
                 autoComplete="email"
@@ -114,18 +257,26 @@ export default function RegisterPage() {
               {fieldErrors.email && <p className="mt-1 text-xs text-red-500">{fieldErrors.email}</p>}
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">Senha</label>
+              <label htmlFor="register-password" className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">Senha</label>
               <div className="relative">
                 <input
+                  id="register-password"
+                  aria-describedby="register-password-hint"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); setFieldErrors(p => ({ ...p, password: undefined })); }}
-                  placeholder="Mínimo 6 caracteres"
+                  placeholder="Mínimo 8 caracteres"
                   className={`w-full px-4 py-3 rounded-xl bg-gray-50/80 border text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition pr-12 ${fieldErrors.password ? 'border-red-400 bg-red-50/40' : 'border-gray-200/60'}`}
                   autoComplete="new-password"
                 />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                  aria-pressed={showPassword}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <svg aria-hidden="true" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     {showPassword ? (
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
                     ) : (
@@ -137,17 +288,25 @@ export default function RegisterPage() {
                   </svg>
                 </button>
               </div>
-              {fieldErrors.password && <p className="mt-1 text-xs text-red-500">{fieldErrors.password}</p>}
+              {fieldErrors.password
+                ? <p className="mt-1 text-xs text-red-500">{fieldErrors.password}</p>
+                : <p id="register-password-hint" className="mt-1 text-[11px] text-gray-400">{PASSWORD_POLICY_HINT}</p>}
+            </div>
+
+            <div className="pt-1">
+              <ConsentCheckboxes value={consent} onChange={setConsent} showHealth={false} idPrefix="register" />
             </div>
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !consentOk}
               className="w-full py-3.5 rounded-xl bg-primary hover:bg-red-700 text-white text-sm font-medium tracking-wide transition disabled:opacity-50 disabled:cursor-not-allowed mt-2 cursor-pointer"
             >
-              {loading ? 'Criando conta...' : 'Criar conta de treinador'}
+              {loading ? 'Criando conta...' : invite ? `Criar conta e entrar na equipe` : 'Criar conta de treinador'}
             </button>
           </form>
+          </>
+          )}
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6">
@@ -156,8 +315,18 @@ export default function RegisterPage() {
             Entrar →
           </Link>
         </p>
+        <LegalFooterLinks className="mt-4" />
         <p className="text-center text-xs text-gray-400 mt-2">RR — Rafinha Running v1.0.0</p>
       </div>
+      <CookieNotice />
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen" />}>
+      <RegisterContent />
+    </Suspense>
   );
 }

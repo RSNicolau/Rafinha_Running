@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, Pressable, Platform, Modal, ActivityIndicator, Alert, RefreshControl, Linking, Image } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, ScrollView, Pressable, Platform, Modal, ActivityIndicator, Alert, RefreshControl, Linking, Image, TextInput, Clipboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -50,6 +50,9 @@ interface ApiRegistration {
   id: string;
   eventId: string;
   status: string;
+  paymentStatus?: string;
+  finalPrice?: number | null;
+  paymentExpiresAt?: string | null;
   bibNumber?: string | null;
   shirtSize?: string | null;
   kitType?: string | null;
@@ -73,6 +76,17 @@ interface ApiProduct {
   reserved: number;
   featured: boolean;
   athleteDiscountPercent: number;
+  isPreOrder?: boolean;
+  purchasable?: boolean;
+  available?: number;
+  estimatedDelivery?: string | null;
+}
+
+interface CheckoutTarget {
+  purpose: 'STORE_ORDER' | 'EVENT_REGISTRATION';
+  refId: string;
+  refToken?: string;
+  title: string;
 }
 
 interface ApiPartner {
@@ -120,13 +134,254 @@ function isExternal(e: ApiEvent): boolean {
   return e.tags?.some((t) => t.toLowerCase() === 'externa' || t.toLowerCase() === 'external');
 }
 
+// ─── Checkout (Pix / fatura Asaas / cartão internacional) ─────────────────────
+
+function onlyDigits(v: string) {
+  return (v || '').replace(/\D/g, '');
+}
+
+function isValidCpf(v: string): boolean {
+  const cpf = onlyDigits(v);
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
+  const calc = (len: number) => {
+    let sum = 0;
+    for (let i = 0; i < len; i++) sum += Number(cpf[i]) * (len + 1 - i);
+    const r = (sum * 10) % 11;
+    return r === 10 ? 0 : r;
+  };
+  return calc(9) === Number(cpf[9]) && calc(10) === Number(cpf[10]);
+}
+
+function maskCpf(v: string) {
+  const d = onlyDigits(v).slice(0, 11);
+  return d.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d{1,2})$/, '.$1-$2');
+}
+
+type PayChoice = 'PIX' | 'INVOICE' | 'INTERNATIONAL';
+
+function CheckoutModal({ target, onClose, onPaid }: { target: CheckoutTarget | null; onClose: () => void; onPaid: () => void }) {
+  const { colors } = useTheme();
+  const user = useAuthStore((s) => s.user);
+  const [cpf, setCpf] = useState('');
+  const [choice, setChoice] = useState<PayChoice>('PIX');
+  const [methods, setMethods] = useState<{ pix: boolean; boletoOrCard: boolean; internationalCard: boolean } | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
+  const [payment, setPayment] = useState<any>(null);
+  const [status, setStatus] = useState<any>(null);
+  const poll = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!target) return;
+    setPayment(null);
+    setStatus(null);
+    setError('');
+    api.get('/checkout/methods').then(({ data }) => {
+      setMethods(data);
+      setChoice(data.pix ? 'PIX' : data.boletoOrCard ? 'INVOICE' : 'INTERNATIONAL');
+    }).catch(() => setMethods({ pix: false, boletoOrCard: false, internationalCard: false }));
+    return () => { if (poll.current) clearInterval(poll.current); };
+  }, [target?.refId]);
+
+  const refresh = useCallback(async (p: any) => {
+    try {
+      const { data } = await api.get(`/checkout/${p.paymentId}/status`, { params: { token: p.accessToken } });
+      setStatus(data);
+      if (data.status !== 'PENDING' && poll.current) {
+        clearInterval(poll.current);
+        poll.current = null;
+      }
+      if (data.status === 'SUCCEEDED') onPaid();
+    } catch {
+      /* rede instável — tenta de novo no próximo ciclo */
+    }
+  }, [onPaid]);
+
+  const create = async () => {
+    if (!target || !user) return;
+    if (!isValidCpf(cpf)) {
+      setError('Informe um CPF válido.');
+      return;
+    }
+    setCreating(true);
+    setError('');
+    try {
+      const { data } = await api.post('/checkout', {
+        purpose: target.purpose,
+        refId: target.refId,
+        ...(target.refToken ? { refToken: target.refToken } : {}),
+        buyer: { name: user.name, email: user.email, cpf: onlyDigits(cpf) },
+        ...(choice === 'INTERNATIONAL' ? { provider: 'STRIPE' } : { method: choice === 'PIX' ? 'PIX' : 'UNDEFINED' }),
+      });
+      setPayment(data);
+      setStatus({ status: data.status, pix: data.pix, checkoutUrl: data.checkoutUrl, amountInCents: data.amountInCents });
+      if (!data.pix && data.checkoutUrl) Linking.openURL(data.checkoutUrl);
+      if (poll.current) clearInterval(poll.current);
+      poll.current = setInterval(() => refresh(data), 4000);
+    } catch (e: any) {
+      const m = e?.response?.data?.message;
+      setError(Array.isArray(m) ? m.join(' · ') : m || 'Não foi possível gerar o pagamento.');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const fakePay = async () => {
+    if (!payment) return;
+    try {
+      await api.post(`/checkout/${payment.paymentId}/fake-pay`, null, { params: { token: payment.accessToken } });
+      refresh(payment);
+    } catch (e: any) {
+      setError(e?.response?.data?.message || 'Falha ao simular');
+    }
+  };
+
+  if (!target) return null;
+  const paid = status?.status === 'SUCCEEDED';
+  const failed = status?.status === 'FAILED';
+
+  return (
+    <Modal visible={!!target} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' }}>
+        <View style={{ backgroundColor: colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: '92%', paddingBottom: 28 }}>
+          <View style={{ padding: 20, paddingBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={{ fontSize: 17, fontWeight: '800', color: colors.text, flex: 1 }} numberOfLines={1}>{target.title}</Text>
+            <Pressable onPress={onClose} hitSlop={10} style={{ padding: 6 }}>
+              <Ionicons name="close" size={22} color={colors.textSecondary} />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12 }}>
+            {!payment && (
+              <>
+                <Text style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 8 }}>CPF do pagador (exigido pelo banco; não fica salvo no app)</Text>
+                <TextInput
+                  value={cpf}
+                  onChangeText={(t) => setCpf(maskCpf(t))}
+                  keyboardType="number-pad"
+                  placeholder="000.000.000-00"
+                  placeholderTextColor={colors.textTertiary}
+                  style={{ borderWidth: 1.5, borderColor: colors.text + '20', borderRadius: 12, padding: 12, fontSize: 15, color: colors.text, marginBottom: 14 }}
+                />
+                {!methods ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <View style={{ gap: 8 }}>
+                    {([
+                      ['PIX', 'Pix', 'Aprovação na hora', methods.pix],
+                      ['INVOICE', 'Cartão de crédito ou boleto', 'Abre a fatura segura no navegador', methods.boletoOrCard],
+                      ['INTERNATIONAL', 'Cartão internacional', 'Stripe', methods.internationalCard],
+                    ] as Array<[PayChoice, string, string, boolean]>).filter((o) => o[3]).map(([id, label, hint]) => (
+                      <Pressable key={id} onPress={() => setChoice(id)} style={{ borderRadius: 14, padding: 14, borderWidth: 1.5, borderColor: choice === id ? colors.primary : colors.text + '15', backgroundColor: choice === id ? colors.primary + '10' : 'transparent' }}>
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>{label}</Text>
+                        <Text style={{ fontSize: 12, color: colors.textSecondary }}>{hint}</Text>
+                      </Pressable>
+                    ))}
+                    {!methods.pix && !methods.boletoOrCard && !methods.internationalCard && (
+                      <Text style={{ fontSize: 13, color: '#B45309' }}>Pagamentos online indisponíveis no momento. Fale com a assessoria.</Text>
+                    )}
+                  </View>
+                )}
+                {!!error && <Text style={{ fontSize: 13, color: '#DC2626', marginTop: 12 }}>{error}</Text>}
+                <Pressable disabled={creating} onPress={create} style={{ marginTop: 18, borderRadius: 14, paddingVertical: 15, alignItems: 'center', backgroundColor: colors.primary, opacity: creating ? 0.7 : 1 }}>
+                  {creating ? <ActivityIndicator color="#FFF" /> : <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFF' }}>Gerar pagamento</Text>}
+                </Pressable>
+              </>
+            )}
+
+            {payment && !paid && !failed && (
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ fontSize: 22, fontWeight: '900', color: colors.primary, marginBottom: 10 }}>{formatPrice(payment.amountInCents)}</Text>
+                {status?.pix?.qrCodeBase64 ? (
+                  <Image source={{ uri: status.pix.qrCodeBase64 }} style={{ width: 220, height: 220, borderRadius: 12, backgroundColor: '#FFF' }} />
+                ) : null}
+                {!!status?.pix?.copyPaste && (
+                  <Pressable onPress={() => { Clipboard.setString(status.pix.copyPaste); Alert.alert('Copiado!', 'Cole o código Pix no app do seu banco.'); }}
+                    style={{ marginTop: 14, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 24, backgroundColor: colors.primary }}>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFF' }}>Copiar código Pix</Text>
+                  </Pressable>
+                )}
+                {!!status?.checkoutUrl && (
+                  <Pressable onPress={() => Linking.openURL(status.checkoutUrl)} style={{ marginTop: 10, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 20, borderWidth: 1.5, borderColor: colors.text + '30' }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>{status.pix ? 'Pagar com cartão ou boleto' : 'Abrir página de pagamento'}</Text>
+                  </Pressable>
+                )}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16 }}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={{ fontSize: 12, color: colors.textSecondary }}>Aguardando confirmação do pagamento…</Text>
+                </View>
+                {status?.fakePayAvailable && (
+                  <Pressable onPress={fakePay} style={{ marginTop: 14, padding: 10 }}>
+                    <Text style={{ fontSize: 12, color: '#B45309', fontWeight: '700' }}>⚙️ Simular pagamento (testes)</Text>
+                  </Pressable>
+                )}
+              </View>
+            )}
+
+            {paid && (
+              <View style={{ alignItems: 'center', paddingVertical: 10 }}>
+                <Ionicons name="checkmark-circle" size={56} color="#10B981" />
+                <Text style={{ fontSize: 18, fontWeight: '800', color: colors.text, marginTop: 10 }}>Pagamento confirmado!</Text>
+                {status?.reference?.bibNumber && (
+                  <Text style={{ fontSize: 32, fontWeight: '900', color: colors.primary, marginTop: 10 }}>#{status.reference.bibNumber}</Text>
+                )}
+                {status?.needsRefund && (
+                  <Text style={{ fontSize: 13, color: '#B45309', marginTop: 10, textAlign: 'center' }}>O item esgotou enquanto o pagamento era processado — a assessoria fará o estorno.</Text>
+                )}
+                <Pressable onPress={onClose} style={{ marginTop: 20, borderRadius: 14, paddingVertical: 15, paddingHorizontal: 40, backgroundColor: colors.primary }}>
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFF' }}>Fechar</Text>
+                </Pressable>
+              </View>
+            )}
+
+            {failed && (
+              <View style={{ alignItems: 'center', paddingVertical: 10 }}>
+                <Ionicons name="time-outline" size={48} color="#DC2626" />
+                <Text style={{ fontSize: 16, fontWeight: '800', color: colors.text, marginTop: 10 }}>Pagamento não concluído</Text>
+                <Text style={{ fontSize: 13, color: colors.textSecondary, marginTop: 6, textAlign: 'center' }}>O prazo expirou e a reserva foi liberada.</Text>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function RegistrationQrModal({ registration, onClose }: { registration: ApiRegistration | null; onClose: () => void }) {
+  const { colors } = useTheme();
+  const [qr, setQr] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!registration) return;
+    setQr(null);
+    setError('');
+    api.get(`/events/my-registrations/${registration.id}/qr`)
+      .then(({ data }) => setQr(data.qrDataUrl))
+      .catch((e) => setError(e?.response?.data?.message || 'QR indisponível'));
+  }, [registration?.id]);
+  if (!registration) return null;
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <View style={{ backgroundColor: '#FFF', borderRadius: 24, padding: 24, alignItems: 'center', width: '100%', maxWidth: 340 }}>
+          <Text style={{ fontSize: 15, fontWeight: '800', color: '#111' }}>{registration.event?.title}</Text>
+          {registration.bibNumber && <Text style={{ fontSize: 30, fontWeight: '900', color: colors.primary, marginTop: 6 }}>#{registration.bibNumber}</Text>}
+          {qr ? <Image source={{ uri: qr }} style={{ width: 240, height: 240, marginTop: 12 }} /> : error ? <Text style={{ marginTop: 12, color: '#DC2626' }}>{error}</Text> : <ActivityIndicator style={{ marginTop: 20 }} />}
+          <Text style={{ fontSize: 12, color: '#666', marginTop: 12, textAlign: 'center' }}>Mostre este QR na retirada do kit e no check-in da prova.</Text>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
 // ─── Registration Modal (real: POST /events/:id/register) ─────────────────────
 
-function RegistrationModal({ event, visible, onClose, onRegistered }: {
+function RegistrationModal({ event, visible, onClose, onRegistered, onRequirePayment }: {
   event: ApiEvent | null;
   visible: boolean;
   onClose: () => void;
   onRegistered: () => void;
+  onRequirePayment: (t: CheckoutTarget) => void;
 }) {
   const { colors } = useTheme();
   const [step, setStep] = useState<RegStep>('distance');
@@ -170,9 +425,15 @@ function RegistrationModal({ event, visible, onClose, onRegistered }: {
         shirtSize: selectedShirtSize || undefined,
         kitType: selectedKit ?? undefined,
       });
+      onRegistered();
+      if (data?.requiresPayment) {
+        // evento pago: vaga reservada por 30 min até o pagamento (número de peito sai na confirmação)
+        onClose();
+        onRequirePayment({ purpose: 'EVENT_REGISTRATION', refId: data.id, title: `Inscrição — ${event.title}` });
+        return;
+      }
       setRegistration(data);
       setStep('done');
-      onRegistered();
     } catch (e: any) {
       setError(e?.response?.data?.message || 'Não foi possível concluir a inscrição. Tente novamente.');
     } finally {
@@ -350,8 +611,8 @@ function RegistrationModal({ event, visible, onClose, onRegistered }: {
                   )}
                   <View style={{ height: 1, backgroundColor: colors.text + '10', marginVertical: 4 }} />
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                    <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>Inscrição</Text>
-                    <Text style={{ fontSize: 14, fontWeight: '800', color: colors.primary }}>{formatPrice(basePrice)}</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>Total</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '800', color: colors.primary }}>{formatPrice(basePrice + kitPrice)}</Text>
                   </View>
                 </View>
 
@@ -362,7 +623,7 @@ function RegistrationModal({ event, visible, onClose, onRegistered }: {
                     <Text style={{ fontSize: 15, fontWeight: '700', color: colors.textSecondary }}>Voltar</Text>
                   </Pressable>
                   <Pressable disabled={submitting} onPress={submit} style={{ flex: 2, borderRadius: 14, paddingVertical: 15, alignItems: 'center', backgroundColor: colors.primary, opacity: submitting ? 0.7 : 1 }}>
-                    {submitting ? <ActivityIndicator color="#FFF" /> : <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFF' }}>Confirmar inscrição</Text>}
+                    {submitting ? <ActivityIndicator color="#FFF" /> : <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFF' }}>{basePrice + kitPrice > 0 ? 'Continuar para pagamento' : 'Confirmar inscrição'}</Text>}
                   </Pressable>
                 </View>
               </>
@@ -413,6 +674,8 @@ export default function EventsScreen() {
   const [regEvent, setRegEvent] = useState<ApiEvent | null>(null);
   const [orderingId, setOrderingId] = useState<string | null>(null);
   const [selectedSizes, setSelectedSizes] = useState<Record<string, string>>({});
+  const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
+  const [qrReg, setQrReg] = useState<ApiRegistration | null>(null);
 
   const loadAll = useCallback(async () => {
     const [ev, regs, prods, parts] = await Promise.allSettled([
@@ -465,9 +728,15 @@ export default function EventsScreen() {
         customerEmail: user.email,
         size: size || undefined,
         quantity: 1,
+        deliveryMethod: 'PICKUP',
       });
-      Alert.alert('Pedido reservado! 🎉', `Sua reserva de "${p.name}" foi registrada. Pedido #${String(data?.id ?? '').slice(0, 8)} — o pagamento será combinado com a assessoria.`);
       loadAll();
+      if (!data?.requiresPayment) {
+        Alert.alert('Pedido confirmado! 🎉', `Pedido #${data?.code ?? ''} — nada a pagar.`);
+        return;
+      }
+      // reserva de 30 min: segue direto para o pagamento (Pix / cartão / boleto)
+      setCheckoutTarget({ purpose: 'STORE_ORDER', refId: data.id, refToken: data.accessToken, title: `${p.name}${size ? ` · ${size}` : ''}` });
     } catch (e: any) {
       Alert.alert('Não foi possível reservar', e?.response?.data?.message || 'Tente novamente.');
     } finally {
@@ -477,7 +746,9 @@ export default function EventsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <RegistrationModal event={regEvent} visible={!!regEvent} onClose={() => setRegEvent(null)} onRegistered={loadAll} />
+      <RegistrationModal event={regEvent} visible={!!regEvent} onClose={() => setRegEvent(null)} onRegistered={loadAll} onRequirePayment={setCheckoutTarget} />
+      <CheckoutModal target={checkoutTarget} onClose={() => { setCheckoutTarget(null); loadAll(); }} onPaid={loadAll} />
+      <RegistrationQrModal registration={qrReg} onClose={() => setQrReg(null)} />
 
       {/* Header */}
       <View style={{
@@ -562,7 +833,21 @@ export default function EventsScreen() {
                   </LinearGradient>
 
                   <View style={{ backgroundColor: isDark ? '#160303' : '#FFFAFA', padding: 20 }}>
-                    {myReg ? (
+                    {myReg && myReg.status === 'PENDING' ? (
+                      <View style={{ borderRadius: 16, padding: 16, backgroundColor: '#F59E0B' + '12', borderWidth: 1.5, borderColor: '#F59E0B' + '40' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                          <Ionicons name="time-outline" size={20} color="#B45309" />
+                          <Text style={{ fontSize: 14, fontWeight: '700', color: '#B45309' }}>Pagamento pendente</Text>
+                        </View>
+                        <Text style={{ fontSize: 12, color: colors.textSecondary, marginBottom: 12 }}>
+                          Sua vaga está reservada{myReg.paymentExpiresAt ? ` até ${new Date(myReg.paymentExpiresAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : ''}. Conclua o pagamento para receber o número de peito.
+                        </Text>
+                        <Pressable onPress={() => setCheckoutTarget({ purpose: 'EVENT_REGISTRATION', refId: myReg.id, title: `Inscrição — ${event.title}` })}
+                          style={{ borderRadius: 12, paddingVertical: 13, alignItems: 'center', backgroundColor: '#B45309' }}>
+                          <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFF' }}>Pagar agora{myReg.finalPrice ? ` · ${formatPrice(myReg.finalPrice)}` : ''}</Text>
+                        </Pressable>
+                      </View>
+                    ) : myReg ? (
                       <View style={{ borderRadius: 16, padding: 16, backgroundColor: '#10B981' + '0C', borderWidth: 1.5, borderColor: '#10B981' + '30' }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
                           <Ionicons name="checkmark-circle" size={20} color="#10B981" />
@@ -589,6 +874,10 @@ export default function EventsScreen() {
                                   <Text style={{ fontSize: 12, color: colors.textSecondary, flex: 1 }}>Kit: {formatDate(myReg.kitPickupScheduledAt)}</Text>
                                 </View>
                               )}
+                              <Pressable onPress={() => setQrReg({ ...myReg, event })} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                                <Ionicons name="qr-code-outline" size={14} color={gradient[0]} />
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: gradient[0] }}>QR Code do kit / check-in</Text>
+                              </Pressable>
                             </View>
                           </View>
                         )}
@@ -699,8 +988,8 @@ export default function EventsScreen() {
               </View>
             ) : (
               products.map((p) => {
-                const available = p.totalStock - p.reserved;
-                const soldOut = available <= 0;
+                const available = p.available ?? p.totalStock - p.reserved;
+                const soldOut = p.purchasable === undefined ? available <= 0 : !p.purchasable;
                 const pct = p.totalStock > 0 ? Math.min(100, Math.round((p.reserved / p.totalStock) * 100)) : 0;
                 const effectivePrice = p.finalPriceInCents ?? p.priceInCents;
                 const hasDiscount = !!p.hasAthleteDiscount && effectivePrice < (p.originalPriceInCents ?? p.priceInCents);
@@ -779,7 +1068,7 @@ export default function EventsScreen() {
                         <ActivityIndicator color="#FFF" size="small" />
                       ) : (
                         <Text style={{ fontSize: 14, fontWeight: '700', color: soldOut ? colors.textTertiary : '#FFF' }}>
-                          {soldOut ? 'Esgotado' : 'Reservar'}
+                          {soldOut ? 'Esgotado' : p.isPreOrder ? 'Encomendar e pagar' : 'Comprar'}
                         </Text>
                       )}
                     </Pressable>

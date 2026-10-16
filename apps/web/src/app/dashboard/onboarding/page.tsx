@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { levelLabel } from '@/lib/coach-format';
 import { api } from '@/lib/api';
 
 interface OnboardingProfile {
@@ -187,7 +188,7 @@ export default function OnboardingDashboardPage() {
                       <div className="mt-3 flex flex-wrap gap-2">
                         {selected.parsedProfile.level && (
                           <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold">
-                            Nível: {selected.parsedProfile.level}
+                            Nível: {levelLabel(selected.parsedProfile.level)}
                           </span>
                         )}
                         {Array.isArray(selected.parsedProfile.alerts) && selected.parsedProfile.alerts.map((alert: string, i: number) => (

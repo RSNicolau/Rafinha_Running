@@ -1,3 +1,14 @@
+> **⚠️ LEGADO — este runbook (Vercel + Railway + Supabase) não é mais o caminho recomendado.**
+> O sistema agora roda como **uma stack Docker única** (Caddy + Web + API + Postgres + Redis), igual
+> na rede local e na VPS:
+>
+> - **Rodar no Mac / rede local (teste e validação):** [`docs/RODAR-LOCAL.md`](docs/RODAR-LOCAL.md)
+> - **Colocar no ar numa VPS com domínio e HTTPS:** [`docs/DEPLOY-VPS.md`](docs/DEPLOY-VPS.md)
+>
+> Os arquivos `railway.toml`, `nixpacks.toml`, `vercel.json`, `apps/web/vercel.json` e
+> `apps/mobile/railway.toml` foram mantidos só para referência/uso antigo; a stack Docker não os usa.
+> As variáveis de ambiente agora estão documentadas em [`.env.example`](.env.example) (raiz).
+
 # Deployment Runbook — RR Rafinha Running
 
 ## Architecture Overview

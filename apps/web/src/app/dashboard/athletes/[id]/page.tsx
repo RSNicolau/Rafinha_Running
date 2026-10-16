@@ -4,7 +4,11 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { useProviderAvailable } from '@/lib/integration-providers';
 import dynamic from 'next/dynamic';
+import AiUnavailableNotice from '@/components/coach/AiUnavailableNotice';
+import { formatCalendarDate, formatInstant, formatPaceSeconds, isAiNotConfigured, WORKOUT_TYPE_LABELS, formatKm } from '@/lib/coach-format';
+import { friendlyError } from '@/lib/api';
 
 const GarminRecoveryCard = dynamic(() => import('../_components/GarminRecoveryCard'), { ssr: false });
 const TrainingLoadChart = dynamic(() => import('./TrainingLoadChart'), { ssr: false });
@@ -25,6 +29,8 @@ interface AthleteUser {
     restingHR?: number;
     maxHR?: number;
     weeklyGoalKm?: number;
+    /** STAFF (apoio) recebe o perfil sem dados de saúde */
+    healthDataHidden?: boolean;
   };
 }
 
@@ -50,7 +56,7 @@ interface Workout {
 interface WorkoutStats {
   totalWorkouts?: number;
   monthlyKm?: number;
-  avgPace?: number;
+  avgPace?: number | null;
   streak?: number;
   weeklyKm?: { week: string; km: number }[];
 }
@@ -62,19 +68,21 @@ interface TrainingPlan {
   completedWorkouts: number;
 }
 
+const SOURCE_LABELS: Record<string, string> = {
+  MANUAL: 'Manual', STRAVA: 'Strava', GARMIN: 'Garmin', APPLE_HEALTH: 'Apple Saúde',
+  GOOGLE_FIT: 'Google Fit', COROS: 'COROS', POLAR: 'Polar',
+};
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatPace(secPerKm: number | undefined): string {
-  if (!secPerKm || !isFinite(secPerKm)) return '--:--';
-  const min = Math.floor(secPerKm / 60);
-  const sec = Math.round(secPerKm % 60);
-  return `${min}:${sec.toString().padStart(2, '0')}`;
+function formatPace(secPerKm: number | null | undefined): string {
+  return formatPaceSeconds(secPerKm);
 }
 
 function formatDistance(meters: number | undefined): string {
   if (!meters) return '—';
   if (meters < 1000) return `${Math.round(meters)} m`;
-  return `${(meters / 1000).toFixed(2)} km`;
+  return formatKm(meters / 1000, 2);
 }
 
 function formatDuration(secs: number | undefined): string {
@@ -87,17 +95,9 @@ function formatDuration(secs: number | undefined): string {
   return `${s}s`;
 }
 
+/** Instante (ex.: data de cadastro / conclusão) no fuso de São Paulo. */
 function formatDate(dateStr: string | undefined): string {
-  if (!dateStr) return '—';
-  try {
-    return new Date(dateStr).toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
-  } catch {
-    return dateStr;
-  }
+  return formatInstant(dateStr);
 }
 
 const SENSATION_EMOJI: Record<number, string> = { 1: '😫', 2: '😕', 3: '😐', 4: '🙂', 5: '💪' };
@@ -262,10 +262,11 @@ function AssessmentsSection({ athleteId }: { athleteId: string }) {
   const [loadingA, setLoadingA] = useState(true);
   const [showNewModal, setShowNewModal] = useState(false);
   const [comparing, setComparing] = useState(false);
-  const [comparison, setComparison] = useState<{ analysis: string | null; message?: string } | null>(null);
+  const [comparison, setComparison] = useState<{ analysis: string | null; message?: string; aiUnavailable?: boolean } | null>(null);
+  const [loadErrorA, setLoadErrorA] = useState('');
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
-    assessedAt: new Date().toISOString().split('T')[0],
+    assessedAt: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date()),
     weightKg: '', heightCm: '', bodyFatPct: '', restingHR: '', maxHR: '',
     vo2max: '', best5kTime: '', best10kTime: '', flexScore: '', strengthScore: '',
     coachNotes: '',
@@ -273,8 +274,8 @@ function AssessmentsSection({ athleteId }: { athleteId: string }) {
 
   useEffect(() => {
     api.get(`/physical-assessments/athlete/${athleteId}`)
-      .then(r => setAssessments(r.data))
-      .catch(() => {})
+      .then(r => setAssessments(Array.isArray(r.data) ? r.data : []))
+      .catch((e) => setLoadErrorA(friendlyError(e, 'Não foi possível carregar as avaliações.')))
       .finally(() => setLoadingA(false));
   }, [athleteId]);
 
@@ -306,8 +307,8 @@ function AssessmentsSection({ athleteId }: { athleteId: string }) {
       });
       setAssessments(prev => [data, ...prev]);
       setShowNewModal(false);
-    } catch {
-      alert('Erro ao salvar avaliação');
+    } catch (e) {
+      alert(friendlyError(e, 'Erro ao salvar avaliação'));
     } finally {
       setSaving(false);
     }
@@ -318,8 +319,12 @@ function AssessmentsSection({ athleteId }: { athleteId: string }) {
     try {
       const { data } = await api.get(`/physical-assessments/athlete/${athleteId}/compare`);
       setComparison(data);
-    } catch {
-      setComparison({ analysis: null, message: 'Erro ao gerar comparação' });
+    } catch (e) {
+      setComparison(
+        isAiNotConfigured(e)
+          ? { analysis: null, aiUnavailable: true, message: (e as any)?.response?.data?.message }
+          : { analysis: null, message: friendlyError(e, 'Não foi possível gerar a comparação.') },
+      );
     } finally {
       setComparing(false);
     }
@@ -355,9 +360,13 @@ function AssessmentsSection({ athleteId }: { athleteId: string }) {
           <p className="text-sm text-gray-700 leading-relaxed">{comparison.analysis}</p>
         </div>
       )}
-      {comparison?.message && !comparison.analysis && (
+      {comparison?.aiUnavailable && (
+        <div className="mb-5"><AiUnavailableNotice message={comparison.message} compact /></div>
+      )}
+      {comparison?.message && !comparison.analysis && !comparison.aiUnavailable && (
         <div className="mb-5 p-3 rounded-xl bg-gray-50 text-xs text-gray-500">{comparison.message}</div>
       )}
+      {loadErrorA && <div className="mb-5 p-3 rounded-xl bg-red-50 text-xs text-red-600">{loadErrorA}</div>}
 
       {loadingA ? (
         <div className="space-y-2">{[1,2].map(i => <div key={i} className="h-12 bg-gray-100 rounded-xl animate-pulse" />)}</div>
@@ -372,7 +381,7 @@ function AssessmentsSection({ athleteId }: { athleteId: string }) {
             <div key={a.id} className="border border-gray-100 rounded-xl p-4">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-sm font-semibold text-gray-900">
-                  {new Date(a.assessedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  {formatCalendarDate(a.assessedAt)}
                 </p>
                 {a.vdot && (
                   <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-primary/10 text-primary">
@@ -633,6 +642,8 @@ export default function AthleteDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [pushingGarmin, setPushingGarmin] = useState(false);
   const [garminPushMsg, setGarminPushMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // Sincronização direta com Garmin desativada no lançamento (Strava é a ponte) — só exibe se a API liberar
+  const garminAvailable = useProviderAvailable('GARMIN');
   const [activeTab, setActiveTab] = useState<'overview' | 'nutrition' | 'documents'>('overview');
 
   useEffect(() => {
@@ -641,54 +652,27 @@ export default function AthleteDetailPage() {
     const fetchAll = async () => {
       setLoading(true);
 
-      // Athlete profile — try /users/athletes/:id first, fall back to /users/:id
-      let athleteData: AthleteUser | null = null;
+      // Perfil do atleta (endpoint do treinador, respeita o vínculo atual)
       try {
         const { data } = await api.get<AthleteUser>(`/users/athletes/${id}`);
-        athleteData = data;
+        setAthlete(data);
       } catch {
-        try {
-          const { data } = await api.get<AthleteUser>(`/users/${id}`);
-          athleteData = data;
-        } catch {
-          setNotFound(true);
-          setLoading(false);
-          return;
-        }
-      }
-      setAthlete(athleteData);
-
-      // Workouts
-      try {
-        const { data } = await api.get<Workout[] | { data: Workout[] }>(
-          `/workouts/athlete/${id}?limit=10`
-        );
-        setWorkouts(Array.isArray(data) ? data : data.data ?? []);
-      } catch {
-        // silently ignore
+        setNotFound(true);
+        setLoading(false);
+        return;
       }
 
-      // Stats — try two possible endpoints
-      try {
-        const { data } = await api.get<WorkoutStats>(`/workouts/athlete/${id}/stats`);
-        setStats(data);
-      } catch {
-        try {
-          const { data } = await api.get<WorkoutStats>(`/workouts/stats?athleteId=${id}`);
-          setStats(data);
-        } catch {
-          // silently ignore
-        }
+      const [wRes, sRes, pRes] = await Promise.allSettled([
+        api.get(`/workouts/athlete/${id}`, { params: { limit: 10 } }),
+        api.get<WorkoutStats>(`/workouts/athlete/${id}/stats`),
+        api.get<TrainingPlan | null>(`/training-plans/athlete/${id}/active`),
+      ]);
+      if (wRes.status === 'fulfilled') {
+        const data: any = wRes.value.data;
+        setWorkouts(Array.isArray(data) ? data : data?.data ?? []);
       }
-
-      // Active training plan
-      try {
-        const { data } = await api.get<TrainingPlan | TrainingPlan[]>(`/plans/athlete/${id}/active`);
-        const planData = Array.isArray(data) ? data[0] : data;
-        if (planData) setPlan(planData);
-      } catch {
-        // silently ignore
-      }
+      if (sRes.status === 'fulfilled') setStats(sRes.value.data);
+      if (pRes.status === 'fulfilled' && pRes.value.data && (pRes.value.data as any).id) setPlan(pRes.value.data as TrainingPlan);
 
       setLoading(false);
     };
@@ -738,6 +722,8 @@ export default function AthleteDetailPage() {
   }
 
   const p = athlete.athleteProfile;
+  // STAFF (equipe de apoio): a API omite dados de saúde → escondemos as abas/seções de saúde
+  const healthHidden = !!p?.healthDataHidden;
 
   // Compute alerts from recent feedback
   const recentWithFeedback = workouts.slice(0, 10).filter(w => w.result?.rpe != null);
@@ -828,8 +814,12 @@ export default function AthleteDetailPage() {
       <div className="flex gap-1 mb-6 border-b border-gray-100 pb-0">
         {[
           { key: 'overview' as const, label: 'Visão Geral' },
-          { key: 'nutrition' as const, label: 'Nutrição' },
-          { key: 'documents' as const, label: 'Documentos' },
+          ...(healthHidden
+            ? []
+            : [
+                { key: 'nutrition' as const, label: 'Nutrição' },
+                { key: 'documents' as const, label: 'Documentos' },
+              ]),
         ].map((tab) => (
           <button
             key={tab.key}
@@ -846,7 +836,13 @@ export default function AthleteDetailPage() {
       </div>
 
       {/* Nutrition Tab */}
-      {activeTab === 'nutrition' && (
+      {healthHidden && (
+        <div className="mb-6 p-4 rounded-xl bg-gray-50 border border-gray-100 text-sm text-gray-500">
+          Como equipe de apoio, você não vê dados de saúde deste atleta (peso, frequência cardíaca, avaliações, nutrição e documentos).
+        </div>
+      )}
+
+      {activeTab === 'nutrition' && !healthHidden && (
         <div className="glass-card p-6">
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">
             Nutrição — Últimos 7 dias
@@ -856,7 +852,7 @@ export default function AthleteDetailPage() {
       )}
 
       {/* Documents Tab */}
-      {activeTab === 'documents' && (
+      {activeTab === 'documents' && !healthHidden && (
         <div className="glass-card p-6">
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">
             Documentos do Atleta
@@ -869,9 +865,11 @@ export default function AthleteDetailPage() {
         <>
 
       {/* Garmin Recovery Card */}
-      <div className="mb-6">
-        <GarminRecoveryCard athleteId={id} />
-      </div>
+      {garminAvailable && !healthHidden && (
+        <div className="mb-6">
+          <GarminRecoveryCard athleteId={id} />
+        </div>
+      )}
 
       {/* Stats Row */}
       <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Estatísticas</h2>
@@ -880,11 +878,11 @@ export default function AthleteDetailPage() {
           {
             label: 'Total de treinos',
             value: stats?.totalWorkouts != null ? String(stats.totalWorkouts) : (workouts.length > 0 ? `${workouts.length}+` : '—'),
-            sub: 'registrados',
+            sub: 'realizados',
           },
           {
             label: 'Km este mês',
-            value: stats?.monthlyKm != null ? `${stats.monthlyKm.toFixed(1)} km` : '—',
+            value: stats?.monthlyKm != null ? formatKm(stats.monthlyKm) : '—',
             sub: 'no mês atual',
           },
           {
@@ -894,7 +892,7 @@ export default function AthleteDetailPage() {
           },
           {
             label: 'Sequência',
-            value: stats?.streak != null ? `${stats.streak} dias` : '—',
+            value: stats?.streak != null ? `${stats.streak} ${stats.streak === 1 ? 'dia' : 'dias'}` : '—',
             sub: 'consecutivos',
           },
         ].map((stat) => (
@@ -907,7 +905,7 @@ export default function AthleteDetailPage() {
       </div>
 
       {/* Athlete Profile Data (if available) */}
-      {p && (
+      {p && !healthHidden && (
         <>
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Dados do Atleta</h2>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
@@ -945,7 +943,7 @@ export default function AthleteDetailPage() {
               <p className="text-xs text-gray-500 mb-4">{planProgress}% concluído</p>
 
               {/* Garmin push */}
-              {garminPushMsg && (
+              {garminAvailable && garminPushMsg && (
                 <div className={`text-xs px-3 py-2 rounded-lg mb-3 ${
                   garminPushMsg.type === 'success'
                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
@@ -954,6 +952,7 @@ export default function AthleteDetailPage() {
                   {garminPushMsg.text}
                 </div>
               )}
+              {garminAvailable && (
               <button
                 onClick={async () => {
                   if (!plan) return;
@@ -980,12 +979,13 @@ export default function AthleteDetailPage() {
                 </svg>
                 {pushingGarmin ? 'Enviando ao Garmin...' : 'Enviar planilha ao Garmin'}
               </button>
+              )}
 
               <Link
-                href="/dashboard/plans"
+                href={`/dashboard/plans/${plan.id}`}
                 className="text-xs text-primary font-medium hover:underline"
               >
-                Ver todas as planilhas →
+                Abrir planilha →
               </Link>
             </>
           ) : (
@@ -994,7 +994,7 @@ export default function AthleteDetailPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
               </svg>
               <p className="text-xs text-gray-400">Nenhuma planilha ativa</p>
-              <Link href="/dashboard/plans" className="text-xs text-primary font-medium hover:underline mt-2">
+              <Link href={`/dashboard/plans/create?athleteId=${id}`} className="text-xs text-primary font-medium hover:underline mt-2">
                 Criar planilha →
               </Link>
             </div>
@@ -1054,7 +1054,7 @@ export default function AthleteDetailPage() {
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Ações</h2>
           <div className="space-y-2">
             <Link
-              href="/dashboard/plans/create"
+              href={`/dashboard/plans/create?athleteId=${id}`}
               className="flex items-center gap-2 w-full px-4 py-2.5 bg-primary hover:bg-primary/90 text-white text-sm font-medium rounded-xl transition"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1062,12 +1062,16 @@ export default function AthleteDetailPage() {
               </svg>
               Criar Planilha
             </Link>
-            <button className="flex items-center gap-2 w-full px-4 py-2.5 border border-gray-200 hover:border-gray-300 text-gray-700 text-sm font-medium rounded-xl transition cursor-pointer">
+            {/* Abre o chat 1:1 com o atleta (a página de chat cria a conversa a partir de ?athleteId=) */}
+            <Link
+              href={`/dashboard/chat?athleteId=${id}`}
+              className="flex items-center gap-2 w-full px-4 py-2.5 border border-gray-200 hover:border-gray-300 text-gray-700 text-sm font-medium rounded-xl transition cursor-pointer"
+            >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
               </svg>
-              Enviar Feedback
-            </button>
+              Mensagem / feedback
+            </Link>
             <button
               onClick={() => window.open(`/dashboard/athletes/${id}/report`, '_blank')}
               className="flex items-center gap-2 w-full px-4 py-2.5 border border-gray-200 hover:border-gray-300 text-gray-700 text-sm font-medium rounded-xl transition cursor-pointer"
@@ -1097,7 +1101,7 @@ export default function AthleteDetailPage() {
           </div>
         ) : (
           <div className="overflow-x-auto -mx-2">
-            <table className="w-full text-sm min-w-[500px]">
+            <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr>
                   {['Data', 'Tipo', 'Distância', 'Duração', 'Pace', 'Fonte', 'Feedback'].map((h) => (
@@ -1114,19 +1118,19 @@ export default function AthleteDetailPage() {
                 {workouts.slice(0, 10).map((w) => (
                   <tr key={w.id} className="group hover:bg-gray-50/60 transition-colors">
                     <td className="py-3 px-2 text-gray-700">{formatDate(w.date)}</td>
-                    <td className="py-3 px-2 text-gray-700 capitalize">{w.type ?? 'Corrida'}</td>
+                    <td className="py-3 px-2 text-gray-700">{(w.type && WORKOUT_TYPE_LABELS[w.type]) ?? w.type ?? 'Corrida'}</td>
                     <td className="py-3 px-2 text-gray-700">{formatDistance(w.distance)}</td>
                     <td className="py-3 px-2 text-gray-700">{formatDuration(w.duration)}</td>
                     <td className="py-3 px-2 text-gray-700 font-mono text-xs">{formatPace(w.pace)}</td>
                     <td className="py-3 px-2">
                       <span
                         className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                          w.source === 'GPS'
+                          w.source && w.source !== 'MANUAL'
                             ? 'bg-blue-50 text-blue-600'
                             : 'bg-gray-100 text-gray-500'
                         }`}
                       >
-                        {w.source ?? 'Manual'}
+                        {(w.source && SOURCE_LABELS[w.source]) ?? w.source ?? 'Manual'}
                       </span>
                     </td>
                     <td className="py-3 px-2">
@@ -1185,7 +1189,7 @@ export default function AthleteDetailPage() {
       </div>
 
       {/* Assessments section */}
-      <AssessmentsSection athleteId={id} />
+      {!healthHidden && <AssessmentsSection athleteId={id} />}
         </>
       )}
     </div>

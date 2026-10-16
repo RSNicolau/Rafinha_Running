@@ -4,9 +4,28 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/stores/auth.store';
+import TrialBanner from '../checkout/_components/TrialBanner';
 import { api } from '@/lib/api';
+import { ConsentGate } from '@/components/legal/ConsentGate';
+import { LEGAL_ROUTES } from '@/lib/legal';
 
-const navItems = [
+type NavItem = {
+  href: string;
+  label: string;
+  icon: string;
+  roles: string[];
+  /** Se definido, exige equipe ativa com um destes papéis (OWNER/ADMIN/COACH/STAFF). */
+  teamRoles?: string[];
+};
+
+const TEAM_ROLE_LABEL: Record<string, string> = {
+  OWNER: 'Dono(a) da equipe',
+  ADMIN: 'Gestão da equipe',
+  COACH: 'Treinador(a)',
+  STAFF: 'Apoio',
+};
+
+const navItems: NavItem[] = [
   // Coach / Admin
   { href: '/dashboard', label: 'Visão Geral', icon: 'grid', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/athletes', label: 'Atletas', icon: 'users', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
@@ -15,11 +34,15 @@ const navItems = [
   { href: '/dashboard/rankings', label: 'Rankings', icon: 'trophy', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/events', label: 'Eventos', icon: 'calendar', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/loja', label: 'Loja Virtual', icon: 'store', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
+  // Gestão da equipe (assessoria)
+  { href: '/dashboard/equipe', label: 'Equipe', icon: 'team', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'], teamRoles: ['OWNER', 'ADMIN'] },
+  { href: '/dashboard/mensalidades', label: 'Mensalidades', icon: 'money', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'], teamRoles: ['OWNER', 'ADMIN', 'STAFF'] },
   { href: '/dashboard/ai-assistant', label: 'IA Assistente', icon: 'sparkles', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/chat', label: 'Chat', icon: 'chat', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/live', label: 'Live Tracking', icon: 'radio', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/integrations', label: 'Integrações', icon: 'integrations', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
-  { href: '/dashboard/billing', label: 'Assinatura', icon: 'billing', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
+  // Assinatura da plataforma: assunto do dono da equipe (treinadores/apoio não veem itens financeiros)
+  { href: '/dashboard/billing', label: 'Assinatura', icon: 'billing', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'], teamRoles: ['OWNER'] },
   { href: '/dashboard/settings', label: 'Configurações', icon: 'settings', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
   { href: '/dashboard/onboarding-guide', label: 'Primeiros Passos', icon: 'guide', roles: ['COACH'] },
   { href: '/dashboard/testimonials', label: 'Depoimentos', icon: 'star', roles: ['COACH', 'ADMIN', 'SUPER_ADMIN'] },
@@ -33,6 +56,7 @@ const navItems = [
   { href: '/dashboard/athlete/niche-zones', label: 'Zonas de Treino', icon: 'zones', roles: ['ATHLETE'] },
   { href: '/dashboard/athlete/badges', label: 'Conquistas', icon: 'trophy', roles: ['ATHLETE'] },
   { href: '/dashboard/athlete/events', label: 'Eventos', icon: 'flag', roles: ['ATHLETE'] },
+  { href: '/dashboard/athlete/ranking', label: 'Ranking', icon: 'trophy', roles: ['ATHLETE'] },
   { href: '/dashboard/athlete/group', label: 'Meu Grupo', icon: 'users', roles: ['ATHLETE'] },
   { href: '/dashboard/athlete/nutrition', label: 'Nutrição', icon: 'nutrition', roles: ['ATHLETE'] },
   { href: '/dashboard/athlete/reports', label: 'Relatório PDF', icon: 'reports', roles: ['ATHLETE'] },
@@ -44,8 +68,29 @@ const navItems = [
   { href: '/dashboard/integrations', label: 'Integrações', icon: 'integrations', roles: ['ATHLETE'] },
 ];
 
+/** Item visível para o usuário? (papel global + papel na equipe ativa) */
+function canSee(item: NavItem, user: { role?: string; team?: { role?: string } | null } | null): boolean {
+  if (!user?.role || !item.roles.includes(user.role)) return false;
+  if (!item.teamRoles) return true;
+  const teamRole = user.team?.role;
+  // Sem equipe ativa: mantém o item de assinatura para treinadores legados / admins da plataforma
+  if (!teamRole) return item.href === '/dashboard/billing';
+  if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return true;
+  return item.teamRoles.includes(teamRole);
+}
+
 function NavIcon({ name, className }: { name: string; className?: string }) {
   const icons: Record<string, React.ReactNode> = {
+    team: (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+      </svg>
+    ),
+    money: (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
     grid: (
       <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
@@ -180,13 +225,21 @@ function NavIcon({ name, className }: { name: string; className?: string }) {
 function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, isAuthenticated, isLoading, loadUser, logout } = useAuthStore();
+  const { user, isAuthenticated, isLoading, loadUser, logout, refreshTeam } = useAuthStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingOnboarding, setPendingOnboarding] = useState(0);
 
   useEffect(() => {
     loadUser();
   }, []);
+
+  // Equipe ativa sempre atualizada (sessões antigas não tinham `team`; papel pode mudar)
+  useEffect(() => {
+    if (isAuthenticated && user?.role && user.role !== 'ATHLETE') {
+      refreshTeam();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, user?.id]);
 
   const fetchPendingCount = useCallback(async () => {
     try {
@@ -203,13 +256,19 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
     }
   }, [isAuthenticated, user?.role, fetchPendingCount]);
 
+  // Marca da EQUIPE ativa (logo/cor) tem prioridade sobre o branding do treinador e o padrão RR
+  const teamLogo = user?.team?.logoUrl || null;
+  const brandLogo = teamLogo || user?.branding?.logoUrl || null;
+  const brandColor = user?.team?.primaryColor || user?.branding?.primaryColor || '#DC2626';
+  const teamName = user?.team?.name || null;
+  const teamInitials = teamName ? teamName.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() : 'RR';
+
   // Inject brand CSS variables for theming
   useEffect(() => {
-    const primary = user?.branding?.primaryColor || '#DC2626';
     const secondary = user?.branding?.secondaryColor || '#1F2937';
-    document.documentElement.style.setProperty('--color-primary', primary);
+    document.documentElement.style.setProperty('--color-primary', brandColor);
     document.documentElement.style.setProperty('--color-secondary', secondary);
-  }, [user?.branding?.primaryColor, user?.branding?.secondaryColor]);
+  }, [brandColor, user?.branding?.secondaryColor]);
 
   // Apply dark mode from localStorage on mount
   useEffect(() => {
@@ -240,9 +299,16 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
     <>
       {/* Logo */}
       <div className="h-16 flex items-center px-5 border-b border-gray-100 shrink-0">
-        {user?.branding?.logoUrl ? (
+        {brandLogo ? (
           <div className="h-10 w-auto max-w-[140px] rounded-2xl overflow-hidden shadow-sm border border-gray-100/60">
-            <img src={user.branding.logoUrl} alt="Logo" className="h-full w-auto object-contain" />
+            <img src={brandLogo} alt={teamName ?? 'Logo'} className="h-full w-auto object-contain" />
+          </div>
+        ) : teamName && user?.team?.role !== 'ATHLETE' ? (
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-2xl flex items-center justify-center shadow-sm shrink-0" style={{ background: brandColor }}>
+              <span className="text-white font-black text-sm tracking-tighter leading-none">{teamInitials}</span>
+            </div>
+            <p className="text-[13px] font-bold text-gray-900 tracking-tight leading-tight truncate">{teamName}</p>
           </div>
         ) : (
           <div className="flex items-center gap-2.5">
@@ -257,9 +323,18 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
         )}
       </div>
 
+      {/* Equipe ativa */}
+      {user?.team && user.team.role !== 'ATHLETE' && (
+        <div className="px-5 py-2.5 border-b border-gray-100 shrink-0">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 leading-tight">Equipe</p>
+          <p className="text-sm font-semibold text-gray-900 leading-tight break-words" title={user.team.name}>{user.team.name}</p>
+          <p className="text-[11px] text-gray-500 leading-tight mt-0.5">{TEAM_ROLE_LABEL[user.team.role] ?? user.team.role}</p>
+        </div>
+      )}
+
       {/* Nav */}
       <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-        {navItems.filter((item) => user?.role && item.roles.includes(user.role)).map((item) => {
+        {navItems.filter((item) => canSee(item, user)).map((item) => {
           const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
           return (
             <Link
@@ -282,6 +357,19 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
           );
         })}
       </nav>
+
+      {/* Legal / LGPD */}
+      <div className="px-4 py-2 border-t border-gray-100 shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+        <Link href={LEGAL_ROUTES.myData} className="font-medium text-gray-500 hover:text-gray-900 transition-colors">
+          Meus dados (LGPD)
+        </Link>
+        <Link href={LEGAL_ROUTES.terms} className="text-gray-400 hover:text-gray-700 transition-colors">
+          Termos
+        </Link>
+        <Link href={LEGAL_ROUTES.privacy} className="text-gray-400 hover:text-gray-700 transition-colors">
+          Privacidade
+        </Link>
+      </div>
 
       {/* User */}
       <div className="p-3 border-t border-gray-100 shrink-0 space-y-2">
@@ -315,12 +403,17 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-gray-900 break-words leading-tight">{user?.name}</p>
-            <p className="text-xs text-gray-400 leading-tight mt-0.5">{user?.role === 'COACH' ? 'Treinador' : user?.role}</p>
+            <p className="text-xs text-gray-400 leading-tight mt-0.5">
+              {user?.role === 'COACH'
+                ? (user?.team?.role && TEAM_ROLE_LABEL[user.team.role]) || 'Treinador'
+                : user?.role === 'ATHLETE' ? 'Atleta' : user?.role}
+            </p>
           </div>
           <button
             onClick={logout}
             className="text-gray-400 hover:text-gray-600 cursor-pointer shrink-0"
             title="Sair"
+            aria-label="Sair da conta"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
@@ -362,14 +455,23 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
           <button
             onClick={() => setSidebarOpen(true)}
             className="p-2 rounded-xl hover:bg-gray-100 transition text-gray-600"
+            aria-label="Abrir menu"
+            aria-expanded={sidebarOpen}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
-          {user?.branding?.logoUrl ? (
+          {brandLogo ? (
             <div className="h-7 rounded-xl overflow-hidden shadow-sm">
-              <img src={user.branding.logoUrl} alt="Logo" className="h-full w-auto object-contain" />
+              <img src={brandLogo} alt={teamName ?? 'Logo'} className="h-full w-auto object-contain" />
+            </div>
+          ) : teamName && user?.team?.role !== 'ATHLETE' ? (
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0" style={{ background: brandColor }}>
+                <span className="text-white font-black text-xs tracking-tighter leading-none">{teamInitials}</span>
+              </div>
+              <span className="text-sm font-bold text-gray-900 tracking-tight truncate">{teamName}</span>
             </div>
           ) : (
             <div className="flex items-center gap-2">
@@ -383,9 +485,13 @@ function DashboardLayout({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="max-w-[1200px] mx-auto px-4 py-6 sm:px-6 sm:py-8 md:p-8">
+          <TrialBanner enabled={user?.role === 'COACH' && (!user?.team || user.team.role === 'OWNER')} />
           {children}
         </div>
       </main>
+
+      {/* LGPD — bloqueia o app até o aceite da versão vigente dos Termos/Política */}
+      <ConsentGate />
     </div>
   );
 }

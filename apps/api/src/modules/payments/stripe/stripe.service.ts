@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { SubscriptionStatus, PaymentProvider, PaymentStatus, SubscriptionPlanType } from '@prisma/client';
 import Stripe from 'stripe';
@@ -16,7 +16,7 @@ export class StripeService {
     if (!this._stripe) {
       const key = process.env.STRIPE_SECRET_KEY;
       if (!key) {
-        throw new Error('Stripe indisponível: STRIPE_SECRET_KEY não configurada');
+        throw new ServiceUnavailableException('Pagamento com cartão internacional indisponível no momento');
       }
       this._stripe = new Stripe(key, {
         apiVersion: '2025-01-27.acacia' as any,
@@ -101,13 +101,94 @@ export class StripeService {
     return { message: 'Assinatura será cancelada no fim do período' };
   }
 
-  async handleWebhook(rawBody: Buffer, signature: string) {
-    const event = this.stripe.webhooks.constructEvent(
-      rawBody,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET || '',
-    );
+  get isConfigured(): boolean {
+    return !!process.env.STRIPE_SECRET_KEY;
+  }
 
+  /**
+   * Stripe Checkout Session (pagamento único, BRL) — backup do Asaas / "cartão internacional".
+   * O valor vem SEMPRE do servidor (Payment.amount).
+   */
+  async createCheckoutSession(input: {
+    paymentId: string;
+    purpose: string;
+    refId: string;
+    amountInCents: number;
+    description: string;
+    customerEmail?: string | null;
+    successUrl: string;
+    cancelUrl: string;
+  }): Promise<{ id: string; url: string | null }> {
+    const session = await this.stripe.checkout.sessions.create(
+      {
+        mode: 'payment',
+        currency: 'brl',
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: 'brl',
+              unit_amount: input.amountInCents,
+              product_data: { name: input.description.slice(0, 250) },
+            },
+          },
+        ],
+        client_reference_id: input.paymentId,
+        customer_email: input.customerEmail || undefined,
+        metadata: { paymentId: input.paymentId, purpose: input.purpose, refId: input.refId },
+        payment_intent_data: {
+          metadata: { paymentId: input.paymentId, purpose: input.purpose, refId: input.refId },
+        },
+        success_url: input.successUrl,
+        cancel_url: input.cancelUrl,
+        // mínimo aceito pela Stripe é 30 min
+        expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
+      },
+      { idempotencyKey: `checkout_${input.paymentId}` },
+    );
+    return { id: session.id, url: session.url };
+  }
+
+  async retrieveCheckoutSession(id: string): Promise<Stripe.Checkout.Session> {
+    return this.stripe.checkout.sessions.retrieve(id);
+  }
+
+  async retrievePaymentIntentMetadata(id: string): Promise<Record<string, string> | null> {
+    try {
+      const pi = await this.stripe.paymentIntents.retrieve(id);
+      return (pi.metadata as Record<string, string>) ?? null;
+    } catch (err: any) {
+      this.logger.warn(`PaymentIntent ${id} indisponível: ${err?.message}`);
+      return null;
+    }
+  }
+
+  async expireCheckoutSession(id: string): Promise<void> {
+    try {
+      await this.stripe.checkout.sessions.expire(id);
+    } catch (err: any) {
+      this.logger.warn(`Não foi possível expirar sessão Stripe ${id}: ${err?.message}`);
+    }
+  }
+
+  /** Verifica a assinatura do webhook. Fail-closed: sem STRIPE_WEBHOOK_SECRET → 503. */
+  verifyWebhook(rawBody: Buffer, signature: string): Stripe.Event {
+    const secret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!secret) {
+      this.logger.error('STRIPE_WEBHOOK_SECRET não configurado — rejeitando webhook Stripe');
+      throw new ServiceUnavailableException('Webhook Stripe não configurado');
+    }
+    return this.stripe.webhooks.constructEvent(rawBody, signature, secret);
+  }
+
+  async handleWebhook(rawBody: Buffer, signature: string) {
+    const event = this.verifyWebhook(rawBody, signature);
+    await this.handleSubscriptionEvent(event);
+    return { received: true };
+  }
+
+  /** Eventos de assinatura recorrente (Stripe Billing). */
+  async handleSubscriptionEvent(event: Stripe.Event) {
     switch (event.type) {
       case 'invoice.paid':
         await this.handleInvoicePaid(event.data.object as Stripe.Invoice);
@@ -122,8 +203,6 @@ export class StripeService {
         await this.handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
         break;
     }
-
-    return { received: true };
   }
 
   private async handleInvoicePaid(invoice: Stripe.Invoice) {
@@ -134,8 +213,10 @@ export class StripeService {
 
     if (!sub) return;
 
-    await this.prisma.payment.create({
-      data: {
+    // upsert: a mesma fatura pode ter gerado antes um registro FAILED (invoice.payment_failed)
+    await this.prisma.payment.upsert({
+      where: { externalPaymentId: invoice.id },
+      create: {
         subscriptionId: sub.id,
         userId: sub.userId,
         amount: invoice.amount_paid,
@@ -144,6 +225,12 @@ export class StripeService {
         provider: PaymentProvider.STRIPE,
         externalPaymentId: invoice.id,
         paidAt: new Date(),
+      },
+      update: {
+        amount: invoice.amount_paid,
+        status: PaymentStatus.SUCCEEDED,
+        paidAt: new Date(),
+        failureReason: null,
       },
     });
 
@@ -175,17 +262,26 @@ export class StripeService {
       },
     });
 
-    await this.prisma.payment.create({
-      data: {
-        subscriptionId: sub.id,
-        userId: sub.userId,
-        amount: invoice.amount_due,
-        currency: 'BRL',
-        status: PaymentStatus.FAILED,
-        provider: PaymentProvider.STRIPE,
-        externalPaymentId: invoice.id,
-      },
-    });
+    // upsert por externalPaymentId (falhas repetidas da mesma fatura não geram P2002);
+    // nunca rebaixa uma fatura que já consta como paga
+    const existing = await this.prisma.payment.findUnique({ where: { externalPaymentId: invoice.id } });
+    if (!existing) {
+      await this.prisma.payment.create({
+        data: {
+          subscriptionId: sub.id,
+          userId: sub.userId,
+          amount: invoice.amount_due,
+          currency: 'BRL',
+          status: PaymentStatus.FAILED,
+          provider: PaymentProvider.STRIPE,
+          externalPaymentId: invoice.id,
+        },
+      }).catch((e: any) => {
+        if (e?.code !== 'P2002') throw e; // corrida com outra entrega do mesmo evento
+      });
+    } else if (existing.status !== PaymentStatus.SUCCEEDED) {
+      await this.prisma.payment.update({ where: { id: existing.id }, data: { status: PaymentStatus.FAILED, amount: invoice.amount_due } });
+    }
   }
 
   private async handleSubscriptionUpdated(subscription: Stripe.Subscription) {

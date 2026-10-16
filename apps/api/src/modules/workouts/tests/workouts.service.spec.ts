@@ -31,6 +31,7 @@ const mockPrisma = {
     upsert:   jest.fn(),
   },
   user: { findUnique: jest.fn() },
+  athleteProfile: { findUnique: jest.fn() },
 };
 
 const mockPlan = {
@@ -102,10 +103,12 @@ describe('WorkoutsService', () => {
       await expect(service.create('coach-1', dto as any)).rejects.toThrow(NotFoundException);
     });
 
-    it('deve lançar ForbiddenException quando coach não é dono do plano', async () => {
+    it('deve negar (404) quando coach não é dono do plano nem tem acesso ao atleta', async () => {
       mockPrisma.trainingPlan.findUnique.mockResolvedValue({ ...mockPlan, coachId: 'outro-coach' });
+      mockPrisma.athleteProfile.findUnique.mockResolvedValue({ coachId: 'outro-coach', teamId: null });
 
-      await expect(service.create('coach-1', dto as any)).rejects.toThrow(ForbiddenException);
+      await expect(service.create('coach-1', dto as any)).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.workout.create).not.toHaveBeenCalled();
     });
   });
 
@@ -179,14 +182,16 @@ describe('WorkoutsService', () => {
     it('deve criar resultado e marcar treino como completo', async () => {
       const workoutWithPlan = { ...mockWorkout, plan: { coachId: 'coach-1' } };
       mockPrisma.workout.findUnique.mockResolvedValue(workoutWithPlan);
-      mockPrisma.workoutResult.create.mockResolvedValue({ id: 'result-1', distanceMeters: 5000 });
+      mockPrisma.workoutResult.upsert.mockResolvedValue({ id: 'result-1', distanceMeters: 5000 });
       mockPrisma.workout.update.mockResolvedValue({ ...mockWorkout, status: WorkoutStatus.COMPLETED });
       mockPrisma.user.findUnique.mockResolvedValue({ name: 'Atleta 1' });
 
       const dto = { distanceMeters: 5000, durationSeconds: 1800, avgPace: '6:00', source: 'MANUAL' };
       const result = await service.submitResult('workout-1', 'athlete-1', dto as any);
 
-      expect(mockPrisma.workoutResult.create).toHaveBeenCalled();
+      expect(mockPrisma.workoutResult.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { workoutId: 'workout-1' } }),
+      );
       expect(mockPrisma.workout.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: WorkoutStatus.COMPLETED }) }),
       );

@@ -12,6 +12,7 @@
  */
 
 import request from 'supertest';
+import { CONSENT, linkAthleteToCoach } from './helpers';
 
 const BASE = process.env.TEST_API_URL || 'http://localhost:3000';
 const ts = Date.now();
@@ -29,20 +30,21 @@ beforeAll(async () => {
   // Register coach
   const coachRes = await request(BASE)
     .post('/api/v1/auth/register')
-    .send({ email: coachEmail, password: 'Test12345!', name: 'Coach Feedback', role: 'COACH' });
+    .send({ ...CONSENT, email: coachEmail, password: 'Test12345!', name: 'Coach Feedback', role: 'COACH' });
   coachToken = coachRes.body.accessToken;
 
   // Register athlete
   const athleteRes = await request(BASE)
     .post('/api/v1/auth/register')
-    .send({ email: athleteEmail, password: 'Test12345!', name: 'Athlete Feedback' });
+    .send({ ...CONSENT, email: athleteEmail, password: 'Test12345!', name: 'Athlete Feedback' });
   athleteToken = athleteRes.body.accessToken;
   athleteId = athleteRes.body.user.id;
+  await linkAthleteToCoach(coachToken, athleteToken, athleteEmail);
 
   // Register another athlete (to test cross-ownership)
   const otherRes = await request(BASE)
     .post('/api/v1/auth/register')
-    .send({ email: otherAthleteEmail, password: 'Test12345!', name: 'Other Athlete' });
+    .send({ ...CONSENT, email: otherAthleteEmail, password: 'Test12345!', name: 'Other Athlete' });
   otherAthleteToken = otherRes.body.accessToken;
 
   // Create a plan and workout for the athlete

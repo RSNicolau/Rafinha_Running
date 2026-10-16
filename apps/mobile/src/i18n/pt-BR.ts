@@ -191,8 +191,8 @@ export const ptBR = {
     step1Desc: 'Upload do arquivo Excel, PDF ou link do Google Sheets',
     step2: 'Treinador analisa',
     step2Desc: 'Seu treinador revisa e adapta o plano',
-    step3: 'Treinos no relógio',
-    step3Desc: 'Os treinos são enviados ao Garmin Connect',
+    step3: 'Treinos no app',
+    step3Desc: 'Os treinos aparecem no app e suas corridas sincronizam pela Strava',
   },
   settings: {
     title: 'Configurações',

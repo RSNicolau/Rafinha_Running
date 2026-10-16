@@ -20,7 +20,7 @@ jest.mock('@sentry/nestjs', () => ({
 
 // ── Prisma mock ───────────────────────────────────────────────────────────────
 const mockTx = {
-  payment:      { update: jest.fn() },
+  payment:      { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   subscription: { update: jest.fn() },
 };
 
@@ -64,7 +64,7 @@ describe('PagarmeService', () => {
     service = module.get<PagarmeService>(PagarmeService);
     jest.clearAllMocks();
     // Re-wire mockTx fns after clearAllMocks
-    mockTx.payment.update      = jest.fn();
+    mockTx.payment.updateMany  = jest.fn().mockResolvedValue({ count: 1 });
     mockTx.subscription.update = jest.fn();
     mockPrisma.$transaction     = jest.fn((fn: any) => fn(mockTx));
   });
@@ -163,9 +163,9 @@ describe('PagarmeService', () => {
       expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
 
       // payment.update called inside transaction
-      expect(mockTx.payment.update).toHaveBeenCalledWith(
+      expect(mockTx.payment.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'pay_1' },
+          where: { id: 'pay_1', status: { in: ['PENDING'] } },
           data:  expect.objectContaining({ status: 'SUCCEEDED' }),
         }),
       );
@@ -187,8 +187,74 @@ describe('PagarmeService', () => {
 
       await service.processWebhookEvent({ type: 'order.paid', data: { id: 'ord_1' } });
 
-      expect(mockTx.payment.update).toHaveBeenCalled();
+      expect(mockTx.payment.updateMany).toHaveBeenCalled();
       expect(mockTx.subscription.update).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent: a redelivered order.paid does not re-activate', async () => {
+      mockPrisma.payment.findFirst.mockResolvedValue(mockPayment);
+      mockTx.payment.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await service.processWebhookEvent({ type: 'order.paid', data: { id: 'ord_1' } });
+
+      expect(mockTx.subscription.update).not.toHaveBeenCalled();
+    });
+
+    it('skips entirely when payment already SUCCEEDED', async () => {
+      mockPrisma.payment.findFirst.mockResolvedValue({ ...mockPayment, status: 'SUCCEEDED' });
+      await service.processWebhookEvent({ type: 'order.paid', data: { id: 'ord_1' } });
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('H1: never flips REFUNDED back to SUCCEEDED (replayed webhook)', async () => {
+      mockPrisma.payment.findFirst.mockResolvedValue({ ...mockPayment, status: 'REFUNDED' });
+      await service.processWebhookEvent({ type: 'order.paid', data: { id: 'ord_1', status: 'paid' } });
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('H1: a FAILED payment only becomes SUCCEEDED after re-verifying with the Pagar.me API', async () => {
+      mockPrisma.payment.findFirst.mockResolvedValue({ ...mockPayment, status: 'FAILED' });
+      const getOrder = jest.spyOn(service, 'getOrder').mockResolvedValueOnce({ id: 'ord_1', status: 'canceled' });
+      await service.processWebhookEvent({ type: 'order.paid', data: { id: 'ord_1', status: 'paid' } });
+      expect(getOrder).toHaveBeenCalledWith('ord_1');
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+
+      getOrder.mockResolvedValueOnce({ id: 'ord_1', status: 'paid' });
+      await service.processWebhookEvent({ type: 'order.paid', data: { id: 'ord_1' } });
+      expect(mockTx.payment.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'pay_1', status: { in: ['FAILED'] } } }));
+    });
+
+    it('H1: amount different from the charge → flagged, nothing activated', async () => {
+      mockPrisma.payment.findFirst.mockResolvedValue({ ...mockPayment, amount: 39700 });
+      await service.processWebhookEvent({ type: 'order.paid', data: { id: 'ord_1', amount: 100 } });
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.payment.update).toHaveBeenCalledWith({ where: { id: 'pay_1' }, data: { failureReason: 'AMOUNT_MISMATCH' } });
+    });
+
+    it('H1: fulfillment error propagates (webhook → 5xx → Pagar.me retries)', async () => {
+      mockPrisma.payment.findFirst.mockResolvedValue(mockPayment);
+      mockTx.subscription.update.mockRejectedValueOnce(new Error('db down'));
+      await expect(service.processWebhookEvent({ type: 'order.paid', data: { id: 'ord_1' } })).rejects.toThrow('db down');
+    });
+
+    it('H1: polling applies the paid order through the same path (activates the coach plan)', async () => {
+      const fulfillment: any = { platformPlanPaid: jest.fn().mockResolvedValue({ outcome: 'FULFILLED' }) };
+      const svc = new PagarmeService(mockPrisma as any, fulfillment);
+      const coachPay = { ...mockPayment, subscriptionId: null, purpose: 'PLATFORM_PLAN', planId: 'PRO', amount: 39700 };
+      mockPrisma.payment.findFirst.mockResolvedValue(coachPay);
+      jest.spyOn(svc, 'getOrder').mockResolvedValue({ id: 'ord_1', status: 'paid', amount: 39700 });
+      await svc.syncOrderStatus(coachPay as any);
+      expect(mockTx.payment.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'pay_1', status: { in: ['PENDING'] } } }));
+      expect(fulfillment.platformPlanPaid).toHaveBeenCalledWith(mockTx, coachPay);
+      // o webhook que chega depois é idempotente (já SUCCEEDED) e não perde a ativação
+      expect(mockPrisma.payment.update).not.toHaveBeenCalled();
+    });
+
+    it('H1: polling never downgrades and only moves PENDING → FAILED', async () => {
+      jest.spyOn(service, 'getOrder').mockResolvedValue({ id: 'ord_1', status: 'canceled' });
+      await service.syncOrderStatus({ id: 'pay_1', externalPaymentId: 'ord_1', status: 'PENDING' } as any);
+      expect(mockPrisma.payment.updateMany).toHaveBeenCalledWith({ where: { id: 'pay_1', status: 'PENDING' }, data: { status: 'FAILED' } });
+      expect(mockPrisma.payment.update).not.toHaveBeenCalled();
     });
 
     it('does NOT call $transaction if order ID is missing', async () => {
@@ -208,7 +274,7 @@ describe('PagarmeService', () => {
 
       expect(mockPrisma.payment.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { externalPaymentId: 'ord_f' },
+          where: { externalPaymentId: 'ord_f', status: 'PENDING' }, // nunca rebaixa SUCCEEDED/REFUNDED
           data:  expect.objectContaining({ status: 'FAILED' }),
         }),
       );

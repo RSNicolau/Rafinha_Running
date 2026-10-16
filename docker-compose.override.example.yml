@@ -1,0 +1,19 @@
+# Opcional — portas de DEPURAÇÃO (somente no Mac / rede local, nunca na VPS).
+# Para ativar:  cp docker-compose.override.example.yml docker-compose.override.yml
+# O docker compose lê o override automaticamente. Tudo preso a 127.0.0.1 (só o próprio Mac acessa).
+#
+# Útil para: abrir o banco num cliente SQL (TablePlus/DBeaver), chamar a API direto,
+# ou rodar `pnpm dev` com o banco/redis do Docker.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
+  api:
+    ports:
+      - "127.0.0.1:3000:3000"   # http://localhost:3000/health  e  /api/docs (se ENABLE_SWAGGER=true)
+  web:
+    ports:
+      - "127.0.0.1:3001:3000"   # Next direto, sem o Caddy

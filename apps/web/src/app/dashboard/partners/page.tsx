@@ -72,6 +72,8 @@ export default function PartnersPage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) { setError('Nome é obrigatório'); return; }
+    // links com esquema perigoso (javascript:, data:, vbscript:, file:) são recusados, não "consertados"
+    if (/^\s*(javascript|data|vbscript|file):/i.test(form.linkUrl)) { setError('Link inválido: use um endereço http:// ou https://'); return; }
     setSaving(true);
     setError('');
     const payload = {
@@ -80,7 +82,10 @@ export default function PartnersPage() {
       description: form.description.trim() || undefined,
       emoji: form.emoji.trim() || undefined,
       color: form.color || undefined,
-      linkUrl: form.linkUrl.trim() || undefined,
+      // API aceita somente http(s) — prefixa https:// quando o usuário digita só o domínio
+      linkUrl: form.linkUrl.trim()
+        ? (/^https?:\/\//i.test(form.linkUrl.trim()) ? form.linkUrl.trim() : `https://${form.linkUrl.trim()}`)
+        : undefined,
     };
     try {
       if (editingId) {

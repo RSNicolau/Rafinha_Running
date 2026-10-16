@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { formatKm, formatNumberBR } from '@/lib/coach-format';
 
 interface GroupEntry {
   rank: number;
@@ -29,7 +30,7 @@ function MotivationalCard({ myEntry, groupAvgKm, total }: { myEntry: GroupEntry 
     return (
       <div className="rounded-2xl border border-yellow-200 bg-yellow-50 p-4">
         <p className="text-sm font-semibold text-yellow-800">
-          Voce esta entre os melhores do grupo! Continue assim.
+          Você está entre os melhores do grupo! Continue assim.
         </p>
       </div>
     );
@@ -37,7 +38,7 @@ function MotivationalCard({ myEntry, groupAvgKm, total }: { myEntry: GroupEntry 
     return (
       <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
         <p className="text-sm font-semibold text-blue-800">
-          Voce esta {Math.abs(diff).toFixed(1)}km abaixo da media do grupo. Um treino a mais faz diferenca!
+          Você está {formatKm(Math.abs(diff))} abaixo da média do grupo. Um treino a mais faz diferença!
         </p>
       </div>
     );
@@ -45,7 +46,7 @@ function MotivationalCard({ myEntry, groupAvgKm, total }: { myEntry: GroupEntry 
     return (
       <div className="rounded-2xl border border-green-200 bg-green-50 p-4">
         <p className="text-sm font-semibold text-green-800">
-          Voce esta {pct}% acima da media do grupo. Otimo trabalho!
+          Você está {pct}% acima da média do grupo. Ótimo trabalho!
         </p>
       </div>
     );
@@ -60,7 +61,7 @@ export default function AthleteGroupPage() {
   useEffect(() => {
     api.get('/workouts/group-comparison')
       .then((r) => setData(r.data))
-      .catch(() => setError('Erro ao carregar comparacao do grupo'))
+      .catch(() => setError('Erro ao carregar comparação do grupo'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -69,8 +70,8 @@ export default function AthleteGroupPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900">Voce no Grupo</h1>
-        <p className="text-sm text-gray-400 mt-1">Comparacao anonima — semana atual</p>
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900">Você no Grupo</h1>
+        <p className="text-sm text-gray-400 mt-1">Comparação anônima — semana atual</p>
       </div>
 
       {loading ? (
@@ -85,7 +86,7 @@ export default function AthleteGroupPage() {
         </div>
       ) : !data || data.data.length === 0 ? (
         <div className="rounded-2xl border border-gray-100 bg-white p-12 text-center">
-          <p className="text-sm font-medium text-gray-500">Nenhum dado de grupo disponivel</p>
+          <p className="text-sm font-medium text-gray-500">Nenhum dado de grupo disponível</p>
           <p className="text-xs text-gray-400 mt-1">Complete treinos para aparecer no ranking</p>
         </div>
       ) : (
@@ -93,19 +94,19 @@ export default function AthleteGroupPage() {
           {/* My position card */}
           {myEntry && (
             <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-6">
-              <h2 className="text-sm font-semibold text-indigo-700 mb-3">Sua posicao</h2>
+              <h2 className="text-sm font-semibold text-indigo-700 mb-3">Sua posição</h2>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div>
                   <p className="text-2xl font-bold text-indigo-900">#{myEntry.rank}</p>
                   <p className="text-xs text-indigo-600">de {data.total} atletas</p>
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-indigo-900">{myEntry.weeklyKm.toFixed(1)}</p>
+                  <p className="text-2xl font-bold text-indigo-900">{formatNumberBR(myEntry.weeklyKm)}</p>
                   <p className="text-xs text-indigo-600">km esta semana</p>
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-indigo-900">{data.groupAvgKm.toFixed(1)}</p>
-                  <p className="text-xs text-indigo-600">media do grupo</p>
+                  <p className="text-2xl font-bold text-indigo-900">{formatNumberBR(data.groupAvgKm)}</p>
+                  <p className="text-xs text-indigo-600">média do grupo</p>
                 </div>
                 <div>
                   {myEntry.weeklyKm > data.groupAvgKm ? (
@@ -113,14 +114,14 @@ export default function AthleteGroupPage() {
                       <p className="text-2xl font-bold text-emerald-700">
                         +{data.groupAvgKm > 0 ? Math.round(((myEntry.weeklyKm - data.groupAvgKm) / data.groupAvgKm) * 100) : 0}%
                       </p>
-                      <p className="text-xs text-emerald-600">acima da media</p>
+                      <p className="text-xs text-emerald-600">acima da média</p>
                     </>
                   ) : (
                     <>
                       <p className="text-2xl font-bold text-amber-700">
                         -{data.groupAvgKm > 0 ? Math.round(((data.groupAvgKm - myEntry.weeklyKm) / data.groupAvgKm) * 100) : 0}%
                       </p>
-                      <p className="text-xs text-amber-600">abaixo da media</p>
+                      <p className="text-xs text-amber-600">abaixo da média</p>
                     </>
                   )}
                 </div>
@@ -167,14 +168,14 @@ export default function AthleteGroupPage() {
                       </td>
                       <td className="px-6 py-3.5">
                         {entry.isMe ? (
-                          <span className="text-indigo-700 font-bold">→ Voce ←</span>
+                          <span className="text-indigo-700 font-bold">→ Você ←</span>
                         ) : (
                           <span className="text-gray-700">{entry.label}</span>
                         )}
                       </td>
                       <td className="px-6 py-3.5 text-right">
                         <span className={entry.isMe ? 'text-indigo-700' : 'text-gray-700'}>
-                          {entry.weeklyKm.toFixed(1)} km
+                          {formatKm(entry.weeklyKm)}
                         </span>
                       </td>
                       <td className="px-6 py-3.5 text-right">

@@ -2,9 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/stores/auth.store';
+import { formatKm } from '@/lib/coach-format';
+
+function fmtValue(tab: 'km' | 'workouts', v: number) {
+  // A API já devolve km (não dividir por 1000 de novo)
+  return tab === 'km' ? formatKm(v) : `${v} treinos`;
+}
 
 interface RankingEntry {
-  rank: number;
+  position: number;
+  isMe?: boolean;
   userId: string;
   name: string;
   avatarUrl?: string | null;
@@ -59,8 +67,12 @@ export default function RankingsPage() {
   const [kmRanking, setKmRanking] = useState<RankingEntry[]>([]);
   const [workoutsRanking, setWorkoutsRanking] = useState<RankingEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const { user } = useAuthStore();
+  const isAthlete = user?.role === 'ATHLETE';
 
   useEffect(() => {
+    setError('');
     setLoading(true);
     Promise.all([
       api.get(`/rankings/km?period=${period}&limit=20`),
@@ -70,7 +82,11 @@ export default function RankingsPage() {
         setKmRanking(kmRes.data || []);
         setWorkoutsRanking(workoutsRes.data || []);
       })
-      .catch(() => {})
+      .catch(() => {
+        setKmRanking([]);
+        setWorkoutsRanking([]);
+        setError('Não foi possível carregar o ranking. Tente novamente em instantes.');
+      })
       .finally(() => setLoading(false));
   }, [period]);
 
@@ -78,13 +94,15 @@ export default function RankingsPage() {
   const unit = tab === 'km' ? 'km' : 'treinos';
 
   const top3 = data.slice(0, 3);
-  const rest = data.slice(3);
+  const rest = data.length >= 2 ? data.slice(3) : data;
 
   return (
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight text-gray-900">Rankings</h1>
-        <p className="text-sm text-gray-400 mt-1">Desempenho dos seus atletas</p>
+        <p className="text-sm text-gray-400 mt-1">
+          {isAthlete ? 'Sua posição entre os atletas da sua equipe' : 'Desempenho dos atletas da sua equipe'}
+        </p>
       </div>
 
       {/* Controls */}
@@ -121,8 +139,8 @@ export default function RankingsPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
             </svg>
           </div>
-          <p className="text-sm font-medium text-gray-500">Sem dados para este período</p>
-          <p className="text-xs text-gray-400 mt-1">Os atletas precisam completar treinos para aparecer no ranking</p>
+          <p className="text-sm font-medium text-gray-500">{error || 'Sem dados para este período'}</p>
+          {!error && <p className="text-xs text-gray-400 mt-1">Os atletas precisam completar treinos para aparecer no ranking</p>}
         </div>
       ) : (
         <>
@@ -138,7 +156,7 @@ export default function RankingsPage() {
                   {top3[1]?.name?.charAt(0)}
                 </div>
                 <p className="text-xs font-semibold text-gray-800 truncate w-full text-center">{top3[1]?.name}</p>
-                <p className="text-sm font-bold text-gray-900">{tab === 'km' ? `${(top3[1]?.value / 1000).toFixed(1)} km` : `${top3[1]?.value} treinos`}</p>
+                <p className="text-sm font-bold text-gray-900">{fmtValue(tab, top3[1]?.value)}</p>
               </div>
               {/* 1st */}
               <div className="glass-card p-4 text-center flex flex-col items-center gap-2 order-0 -mt-3 border-2 border-amber-200">
@@ -149,7 +167,7 @@ export default function RankingsPage() {
                   {top3[0]?.name?.charAt(0)}
                 </div>
                 <p className="text-xs font-semibold text-gray-800 truncate w-full text-center">{top3[0]?.name}</p>
-                <p className="text-base font-bold text-gray-900">{tab === 'km' ? `${(top3[0]?.value / 1000).toFixed(1)} km` : `${top3[0]?.value} treinos`}</p>
+                <p className="text-base font-bold text-gray-900">{fmtValue(tab, top3[0]?.value)}</p>
               </div>
               {/* 3rd */}
               {top3[2] ? (
@@ -161,7 +179,7 @@ export default function RankingsPage() {
                     {top3[2]?.name?.charAt(0)}
                   </div>
                   <p className="text-xs font-semibold text-gray-800 truncate w-full text-center">{top3[2]?.name}</p>
-                  <p className="text-sm font-bold text-gray-900">{tab === 'km' ? `${(top3[2]?.value / 1000).toFixed(1)} km` : `${top3[2]?.value} treinos`}</p>
+                  <p className="text-sm font-bold text-gray-900">{fmtValue(tab, top3[2]?.value)}</p>
                 </div>
               ) : <div className="order-2" />}
             </div>
@@ -171,13 +189,13 @@ export default function RankingsPage() {
           {rest.length > 0 && (
             <div className="glass-card divide-y divide-gray-100 overflow-hidden">
               {rest.map((entry) => (
-                <div key={entry.userId} className="flex items-center gap-4 p-4 hover:bg-gray-50/50 transition">
-                  <span className="w-6 text-center text-sm font-bold text-gray-400">{entry.rank}</span>
+                <div key={entry.userId} className={`flex items-center gap-4 p-4 hover:bg-gray-50/50 transition ${entry.isMe ? 'bg-red-50/60' : ''}`}>
+                  <span className="w-6 text-center text-sm font-bold text-gray-400">{entry.position}</span>
                   <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0" style={{ backgroundColor: avatarColor(entry.name) }}>
                     {entry.name?.charAt(0)}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{entry.name}</p>
+                    <p className="text-sm font-medium text-gray-900 truncate">{entry.name}{entry.isMe ? ' (você)' : ''}</p>
                     {entry.level && (
                       <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${LEVEL_COLORS[entry.level] ?? 'bg-gray-100 text-gray-500'}`}>
                         {LEVEL_LABELS[entry.level] ?? entry.level}
@@ -186,7 +204,7 @@ export default function RankingsPage() {
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-sm font-bold text-gray-900">
-                      {tab === 'km' ? `${(entry.value / 1000).toFixed(1)}` : entry.value}
+                      {tab === 'km' ? Number(entry.value ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : entry.value}
                     </p>
                     <p className="text-xs text-gray-400">{unit}</p>
                   </div>

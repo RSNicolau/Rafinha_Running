@@ -17,53 +17,79 @@ export default function CoachOnboardingGuide() {
   const [steps, setSteps] = useState<Step[]>([]);
 
   useEffect(() => {
-    // Check completion status dynamically
+    // Cada passo verifica um dado REAL da API (antes dependia de campos inexistentes em /users/me)
     const checkSteps = async () => {
-      const [athletesRes, settingsRes] = await Promise.allSettled([
-        api.get('/users/my-athletes'),
-        api.get('/settings/coach-profile'),
+      const [athletesRes, meRes, formRes, teamRes, plansRes, aiRes] = await Promise.allSettled([
+        api.get('/users/athletes', { params: { limit: 1 } }),
+        api.get('/users/me'),
+        api.get('/onboarding/form'),
+        api.get('/teams/me'),
+        api.get('/teams/me/plans'),
+        api.get('/ai-assistant/status'),
       ]);
 
-      const hasAthletes = athletesRes.status === 'fulfilled' && athletesRes.value.data?.length > 0;
-      const settings = settingsRes.status === 'fulfilled' ? settingsRes.value.data : null;
+      const val = (r: PromiseSettledResult<any>) => (r.status === 'fulfilled' ? r.value.data : null);
+      const a = val(athletesRes);
+      const hasAthletes = !!(a && ((Array.isArray(a) && a.length > 0) || a.total > 0 || a.data?.length > 0));
+      const me = val(meRes);
+      const form = val(formRes);
+      const activeTeam = val(teamRes)?.activeTeam ?? null;
+      const plansData = val(plansRes);
+      const plans: any[] = Array.isArray(plansData) ? plansData : plansData?.data ?? [];
+      const ai = val(aiRes);
+      const isManager = activeTeam?.role === 'OWNER' || activeTeam?.role === 'ADMIN';
 
-      setSteps([
+      const activeQuestions = Array.isArray(form?.questions) ? form.questions.filter((q: any) => q.isActive).length : 0;
+
+      const list: Step[] = [
         {
           id: 'profile',
           title: 'Complete seu perfil',
           description: 'Adicione foto, bio e link de agendamento para seus atletas.',
           href: '/dashboard/settings',
-          completed: !!(settings?.bio || settings?.profilePhotoUrl),
+          completed: !!(me?.avatarUrl || me?.coachProfile?.bio || me?.bio),
         },
         {
           id: 'onboarding-form',
           title: 'Configure o questionário de anamnese',
-          description: 'Personalize as perguntas que seus novos atletas vão responder.',
+          description: 'Revise as perguntas que seus novos atletas vão responder e compartilhe o link.',
           href: '/dashboard/settings/onboarding-form',
-          completed: !!(settings?.onboardingFormActive),
+          completed: !!(form && form.isActive !== false && activeQuestions > 0),
         },
         {
           id: 'invite',
           title: 'Convide seu primeiro atleta',
-          description: 'Compartilhe seu link de onboarding ou convide por email.',
+          description: 'Compartilhe seu link de onboarding ou convide por e-mail.',
           href: '/dashboard/athletes',
           completed: hasAthletes,
         },
-        {
-          id: 'payment',
-          title: 'Configure pagamentos',
-          description: 'Adicione sua chave do MercadoPago ou Stripe para cobrar seus atletas.',
-          href: '/dashboard/settings#payments',
-          completed: !!(settings?.paymentConfigured),
-        },
-        {
-          id: 'ai',
-          title: 'Configure o assistente IA',
-          description: 'Personalize o nome e tom do seu assistente de coaching.',
-          href: '/dashboard/settings#ai',
-          completed: !!(settings?.aiAssistantName),
-        },
-      ]);
+      ];
+      if (isManager) {
+        list.push(
+          {
+            id: 'plans',
+            title: 'Crie os planos de mensalidade',
+            description: 'Defina os planos (valor e periodicidade) que os atletas vão assinar.',
+            href: '/dashboard/mensalidades',
+            completed: plans.length > 0,
+          },
+          {
+            id: 'payment',
+            title: 'Configure o recebimento',
+            description: 'Informe a carteira Asaas da equipe para receber as mensalidades.',
+            href: '/dashboard/equipe',
+            completed: !!activeTeam?.hasWallet,
+          },
+        );
+      }
+      list.push({
+        id: 'ai',
+        title: 'Configure a IA',
+        description: 'Escolha o provedor e, se necessário, adicione sua própria chave.',
+        href: '/dashboard/settings/ai',
+        completed: !!ai?.configured,
+      });
+      setSteps(list);
     };
 
     checkSteps();

@@ -1,6 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/stores/auth.store';
+import PaymentMethodPicker from '../../checkout/_components/PaymentMethodPicker';
+import { PaymentChoice, createCheckout, isValidCpf, maskCpf, paymentUrl } from '../../checkout/_lib/checkout';
 
 interface Product {
   id: string;
@@ -31,6 +35,10 @@ function formatPrice(cents: number) {
 }
 
 export default function AthleteStorefront() {
+  const router = useRouter();
+  const { user } = useAuthStore();
+  const [cpf, setCpf] = useState('');
+  const [choice, setChoice] = useState<PaymentChoice>('PIX');
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -58,21 +66,38 @@ export default function AthleteStorefront() {
   const categories = ['ALL', ...Array.from(new Set(products.map(p => p.category)))];
 
   const placeOrder = async () => {
-    if (!selected) return;
+    if (!selected || !user) return;
+    if (!isValidCpf(cpf)) {
+      alert('Informe um CPF válido para emitir a cobrança.');
+      return;
+    }
     setOrdering(true);
     try {
-      const { data } = await api.post('/store/public/orders', {
+      // preço (com desconto de aluno) é calculado no servidor a partir do usuário logado
+      const { data: order } = await api.post('/store/public/orders', {
         productId: selected.id,
-        customerName: 'Aluno',
-        customerEmail: 'aluno@app.com',
+        customerName: user.name,
+        customerEmail: user.email,
         size: size || undefined,
         color: color || undefined,
         quantity,
+        deliveryMethod: 'PICKUP',
       });
-      setOrderSuccess(data.id);
-      setSelected(null);
+      if (!order.requiresPayment) {
+        setOrderSuccess(order.id);
+        setSelected(null);
+        return;
+      }
+      const checkout = await createCheckout({
+        purpose: 'STORE_ORDER',
+        refId: order.id,
+        refToken: order.accessToken,
+        buyer: { name: user.name, email: user.email, cpf },
+        choice,
+      });
+      router.push(paymentUrl(checkout));
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Erro ao criar pedido');
+      alert(err?.response?.data?.message || err?.message || 'Erro ao criar pedido');
     } finally {
       setOrdering(false);
     }
@@ -272,8 +297,18 @@ export default function AthleteStorefront() {
                   <div className="flex items-center gap-2">
                     <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="w-8 h-8 rounded-lg border border-gray-200 hover:bg-gray-50">−</button>
                     <span className="w-12 text-center font-semibold">{quantity}</span>
-                    <button onClick={() => setQuantity(quantity + 1)} className="w-8 h-8 rounded-lg border border-gray-200 hover:bg-gray-50">+</button>
+                    <button onClick={() => setQuantity(Math.min(10, quantity + 1))} className="w-8 h-8 rounded-lg border border-gray-200 hover:bg-gray-50">+</button>
                   </div>
+                </div>
+
+                <div className="mb-3">
+                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">CPF (para a cobrança)</label>
+                  <input value={cpf} onChange={(e) => setCpf(maskCpf(e.target.value))} inputMode="numeric" placeholder="000.000.000-00"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                </div>
+                <div className="mb-4">
+                  <label className="text-xs font-medium text-gray-500 mb-1.5 block">Pagamento</label>
+                  <PaymentMethodPicker value={choice} onChange={setChoice} />
                 </div>
 
                 <div className="mt-auto pt-4 border-t border-gray-100">
@@ -284,7 +319,7 @@ export default function AthleteStorefront() {
                     className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-medium text-sm transition disabled:opacity-50 flex items-center justify-center gap-2"
                   >
                     {ordering && <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                    {selected.sizes.length > 0 && !size ? 'Selecione um tamanho' : 'Confirmar pedido'}
+                    {selected.sizes.length > 0 && !size ? 'Selecione um tamanho' : 'Ir para o pagamento'}
                   </button>
                 </div>
               </div>

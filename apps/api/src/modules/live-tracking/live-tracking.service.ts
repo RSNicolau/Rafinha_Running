@@ -138,6 +138,24 @@ export class LiveTrackingService {
     return results;
   }
 
+  /** Sessões ao vivo restritas aos atletas vinculados ao coach. */
+  async getLiveAthletesForCoach(prisma: any, coachId: string) {
+    const all = await this.getLiveAthletes();
+    if (all.length === 0) return [];
+    const mine = await prisma.athleteProfile.findMany({
+      where: { coachId, userId: { in: all.map((a) => a.athleteId) } },
+      select: { userId: true },
+    });
+    const allowed = new Set(mine.map((m: { userId: string }) => m.userId));
+    return all.filter((a) => allowed.has(a.athleteId));
+  }
+
+  /** O socket `clientId` é o dono da sessão ativa do atleta? */
+  async isSessionOwner(athleteId: string, clientId: string): Promise<boolean> {
+    const session = await this.cache.get<LiveSession>(this.sessionKey(athleteId));
+    return !!session && session.clientId === clientId;
+  }
+
   async getSessionRoute(athleteId: string) {
     return await this.cache.get<Array<{ lat: number; lng: number; timestamp: number }>>(this.routeKey(athleteId)) || [];
   }

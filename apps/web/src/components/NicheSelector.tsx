@@ -26,8 +26,9 @@ export default function NicheSelector({ value, onChange, compact = false }: Nich
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? '';
-    fetch(`${apiUrl}/api/v1/niche`)
+    // NEXT_PUBLIC_API_URL já termina em /api/v1 (padrão do projeto); sem ele usa o proxy relativo
+    const apiUrl = (process.env.NEXT_PUBLIC_API_URL || '/api/v1').replace(/\/+$/, '');
+    fetch(`${apiUrl}/niche`)
       .then((r) => {
         if (!r.ok) throw new Error('Failed to load niches');
         return r.json() as Promise<NicheOption[]>;

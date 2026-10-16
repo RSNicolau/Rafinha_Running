@@ -1,0 +1,55 @@
+# Contexto de build do Docker (raiz do monorepo) — usado por apps/api/Dockerfile e apps/web/Dockerfile.
+# Mantém a imagem pequena e, principalmente, NUNCA envia segredos (.env) para dentro da imagem.
+
+# Dependências e saídas de build locais (a imagem instala/compila do zero)
+**/node_modules
+**/.next
+**/dist
+**/coverage
+**/.turbo
+**/*.tsbuildinfo
+**/test-results
+**/playwright-report
+
+# Segredos e ambiente
+.env
+**/.env
+**/.env.*
+!**/.env.example
+
+# Git, editores, ferramentas
+.git
+.github
+.vercel
+**/.vercel
+.claude
+.local
+.vscode
+.idea
+**/.DS_Store
+
+# Infra/documentação que não entra na imagem
+backups
+docs
+load-tests
+scripts
+DEPLOY.md
+docker-compose*.yml
+Makefile
+railway.toml
+nixpacks.toml
+vercel.json
+start-web.sh
+
+# App mobile (Expo) não roda no servidor — só o package.json é necessário
+# para o pnpm validar o lockfile do workspace.
+apps/mobile/*
+!apps/mobile/package.json
+
+# Lockfile npm perdido dentro do web (o monorepo usa pnpm)
+apps/web/package-lock.json
+
+# Pastas de mídia soltas na raiz
+Loja_virtual
+Sao_garrafa
+pre*os_planos

@@ -3,7 +3,9 @@
 import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { api } from '@/lib/api';
+import { api, friendlyError } from '@/lib/api';
+import { passwordPolicyError, PASSWORD_POLICY_HINT } from '@/lib/password-policy';
+import { Portal, loginPathFor, readPortalHint } from '@/lib/portal';
 
 function ResetPasswordContent() {
   const router = useRouter();
@@ -17,6 +19,14 @@ function ResetPasswordContent() {
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
+  const [portal, setPortal] = useState<Portal | null>(null);
+
+  // 1º acesso após o onboarding: o link da API traz ?welcome=1 (aceita também ?first=1) — é sempre conta de atleta
+  const firstAccess = searchParams.get('welcome') === '1' || searchParams.get('first') === '1';
+  // Portal: ?portal=athlete|coach, ou o lembrado em /forgot-password neste navegador
+  useEffect(() => { setPortal(firstAccess ? 'athlete' : readPortalHint()); }, [firstAccess]);
+  const withEmail = (path: string) => (email ? `${path}${path.includes('?') ? '&' : '?'}email=${encodeURIComponent(email)}` : path);
+  const loginHref = withEmail(loginPathFor(portal));
 
   useEffect(() => {
     if (!token || !email) setError('Link inválido ou expirado. Solicite um novo link.');
@@ -25,15 +35,18 @@ function ResetPasswordContent() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (password.length < 8) { setError('A senha deve ter no mínimo 8 caracteres'); return; }
+    const pwdError = passwordPolicyError(password);
+    if (pwdError) { setError(pwdError); return; }
     if (password !== confirm) { setError('As senhas não coincidem'); return; }
     setLoading(true);
     try {
       await api.post('/auth/reset-password', { email, token, newPassword: password });
       setDone(true);
-      setTimeout(() => router.replace('/login'), 3000);
+      // Só redireciona sozinho quando sabemos o portal; senão o usuário escolhe abaixo
+      const target = firstAccess ? 'athlete' : portal;
+      if (target) setTimeout(() => router.replace(withEmail(loginPathFor(target))), firstAccess ? 1500 : 3000);
     } catch (err: any) {
-      setError(err?.response?.data?.message ?? 'Link inválido ou expirado. Solicite um novo link.');
+      setError(friendlyError(err, 'Link inválido ou expirado. Solicite um novo link.'));
     } finally {
       setLoading(false);
     }
@@ -46,7 +59,7 @@ function ResetPasswordContent() {
           <div className="w-40 sm:w-52 mx-auto mb-5 rounded-2xl overflow-hidden shadow-lg">
             <img src="/logo.png" alt="Rafinha Running" className="w-full block" />
           </div>
-          <p className="text-sm text-gray-500 font-medium">Painel do Treinador</p>
+          <p className="text-sm text-gray-500 font-medium">{portal === 'athlete' ? 'Área do Atleta' : portal === 'coach' ? 'Painel do Treinador' : 'Recuperação de acesso'}</p>
         </div>
 
         <div className="glass-card p-6 sm:p-8">
@@ -57,17 +70,29 @@ function ResetPasswordContent() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-              <h2 className="text-lg font-semibold text-gray-900 mb-2">Senha redefinida!</h2>
-              <p className="text-sm text-gray-500 mb-4">Sua senha foi atualizada com sucesso. Redirecionando para o login...</p>
-              <Link href="/login" className="text-sm text-[#DC2626] font-medium hover:text-red-800 transition">
-                Ir para o login →
-              </Link>
+              <h2 className="text-lg font-semibold text-gray-900 mb-2">{firstAccess ? 'Senha criada!' : 'Senha redefinida!'}</h2>
+              <p className="text-sm text-gray-500 mb-4">
+                {firstAccess ? 'Sua senha foi criada.' : 'Sua senha foi atualizada com sucesso.'}
+                {portal ? ' Redirecionando para o login...' : ' Entre novamente com a nova senha.'}
+              </p>
+              {portal ? (
+                <Link href={loginHref} className="text-sm text-[#DC2626] font-medium hover:text-red-800 transition">
+                  Ir para o login →
+                </Link>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <Link href="/athlete-login" className="block py-3 rounded-xl bg-gray-900 text-white text-sm font-medium">Sou atleta</Link>
+                  <Link href="/login" className="block py-3 rounded-xl border border-gray-200 text-gray-700 text-sm font-medium">Sou treinador</Link>
+                </div>
+              )}
             </div>
           ) : (
             <>
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">Nova senha</h2>
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">{firstAccess ? 'Defina sua senha' : 'Nova senha'}</h2>
               <p className="text-sm text-gray-500 mb-6">
-                {email ? `Redefinindo senha para ${email}` : 'Escolha uma nova senha para sua conta.'}
+                {firstAccess
+                  ? `Crie a senha de acesso${email ? ` para ${email}` : ''} — depois é só entrar na Área do Atleta.`
+                  : email ? `Redefinindo senha para ${email}` : 'Escolha uma nova senha para sua conta.'}
               </p>
 
               {error && (
@@ -110,6 +135,7 @@ function ResetPasswordContent() {
                       </svg>
                     </button>
                   </div>
+                  <p className="mt-1 text-[11px] text-gray-400">{PASSWORD_POLICY_HINT}</p>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">Confirmar senha</label>
@@ -133,11 +159,11 @@ function ResetPasswordContent() {
               </form>
 
               <p className="text-center text-xs text-gray-400 mt-5">
-                <Link href="/forgot-password" className="text-[#DC2626] font-medium hover:text-red-800 transition">
+                <Link href={portal ? `/forgot-password?portal=${portal}` : '/forgot-password'} className="text-[#DC2626] font-medium hover:text-red-800 transition">
                   Solicitar novo link
                 </Link>
                 {' '}·{' '}
-                <Link href="/login" className="hover:text-gray-600 transition">Voltar ao login</Link>
+                <Link href={loginHref} className="hover:text-gray-600 transition">Voltar ao login</Link>
               </p>
             </>
           )}

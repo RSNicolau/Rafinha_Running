@@ -5,6 +5,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
+import { parseBRLToCents } from '../../checkout/_lib/money';
 
 const AddressPicker = dynamic(() => import('@/components/maps/AddressPicker'), { ssr: false });
 
@@ -31,6 +32,9 @@ interface Event {
   meetingPoint?: string;
   registrationCount?: number;
   _count?: { registrations: number };
+  // /events/manage (organizador)
+  counts?: { confirmed: number; pending: number; waitlist: number; checkedIn: number; canceled: number };
+  revenueInCents?: number;
 }
 
 interface Attendee {
@@ -122,6 +126,8 @@ function formatPrice(cents: number, currency: string) {
 
 export default function EventsPage() {
   const { user } = useAuthStore();
+  const teamRole = user?.team?.role;
+  const canPublishEvents = !teamRole || teamRole === 'OWNER' || teamRole === 'ADMIN' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'upcoming' | 'past'>('upcoming');
@@ -146,12 +152,20 @@ export default function EventsPage() {
 
   const isCoach = user?.role === 'COACH' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
 
+  // Organizador vê todos os seus eventos (inclusive rascunhos); atleta vê os publicados
+  const fetchEvents = async (): Promise<Event[]> => {
+    const r = await api.get(isCoach ? '/events/manage' : '/events');
+    return r.data?.data || r.data || [];
+  };
+
   useEffect(() => {
-    api.get('/events')
-      .then((r) => setEvents(r.data?.data || r.data || []))
+    if (!user) return;
+    fetchEvents()
+      .then(setEvents)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, isCoach]);
 
   const now = new Date();
   const upcoming = events.filter((e) => new Date(e.eventDate) >= now && e.status !== 'CANCELED');
@@ -205,6 +219,7 @@ export default function EventsPage() {
   };
 
   const canProceedStep1 = eventForm.title.trim() && eventForm.eventDate;
+  const basePriceInvalid = !!eventForm.price && parseBRLToCents(eventForm.price) === null;
 
   const handleCreateEvent = async () => {
     if (!canProceedStep1) return;
@@ -223,11 +238,12 @@ export default function EventsPage() {
         city: eventForm.city || undefined,
         modality: eventForm.modality || undefined,
         maxParticipants: eventForm.maxParticipants ? Number(eventForm.maxParticipants) : undefined,
-        price: eventForm.price ? Math.round(Number(eventForm.price) * 100) : 0,
+        price: eventForm.price ? parseBRLToCents(eventForm.price) ?? 0 : 0,
         latitude: eventForm.latitude,
         longitude: eventForm.longitude,
         meetingPoint: eventForm.meetingPoint || undefined,
-        status: eventForm.status,
+        // M10: treinador cria rascunho; dono/gestor publica
+        status: canPublishEvents ? eventForm.status : 'DRAFT',
       };
 
       const { data: createdEvent } = await api.post('/events', payload);
@@ -248,7 +264,7 @@ export default function EventsPage() {
         await api.post(`/events/${eventId}/distances`, {
           name: d.name.trim(),
           distanceKm: d.distanceKm ? Number(d.distanceKm) : undefined,
-          price: d.price ? Math.round(Number(d.price) * 100) : 0,
+          price: d.price ? parseBRLToCents(d.price) ?? 0 : 0,
           maxParticipants: d.maxParticipants ? Number(d.maxParticipants) : undefined,
           ageGroup: d.ageGroup || undefined,
           description: d.description || undefined,
@@ -257,8 +273,7 @@ export default function EventsPage() {
       }
 
       // Refresh event list
-      const fresh = await api.get('/events');
-      setEvents(fresh.data?.data || fresh.data || []);
+      setEvents(await fetchEvents());
       resetCreate();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Erro ao criar evento. Verifique os dados e tente novamente.');
@@ -478,26 +493,40 @@ export default function EventsPage() {
                     <div>
                       <label className={labelClass}>Preço Base (R$)</label>
                       <input
-                        type="number"
-                        min={0}
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={eventForm.price}
                         onChange={(e) => setEventForm((p) => ({ ...p, price: e.target.value }))}
                         placeholder="0 = gratuito"
                         className={inputClass}
                       />
+                      {basePriceInvalid && <p className="text-[11px] text-red-600 mt-1">Use o formato 1.299,90</p>}
                     </div>
                     <div>
                       <label className={labelClass}>Status</label>
                       <select
-                        value={eventForm.status}
+                        value={canPublishEvents ? eventForm.status : 'DRAFT'}
                         onChange={(e) => setEventForm((p) => ({ ...p, status: e.target.value }))}
+                        disabled={!canPublishEvents}
                         className={inputClass}
                       >
                         <option value="DRAFT">Rascunho</option>
                         <option value="PUBLISHED">Publicado</option>
                       </select>
+                      {!canPublishEvents && <p className="text-[11px] text-gray-500 mt-1">O dono ou um gestor da equipe publica o evento.</p>}
                     </div>
+                  </div>
+
+                  <div>
+                    <label className={labelClass}>Vagas totais (opcional)</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={eventForm.maxParticipants}
+                      onChange={(e) => setEventForm((p) => ({ ...p, maxParticipants: e.target.value.replace(/\D/g, '') }))}
+                      placeholder="Sem limite — preencha para ter lista de espera"
+                      className={inputClass}
+                    />
                   </div>
                 </div>
               )}
@@ -530,7 +559,7 @@ export default function EventsPage() {
                             </div>
                             <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
                               {d.price ? (
-                                <span>R$ {Number(d.price).toFixed(2)}</span>
+                                <span>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((parseBRLToCents(d.price) ?? 0) / 100)}</span>
                               ) : (
                                 <span className="text-gray-400">Preço do evento</span>
                               )}
@@ -610,16 +639,16 @@ export default function EventsPage() {
                 ) : (
                   <button
                     onClick={handleCreateEvent}
-                    disabled={saving || (distances.length === 0 && Number(eventForm.price) === 0)}
+                    disabled={saving || basePriceInvalid}
                     className="flex-1 py-2.5 rounded-xl bg-primary hover:bg-red-700 text-white text-sm font-semibold transition disabled:opacity-50 cursor-pointer"
                   >
                     {saving ? 'Criando evento...' : 'Criar Evento'}
                   </button>
                 )}
               </div>
-              {createStep === 2 && distances.length === 0 && Number(eventForm.price) === 0 && (
-                <p className="text-xs text-amber-600 text-center mt-2">
-                  Adicione pelo menos um percurso ou defina um preço base para o evento
+              {createStep === 2 && distances.length === 0 && !parseBRLToCents(eventForm.price || '0') && (
+                <p className="text-xs text-gray-500 text-center mt-2">
+                  Sem percursos e com preço 0, o evento será gratuito (inscrição única).
                 </p>
               )}
             </div>
@@ -679,9 +708,8 @@ export default function EventsPage() {
                 <div>
                   <label className={labelClass}>Valor (R$)</label>
                   <input
-                    type="number"
-                    min={0}
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={distanceForm.price}
                     onChange={(e) => setDistanceForm((p) => ({ ...p, price: e.target.value }))}
                     placeholder="0 = preço do evento"
@@ -916,6 +944,14 @@ export default function EventsPage() {
                           {regCount} {regCount === 1 ? 'inscrito' : 'inscritos'}
                           {event.maxParticipants ? ` / ${event.maxParticipants}` : ''}
                         </span>
+                        {event.counts && event.counts.pending > 0 && (
+                          <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">{event.counts.pending} aguardando pagamento</span>
+                        )}
+                        {event.revenueInCents !== undefined && event.revenueInCents > 0 && (
+                          <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(event.revenueInCents / 100)}
+                          </span>
+                        )}
                         {event.location && (
                           <a
                             href={`https://maps.google.com/maps?q=${encodeURIComponent([event.location, event.city].filter(Boolean).join(', '))}`}

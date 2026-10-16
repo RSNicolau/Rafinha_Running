@@ -6,8 +6,9 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { UserRole, PlatformPlanType, CoachSubscriptionStatus } from '@prisma/client';
+import { UserRole } from '@prisma/client';
 import { PlatformService } from './platform.service';
+import { AdminSetPlanDto, SubscribePlatformDto, WhiteLabelAddCoachDto, WhiteLabelDto } from './dto/platform.dto';
 import { AdminService } from '../admin/admin.service';
 
 @ApiTags('Platform')
@@ -47,12 +48,15 @@ export class PlatformController {
   @ApiBearerAuth()
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  @ApiOperation({ summary: 'Assinar um plano' })
+  @ApiOperation({
+    summary: 'Assinar um plano (gera cobrança — ativa somente após o pagamento)',
+    description: 'Resposta: { status: "PENDING_PAYMENT", checkout: { paymentId, accessToken, checkoutUrl, pix, ... } }',
+  })
   async subscribe(
-    @CurrentUser('id') coachId: string,
-    @Body() body: { plan: PlatformPlanType },
+    @CurrentUser() user: { id: string; name: string; email: string },
+    @Body() body: SubscribePlatformDto,
   ) {
-    return this.platformService.subscribe(coachId, body.plan);
+    return this.platformService.subscribe(user, body);
   }
 
   // ─── White Label ─────────────────────────────────────────────────────────
@@ -64,9 +68,18 @@ export class PlatformController {
   @ApiOperation({ summary: 'Criar/atualizar conta white-label' })
   async createWhiteLabel(
     @CurrentUser('id') ownerId: string,
-    @Body() body: { brandName: string; customDomain?: string; logoUrl?: string; primaryColor?: string; maxCoaches?: number },
+    @Body() body: WhiteLabelDto,
   ) {
     return this.platformService.createWhiteLabel(ownerId, body);
+  }
+
+  @Post('white-label/domain/verify')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Verificar o domínio próprio (registro TXT _rr-verify.<domínio>)' })
+  async verifyWhiteLabelDomain(@CurrentUser('id') ownerId: string) {
+    return this.platformService.verifyWhiteLabelDomain(ownerId);
   }
 
   @Post('white-label/coaches')
@@ -76,7 +89,7 @@ export class PlatformController {
   @ApiOperation({ summary: 'Adicionar coach à conta white-label' })
   async addCoach(
     @CurrentUser('id') ownerId: string,
-    @Body() body: { coachId: string },
+    @Body() body: WhiteLabelAddCoachDto,
   ) {
     return this.platformService.whiteLabelAddCoach(ownerId, body.coachId);
   }
@@ -117,7 +130,7 @@ export class PlatformController {
   @ApiOperation({ summary: 'Admin: definir plano de um coach manualmente' })
   async adminSetPlan(
     @Param('coachId') coachId: string,
-    @Body() body: { plan: PlatformPlanType; status: CoachSubscriptionStatus },
+    @Body() body: AdminSetPlanDto,
   ) {
     return this.platformService.adminSetPlan(coachId, body.plan, body.status);
   }

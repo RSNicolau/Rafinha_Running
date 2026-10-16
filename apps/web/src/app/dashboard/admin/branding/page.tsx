@@ -60,6 +60,11 @@ export default function BrandingPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // A7: domínio só ativa após verificação do registro TXT
+  const [verifiedDomain, setVerifiedDomain] = useState<string | null>(null);
+  const [pendingDomain, setPendingDomain] = useState<{ domain: string; txtName: string; txtValue: string } | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [domainMsg, setDomainMsg] = useState('');
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadingBanner, setUploadingBanner] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -67,16 +72,20 @@ export default function BrandingPage() {
 
   useEffect(() => {
     api.get('/config/branding')
-      .then((r) => setForm({
-        tenantName: r.data.tenantName || '',
-        primaryColor: r.data.primaryColor || '#DC2626',
-        secondaryColor: r.data.secondaryColor || '#1F2937',
-        logoUrl: r.data.logoUrl || null,
-        bannerUrl: r.data.bannerUrl || null,
-        niche: r.data.niche || 'running',
-        domain: r.data.domain || null,
-        welcomeMsg: r.data.welcomeMsg || null,
-      }))
+      .then((r) => {
+        setForm({
+          tenantName: r.data.tenantName || '',
+          primaryColor: r.data.primaryColor || '#DC2626',
+          secondaryColor: r.data.secondaryColor || '#1F2937',
+          logoUrl: r.data.logoUrl || null,
+          bannerUrl: r.data.bannerUrl || null,
+          niche: r.data.niche || 'running',
+          domain: r.data.domain || r.data.pendingDomain?.domain || null,
+          welcomeMsg: r.data.welcomeMsg || null,
+        });
+        setVerifiedDomain(r.data.domain || null);
+        setPendingDomain(r.data.pendingDomain || null);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -102,13 +111,33 @@ export default function BrandingPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.put('/config/branding', form);
+      const { data } = await api.put('/config/branding', { ...form, domain: form.domain?.trim() || '' });
+      setVerifiedDomain(data?.domain || null);
+      if (data?.pendingDomain !== undefined) setPendingDomain(data.pendingDomain);
+      if (!form.domain?.trim()) setPendingDomain(null);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-    } catch {
-      alert('Erro ao salvar');
+    } catch (e: any) {
+      const m = e?.response?.data?.message;
+      alert((Array.isArray(m) ? m.join(' · ') : m) || 'Erro ao salvar');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const verifyDomain = async () => {
+    setVerifying(true);
+    setDomainMsg('');
+    try {
+      const { data } = await api.post('/config/branding/domain/verify');
+      setVerifiedDomain(data?.domain || null);
+      setPendingDomain(null);
+      setDomainMsg('✓ Domínio verificado e ativo.');
+    } catch (e: any) {
+      const m = e?.response?.data?.message;
+      setDomainMsg((Array.isArray(m) ? m.join(' · ') : m) || 'Não foi possível verificar o domínio.');
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -174,6 +203,21 @@ export default function BrandingPage() {
                 <label className={labelClass}>Domínio Personalizado (opcional)</label>
                 <input type="text" value={form.domain || ''} onChange={(e) => setForm(p => ({ ...p, domain: e.target.value || null }))} placeholder="speedrunning.app" className={inputClass} />
                 <p className="text-xs text-gray-400 mt-1.5">Aponte o CNAME do seu domínio para app.rafinharunning.com.br</p>
+                {verifiedDomain && !pendingDomain && (
+                  <p className="text-xs text-emerald-700 mt-1.5">✓ {verifiedDomain} verificado e ativo.</p>
+                )}
+                {pendingDomain && (
+                  <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 space-y-1">
+                    <p className="font-semibold">Aguardando verificação de {pendingDomain.domain}</p>
+                    <p>Crie no DNS um registro <strong>TXT</strong>:</p>
+                    <p className="font-mono break-all">Nome: {pendingDomain.txtName}</p>
+                    <p className="font-mono break-all">Valor: {pendingDomain.txtValue}</p>
+                    <button type="button" onClick={verifyDomain} disabled={verifying} className="mt-1 px-3 py-1.5 rounded-lg bg-amber-600 text-white font-semibold disabled:opacity-50">
+                      {verifying ? 'Verificando…' : 'Verificar domínio'}
+                    </button>
+                  </div>
+                )}
+                {domainMsg && <p className="text-xs mt-1.5 text-gray-700">{domainMsg}</p>}
               </div>
             </div>
           </div>

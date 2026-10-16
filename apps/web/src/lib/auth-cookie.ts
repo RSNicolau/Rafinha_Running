@@ -1,12 +1,16 @@
 // Utility to set/get a non-sensitive auth signal cookie for middleware.
-// The actual JWT stays in localStorage; this cookie just signals "logged in" for server-side routing.
-// Value is "1" — real security is enforced by the API on every request.
+// The actual JWT stays in localStorage; this cookie only drives server-side ROUTING (which portal to show).
+// Value = papel do usuário (ex.: "ATHLETE") ou "1" (legado). Não é controle de acesso:
+// a API valida o JWT e o papel em toda requisição.
 
-export function setAuthCookie(_token: string) {
+const ROLE_RE = /^[A-Z_]{2,32}$/;
+
+export function setAuthCookie(role?: string | null) {
   if (typeof document === 'undefined') return;
+  const value = role && ROLE_RE.test(role) ? role : '1';
   // Cookie lasts 7 days (refresh token lifetime). Presence = user is considered logged in by middleware.
   const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toUTCString();
-  document.cookie = `rr_auth=1; expires=${expires}; path=/; SameSite=Strict${location.protocol === 'https:' ? '; Secure' : ''}`;
+  document.cookie = `rr_auth=${value}; expires=${expires}; path=/; SameSite=Strict${location.protocol === 'https:' ? '; Secure' : ''}`;
 }
 
 export function clearAuthCookie() {

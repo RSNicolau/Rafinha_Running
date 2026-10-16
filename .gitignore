@@ -62,3 +62,17 @@ apps/mobile/ios/
 .env.*
 .expo/
 .vercel/
+
+# Stack Docker (docker-compose.yml) — ver docs/RODAR-LOCAL.md
+!.env.example
+backups/
+docker-compose.override.yml
+caddy-root.crt
+.ultimo-deploy-anterior
+
+# Saída da auditoria Jev (pode conter texto de páginas)
+scripts/qa/out/
+
+# local
+.claude/settings.local.json
+*.patch

@@ -1,7 +1,12 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import OpenAI from 'openai';
+import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { assertCoachOwnsAthlete, AuthUserLike } from '../../common/utils/ownership';
 import { generatePredictions } from './riegel';
+import { aiComplete, requireAiCredentials, resolveAiCredentials } from '../../common/ai/ai-provider';
+
+type ActorArg = string | AuthUserLike;
+/** Compatibilidade: string = id de um COACH. */
+const toActor = (a: ActorArg): AuthUserLike => (typeof a === 'string' ? { id: a, role: 'COACH' } : a);
 
 type HRZones = Record<string, { min: number; max: number; label: string }>;
 type PaceZones = Record<string, string>;
@@ -9,28 +14,13 @@ type PaceZones = Record<string, string>;
 @Injectable()
 export class PhysicalAssessmentsService {
   private readonly logger = new Logger(PhysicalAssessmentsService.name);
-  private _openai: OpenAI | null = null;
-
   constructor(private prisma: PrismaService) {}
-
-  // Lazy: só instancia o cliente OpenAI quando a análise por IA é usada, e
-  // falha com erro claro em vez de derrubar o boot da API se a env não existir.
-  private get openai(): OpenAI {
-    if (!this._openai) {
-      const apiKey = process.env.OPENAI_API_KEY;
-      if (!apiKey) {
-        throw new Error('Análise por IA indisponível: OPENAI_API_KEY não configurada');
-      }
-      this._openai = new OpenAI({ apiKey });
-    }
-    return this._openai;
-  }
 
   // ──────────────────────────────────────
   // Create assessment
   // ──────────────────────────────────────
 
-  async create(coachId: string, data: {
+  async create(actorArg: ActorArg, data: {
     athleteId: string;
     assessedAt?: Date;
     weightKg?: number;
@@ -46,10 +36,11 @@ export class PhysicalAssessmentsService {
     strengthScore?: number;
     coachNotes?: string;
   }) {
-    // Verify coach has access to athlete
-    const athlete = await this.prisma.user.findFirst({
-      where: { id: data.athleteId, athleteProfile: { coachId } },
-    });
+    // Treinador do atleta ou gestão da equipe (STAFF não acessa dados de saúde)
+    const actor = toActor(actorArg);
+    const coachId = actor.id;
+    await assertCoachOwnsAthlete(this.prisma, actor, data.athleteId, { allowSelf: false, healthData: true });
+    const athlete = await this.prisma.user.findUnique({ where: { id: data.athleteId } });
     if (!athlete) throw new NotFoundException('Atleta não encontrado');
 
     // Compute derived fields
@@ -105,12 +96,11 @@ export class PhysicalAssessmentsService {
   // Get athlete history
   // ──────────────────────────────────────
 
-  async getHistory(requesterId: string, athleteId: string, asCoach: boolean) {
+  async getHistory(requester: ActorArg, athleteId: string, asCoach: boolean) {
+    const actor = toActor(requester);
+    const requesterId = actor.id;
     if (asCoach) {
-      const athlete = await this.prisma.user.findFirst({
-        where: { id: athleteId, athleteProfile: { coachId: requesterId } },
-      });
-      if (!athlete) throw new NotFoundException('Atleta não encontrado');
+      await assertCoachOwnsAthlete(this.prisma, actor, athleteId, { allowSelf: false, healthData: true });
     } else {
       // Athlete requesting their own
       if (requesterId !== athleteId) throw new NotFoundException('Acesso negado');
@@ -131,7 +121,9 @@ export class PhysicalAssessmentsService {
     });
   }
 
-  async getById(requesterId: string, assessmentId: string, asCoach: boolean) {
+  async getById(requester: ActorArg, assessmentId: string, asCoach: boolean) {
+    const actor = toActor(requester);
+    const requesterId = actor.id;
     const assessment = await this.prisma.physicalAssessment.findUnique({
       where: { id: assessmentId },
       include: { athlete: { select: { id: true, name: true, email: true } } },
@@ -140,7 +132,14 @@ export class PhysicalAssessmentsService {
     if (!assessment) throw new NotFoundException('Avaliação não encontrada');
 
     if (asCoach) {
-      if (assessment.coachId !== requesterId) throw new NotFoundException('Avaliação não encontrada');
+      if (assessment.coachId !== requesterId) {
+        try {
+          await assertCoachOwnsAthlete(this.prisma, actor, assessment.athleteId, { allowSelf: false, healthData: true });
+        } catch (e) {
+          if (e instanceof ForbiddenException) throw e;
+          throw new NotFoundException('Avaliação não encontrada');
+        }
+      }
     } else {
       if (assessment.athleteId !== requesterId) throw new NotFoundException('Acesso negado');
     }
@@ -155,7 +154,7 @@ export class PhysicalAssessmentsService {
     return assessment;
   }
 
-  async update(coachId: string, assessmentId: string, data: Partial<{
+  async update(actorArg: ActorArg, assessmentId: string, data: Partial<{
     assessedAt: Date;
     weightKg: number;
     heightCm: number;
@@ -169,12 +168,17 @@ export class PhysicalAssessmentsService {
     flexScore: number;
     strengthScore: number;
     coachNotes: string;
-    aiAnalysis: string;
   }>) {
-    const assessment = await this.prisma.physicalAssessment.findFirst({
-      where: { id: assessmentId, coachId },
-    });
+    const actor = toActor(actorArg);
+    const assessment = await this.prisma.physicalAssessment.findUnique({ where: { id: assessmentId } });
     if (!assessment) throw new NotFoundException('Avaliação não encontrada');
+    // Acesso segue o vínculo ATUAL do atleta (não quem criou a avaliação)
+    try {
+      await assertCoachOwnsAthlete(this.prisma, actor, assessment.athleteId, { allowSelf: false, healthData: true });
+    } catch (e) {
+      if (e instanceof ForbiddenException) throw e;
+      throw new NotFoundException('Avaliação não encontrada');
+    }
 
     const bmi = data.weightKg && data.heightCm
       ? parseFloat((data.weightKg / Math.pow(data.heightCm / 100, 2)).toFixed(2))
@@ -189,10 +193,19 @@ export class PhysicalAssessmentsService {
     const hrZones = maxHR ? this.calculateHRZones(maxHR) : undefined;
     const paceZones = vdot ? this.calculatePaceZones(vdot) : undefined;
 
+    // Somente campos permitidos — athleteId/coachId/aiAnalysis nunca são alterados por aqui
+    const allowed: Record<string, any> = {};
+    for (const k of [
+      'assessedAt', 'weightKg', 'heightCm', 'bodyFatPct', 'muscleMassPct', 'restingHR', 'maxHR', 'vo2max',
+      'best5kTime', 'best10kTime', 'flexScore', 'strengthScore', 'coachNotes',
+    ] as const) {
+      if ((data as any)[k] !== undefined) allowed[k] = (data as any)[k];
+    }
+
     return this.prisma.physicalAssessment.update({
       where: { id: assessmentId },
       data: {
-        ...data,
+        ...allowed,
         bmi: bmi ?? undefined,
         vdot: vdot ? parseFloat(vdot.toFixed(1)) : undefined,
         hrZones: hrZones ?? undefined,
@@ -205,14 +218,14 @@ export class PhysicalAssessmentsService {
   // AI comparison
   // ──────────────────────────────────────
 
-  async compareWithAI(coachId: string, athleteId: string) {
-    const athlete = await this.prisma.user.findFirst({
-      where: { id: athleteId, athleteProfile: { coachId } },
-    });
+  async compareWithAI(actorArg: ActorArg, athleteId: string) {
+    const actor = toActor(actorArg);
+    await assertCoachOwnsAthlete(this.prisma, actor, athleteId, { allowSelf: false, healthData: true });
+    const athlete = await this.prisma.user.findUnique({ where: { id: athleteId } });
     if (!athlete) throw new NotFoundException('Atleta não encontrado');
 
     const assessments = await this.prisma.physicalAssessment.findMany({
-      where: { athleteId, coachId },
+      where: { athleteId },
       orderBy: { assessedAt: 'desc' },
       take: 2,
     });
@@ -239,13 +252,9 @@ Gere um parágrafo detalhado sobre:
 
 Seja técnico, preciso e motivador. Mencione valores específicos.`;
 
-    const response = await this.openai.chat.completions.create({
-      model: 'gpt-4o',
-      max_tokens: 1000,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    const analysis = response.choices[0]?.message?.content ?? '';
+    // Sem chave (plataforma ou BYOK do treinador) → 503 com mensagem clara; erros do provedor → PT amigável
+    const creds = await requireAiCredentials(this.prisma, actor.id);
+    const analysis = await aiComplete(creds, { prompt, maxTokens: 1000 });
 
     // Save analysis on latest assessment
     await this.prisma.physicalAssessment.update({
@@ -287,13 +296,9 @@ ${this.formatAssessment(assessment)}
 Gere uma análise objetiva em 2-3 frases com os pontos-chave do perfil atual.`;
     }
 
-    const response = await this.openai.chat.completions.create({
-      model: 'gpt-4o',
-      max_tokens: 500,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    const analysis = response.choices[0]?.message?.content ?? '';
+    const creds = await resolveAiCredentials(this.prisma, coachId);
+    if (!creds) return; // IA não configurada: avaliação fica sem análise automática (sem erro)
+    const analysis = await aiComplete(creds, { prompt, maxTokens: 500 });
 
     await this.prisma.physicalAssessment.update({
       where: { id: assessmentId },
@@ -367,8 +372,10 @@ Gere uma análise objetiva em 2-3 frases com os pontos-chave do perfil atual.`;
   }
 
   private secondsToMMSS(seconds: number): string {
-    const m = Math.floor(seconds / 60);
-    const s = Math.round(seconds % 60);
+    // Arredonda o total ANTES de separar min/s (evita "5:60")
+    const total = Math.round(seconds);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
     return `${m}:${s.toString().padStart(2, '0')}`;
   }
 

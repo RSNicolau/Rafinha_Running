@@ -1,4 +1,4 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, ServiceUnavailableException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { ReferralsService } from '../../referrals/referrals.service';
@@ -8,7 +8,7 @@ import {
 } from '@prisma/client';
 
 // Plan amounts (full price) used by both createSubscription and webhook restore
-const PLAN_FULL_AMOUNTS: Record<string, number> = {
+export const PLAN_FULL_AMOUNTS: Record<string, number> = {
   MONTHLY:    174.00,
   QUARTERLY:  495.00,
   SEMIANNUAL: 960.00,
@@ -23,7 +23,15 @@ const PLAN_FULL_FREQUENCY: Record<string, number> = {
 export class MercadoPagoService {
   private readonly logger = new Logger(MercadoPagoService.name);
   private readonly accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN || '';
-  private readonly webhookSecret = process.env.MERCADO_PAGO_WEBHOOK_SECRET || '';
+
+  /** Aceita os dois nomes de env usados historicamente no projeto. */
+  private get webhookSecret(): string {
+    return process.env.MERCADO_PAGO_WEBHOOK_SECRET || process.env.MERCADOPAGO_WEBHOOK_SECRET || '';
+  }
+
+  get hasWebhookSecret(): boolean {
+    return !!this.webhookSecret;
+  }
 
   constructor(
     private prisma: PrismaService,
@@ -47,7 +55,7 @@ export class MercadoPagoService {
 
     if (!this.accessToken) {
       this.logger.warn('MERCADO_PAGO_ACCESS_TOKEN não configurado');
-      throw new Error('Gateway de pagamento não configurado');
+      throw new ServiceUnavailableException('Gateway de pagamento não configurado');
     }
 
     const res = await fetch('https://api.mercadopago.com/preapproval', {
@@ -75,7 +83,7 @@ export class MercadoPagoService {
     if (!res.ok) {
       const err = await res.text();
       this.logger.error(`MercadoPago subscription error: ${res.status} ${err}`);
-      throw new Error('Falha ao criar assinatura no Mercado Pago');
+      throw new ServiceUnavailableException('Falha ao criar assinatura no Mercado Pago. Tente novamente.');
     }
 
     const preapprovalData: any = await res.json();
@@ -105,7 +113,7 @@ export class MercadoPagoService {
 
   async createPixPayment(userId: string, email: string, amount: number, description: string) {
     if (!this.accessToken) {
-      throw new Error('Gateway de pagamento PIX não configurado (MERCADO_PAGO_ACCESS_TOKEN)');
+      throw new ServiceUnavailableException('Pagamento PIX indisponível no momento');
     }
 
     const idempotencyKey = `pix_${userId}_${Date.now()}`;
@@ -131,7 +139,7 @@ export class MercadoPagoService {
     if (!res.ok) {
       const err = await res.text();
       this.logger.error(`Mercado Pago PIX error: ${res.status} ${err}`);
-      throw new Error('Falha ao gerar cobrança PIX');
+      throw new ServiceUnavailableException('Falha ao gerar cobrança PIX. Tente novamente.');
     }
 
     const data: any = await res.json();
@@ -180,14 +188,12 @@ export class MercadoPagoService {
   }
 
   /**
-   * Validate MercadoPago webhook signature.
-   * Header: x-signature contains ts=...v1=<hmac>
+   * Valida a assinatura do webhook do Mercado Pago.
+   * Header x-signature: "ts=<ts>,v1=<hmac>"; manifesto: "id:<data.id>;request-id:<x-request-id>;ts:<ts>;"
+   * Fail-closed: sem secret configurado retorna false (o controller decide o modo sem secret).
    */
-  validateWebhookSignature(xSignature: string, xRequestId: string, rawBody: Buffer): boolean {
-    if (!this.webhookSecret) {
-      this.logger.warn('MERCADO_PAGO_WEBHOOK_SECRET não configurado — ignorando validação de assinatura');
-      return true; // Permissivo em dev sem secret configurado
-    }
+  validateWebhookSignature(xSignature: string, xRequestId: string, dataId: string): boolean {
+    if (!this.webhookSecret || !xSignature) return false;
 
     try {
       const parts = xSignature.split(',');
@@ -196,13 +202,16 @@ export class MercadoPagoService {
 
       if (!tsMatch || !v1Match) return false;
 
-      const signedTemplate = `id:${xRequestId};request-id:${xRequestId};ts:${tsMatch};`;
+      const id = /^[a-z0-9]+$/i.test(dataId) ? dataId.toLowerCase() : dataId;
+      const signedTemplate = `id:${id};request-id:${xRequestId ?? ''};ts:${tsMatch};`;
       const expected = crypto
         .createHmac('sha256', this.webhookSecret)
         .update(signedTemplate)
         .digest('hex');
 
-      return crypto.timingSafeEqual(Buffer.from(v1Match), Buffer.from(expected));
+      const a = Buffer.from(v1Match);
+      const b = Buffer.from(expected);
+      return a.length === b.length && crypto.timingSafeEqual(a, b);
     } catch {
       return false;
     }
@@ -245,11 +254,16 @@ export class MercadoPagoService {
       });
       if (!subscription) return;
 
-      const status = payment.status === 'approved' ? PaymentStatus.SUCCEEDED : PaymentStatus.FAILED;
+      const status =
+        payment.status === 'approved' ? PaymentStatus.SUCCEEDED
+        : payment.status === 'refunded' || payment.status === 'charged_back' ? PaymentStatus.REFUNDED
+        : payment.status === 'rejected' || payment.status === 'cancelled' ? PaymentStatus.FAILED
+        : PaymentStatus.PENDING;
 
-      // Record payment
-      await this.prisma.payment.create({
-        data: {
+      // Registra/atualiza o pagamento (idempotente por externalPaymentId) — dados vindos da API do MP
+      await this.prisma.payment.upsert({
+        where: { externalPaymentId: String(paymentId) },
+        create: {
           subscriptionId: subscription.id,
           userId: subscription.userId,
           amount: Math.round(payment.transaction_amount * 100),
@@ -259,7 +273,11 @@ export class MercadoPagoService {
           externalPaymentId: String(paymentId),
           paidAt: status === PaymentStatus.SUCCEEDED ? new Date() : null,
         },
-      }).catch(() => {}); // Ignore duplicate
+        update: {
+          status,
+          ...(status === PaymentStatus.SUCCEEDED ? { paidAt: new Date() } : {}),
+        },
+      }).catch((e: any) => this.logger.warn(`Falha ao registrar pagamento MP ${paymentId}: ${e?.message}`));
 
       // Activate subscription on successful payment
       const wasInactive = subscription.status !== SubscriptionStatus.ACTIVE;

@@ -2,13 +2,16 @@
 import './instrument';
 import { NestFactory } from '@nestjs/core';
 import { CorrelationIdInterceptor } from './common/interceptors/correlation-id.interceptor';
-import { ValidationPipe, VersioningType, VERSION_NEUTRAL } from '@nestjs/common';
+import { VersioningType } from '@nestjs/common';
+import { buildValidationPipe } from './common/pipes/validation.pipe';
+import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
 import helmet from 'helmet';
 import compression from 'compression';
 import * as express from 'express';
 import { AppModule } from './app.module';
+import { ENCRYPTION_KEY_ENV, isValidEncryptionKey } from './common/utils/encryption';
 
 function validateEnv(): void {
   const required = [
@@ -21,17 +24,54 @@ function validateEnv(): void {
     throw new Error(`Missing required env variables: ${missing.join(', ')}`);
   }
 
-  // ITEM 2 — Encryption key must be set and strong
+  // Criptografia — dois segredos distintos em uso no código:
+  //  - ENCRYPTION_KEY (common/utils/encryption.ts, AES-256-GCM): tokens OAuth das integrações. 32 bytes em hex.
+  //  - API_KEY_ENCRYPTION_SECRET (BYOK do coach-brain, segredo TOTP do 2FA, payments): string >= 32 chars.
   if (!process.env.API_KEY_ENCRYPTION_SECRET || process.env.API_KEY_ENCRYPTION_SECRET.length < 32) {
     throw new Error('API_KEY_ENCRYPTION_SECRET must be set and at least 32 chars long');
+  }
+  if (!isValidEncryptionKey(process.env[ENCRYPTION_KEY_ENV])) {
+    const msg = `${ENCRYPTION_KEY_ENV} must be set to a 32-byte hex string (64 hex chars) — generate with: openssl rand -hex 32`;
+    if (process.env.NODE_ENV === 'production') throw new Error(msg);
+    const { Logger: L } = require('@nestjs/common');
+    new L('Bootstrap').warn(`ENV WARNING: ${msg} (integration tokens will be stored unencrypted outside production)`);
   }
 
   // ITEM 3 — Warn (not crash) for optional-but-important vars
   const warnings: string[] = [];
   if (!process.env.RESEND_API_KEY) warnings.push('RESEND_API_KEY not set — emails disabled');
   if (!process.env.EXPO_ACCESS_TOKEN) warnings.push('EXPO_ACCESS_TOKEN not set — push notifications disabled');
-  if (!process.env.MERCADO_PAGO_ACCESS_TOKEN && !process.env.STRIPE_SECRET_KEY && !process.env.PAGARME_API_KEY) {
-    warnings.push('No payment provider configured — payments will fail');
+  const isProduction = process.env.NODE_ENV === 'production';
+  // Mesmo critério de checkout.service.ts (isFakeProvider): só vale fora de produção
+  const fakeEnvAllowed = ['development', 'test'].includes(process.env.NODE_ENV ?? '');
+  const asaasIsProduction = /^https?:\/\/api\.asaas\.com(\/|$)/i.test(process.env.ASAAS_BASE_URL ?? '');
+  const fakePayments = fakeEnvAllowed && !asaasIsProduction && process.env.PAYMENTS_FAKE_PROVIDER === 'true';
+  if (process.env.PAYMENTS_FAKE_PROVIDER === 'true' && !fakePayments) {
+    warnings.push('PAYMENTS_FAKE_PROVIDER=true is ignored (only NODE_ENV=development|test and never with the production Asaas URL)');
+  }
+  if (fakePayments) {
+    warnings.push('PAYMENTS_FAKE_PROVIDER=true — payments are SIMULATED (dev only)');
+  }
+  if (
+    !fakePayments &&
+    !process.env.ASAAS_API_KEY &&
+    !process.env.MERCADO_PAGO_ACCESS_TOKEN &&
+    !process.env.STRIPE_SECRET_KEY &&
+    !process.env.PAGARME_API_KEY
+  ) {
+    warnings.push('No payment provider configured (ASAAS_API_KEY, MERCADO_PAGO_ACCESS_TOKEN, STRIPE_SECRET_KEY or PAGARME_API_KEY) — payments will fail');
+  }
+  if (process.env.ASAAS_API_KEY && !process.env.ASAAS_WEBHOOK_TOKEN) {
+    warnings.push('ASAAS_WEBHOOK_TOKEN not set while ASAAS_API_KEY is — Asaas webhooks will be rejected and payments will not be confirmed');
+  }
+  if (!process.env.PROXY_SHARED_SECRET) {
+    warnings.push('PROXY_SHARED_SECRET not set — client IP forwarded by the web proxy will not be trusted (rate limits/audit logs use the proxy IP)');
+  }
+  if (!process.env.APP_URL) {
+    warnings.push('APP_URL not set — email links, OAuth/payment redirects and CORS fall back to localhost defaults');
+  }
+  if (!process.env.LEGAL_DPO_EMAIL) {
+    warnings.push('LEGAL_DPO_EMAIL not set — LGPD data-subject requests will not be emailed to the DPO');
   }
   if (!process.env.ANTHROPIC_API_KEY) warnings.push('ANTHROPIC_API_KEY not set — AI features disabled');
   if (!process.env.PAGARME_WEBHOOK_SECRET) warnings.push('PAGARME_WEBHOOK_SECRET not set');
@@ -48,6 +88,10 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule, { rawBody: true, bufferLogs: true });
   app.useLogger(app.get(Logger));
+
+  // req.ip = IP acrescentado pelo(s) proxy(s) reverso(s) confiável(is) (Caddy/Nginx), não o X-Forwarded-For do cliente
+  const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 1);
+  app.getHttpAdapter().getInstance().set('trust proxy', Number.isFinite(trustProxyHops) ? trustProxyHops : 1);
 
   // Capture raw body for Pagar.me webhook HMAC-SHA256 signature validation
   app.use('/api/v1/payments/webhook', express.raw({ type: '*/*' }));
@@ -75,23 +119,20 @@ async function bootstrap() {
       : false,
   }));
 
-  const allowedOrigins = process.env.NODE_ENV === 'production'
-    ? [
-        ...(process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean),
-        ...(process.env.APP_URL ? [process.env.APP_URL] : []),
-      ].filter(Boolean)
-    : ['http://localhost:8081', 'http://localhost:3001', 'http://localhost:3000'];
+  const isProd = process.env.NODE_ENV === 'production';
+  const allowedOrigins = [
+    ...(process.env.ALLOWED_ORIGINS || '').split(',').map((o) => o.trim()).filter(Boolean),
+    ...(process.env.APP_URL ? [process.env.APP_URL.trim()] : []),
+    ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL.trim()] : []),
+    ...(isProd ? [] : ['http://localhost:8081', 'http://localhost:3001', 'http://localhost:3000']),
+  ].map((o) => o.replace(/\/+$/, ''));
 
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      if (!origin) return callback(null, true); // curl, mobile, server-to-server
+      if (!origin) return callback(null, true); // curl, mobile, server-to-server, same-origin via Next rewrites
       if (allowedOrigins.includes(origin)) return callback(null, true);
-      // Allow all Vercel preview + production domains (*.vercel.app)
-      if (/^https:\/\/[a-zA-Z0-9-]+(\.vercel\.app)$/.test(origin)) return callback(null, true);
-      // Allow Railway domains for internal calls
-      if (/^https:\/\/.*\.up\.railway\.app$/.test(origin)) return callback(null, true);
-      if (process.env.NODE_ENV !== 'production') return callback(null, true);
-      callback(new Error('Not allowed by CORS'));
+      // Origem não listada: sem headers CORS (o navegador bloqueia a leitura da resposta)
+      callback(null, false);
     },
     credentials: true,
   });
@@ -104,14 +145,10 @@ async function bootstrap() {
 
   app.useGlobalInterceptors(new CorrelationIdInterceptor());
 
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      transformOptions: { enableImplicitConversion: true },
-    }),
-  );
+  // Validação global com mensagens em PT (mensagens customizadas dos DTOs são mantidas)
+  app.useGlobalPipes(buildValidationPipe());
+  // Rede de segurança: Prisma P2002/P2025/P2003 → 409/404/400 em PT; demais → 500 genérico logado
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   const config = new DocumentBuilder()
     .setTitle('RR - Rafinha Running API')
@@ -141,14 +178,17 @@ async function bootstrap() {
     .addTag('Webhooks', 'Endpoints para webhooks de terceiros')
     .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  const swaggerEnabled = !isProd || process.env.ENABLE_SWAGGER === 'true';
+  if (swaggerEnabled) {
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document);
+  }
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
   const bootstrapLogger = app.get(Logger);
   bootstrapLogger.log(`RR API rodando na porta ${port} | health: /api/health`, 'Bootstrap');
-  bootstrapLogger.log(`Docs: http://localhost:${port}/api/docs`, 'Bootstrap');
+  if (swaggerEnabled) bootstrapLogger.log(`Docs: http://localhost:${port}/api/docs`, 'Bootstrap');
 }
 
 bootstrap();

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '@/lib/api';
+import SupplementsCard from '@/components/nutrition/SupplementsCard';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ const MEAL_TYPES = [
 ];
 
 const CALORIE_GOAL = 2000;
+const AI_UNAVAILABLE_HINT = 'Estimativa automática indisponível no momento — preencha calorias e macros manualmente.';
 const WATER_GOAL_ML = 2000;
 
 function getMealIcon(mealTime: string | null | undefined): string {
@@ -246,7 +248,7 @@ function AddMealForm({
     setAiHint('');
     try {
       const { data } = await api.post('/nutrition/analyze', { description });
-      if (data.calories > 0) {
+      if (data?.calories > 0) {
         setForm(f => ({
           ...f,
           calories: String(data.calories),
@@ -255,8 +257,13 @@ function AddMealForm({
           fat: String(data.fat),
         }));
         setAiHint(data.analysis || '');
+      } else {
+        // Sem chave de IA (ou estimativa falhou): avisa em vez de falhar em silêncio
+        setAiHint(AI_UNAVAILABLE_HINT);
       }
-    } catch { /* silent */ }
+    } catch {
+      setAiHint(AI_UNAVAILABLE_HINT);
+    }
     finally { setAnalyzing(false); }
   }, []);
 
@@ -520,7 +527,7 @@ export default function NutritionPage() {
       <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Nutrição</h1>
-          <p className="text-sm text-gray-500 mt-1">Acompanhe sua alimentação e hidratação diária</p>
+          <p className="text-sm text-gray-500 mt-1">Acompanhe sua alimentação, hidratação e suplementos</p>
         </div>
 
         {/* Date picker */}
@@ -571,6 +578,9 @@ export default function NutritionPage() {
 
           {/* Add Meal Form */}
           <AddMealForm onAdd={handleAddMeal} adding={addingMeal} />
+
+          {/* Supplements */}
+          <SupplementsCard date={selectedDate} />
         </div>
       )}
     </div>

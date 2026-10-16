@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Caddy = a "portaria" do sistema. Tudo que chega de fora entra por aqui
+# (portas 80/443) e é encaminhado para o container certo.
+#
+#   SITE_ADDRESS (no .env):
+#     :80                    → rede local, HTTP simples (padrão)
+#     192.168.0.10           → rede local com HTTPS de certificado próprio do Caddy
+#                              (junto com SITE_TLS="tls internal" e
+#                               CADDY_GLOBAL_OPTIONS="default_sni 192.168.0.10";
+#                               o scripts/gerar-env.sh --https-local preenche tudo)
+#     app.seudominio.com.br  → VPS: HTTPS automático e gratuito (Let's Encrypt)
+#
+#   CADDY_GLOBAL_OPTIONS (opcional, UMA opção global do Caddy por linha), ex.:
+#     default_sni 192.168.0.10     (HTTPS na rede local acessando pelo IP)
+#     email voce@seudominio.com.br (aviso do Let's Encrypt sobre o certificado)
+#
+#   SITE_TLS (opcional): vazio = automático. "tls internal" = certificado da CA local do Caddy.
+# ─────────────────────────────────────────────────────────────────────────────
+{
+	admin localhost:2019
+	{$CADDY_GLOBAL_OPTIONS}
+}
+
+{$SITE_ADDRESS::80} {
+	{$SITE_TLS}
+
+	# Rotas que vão DIRETO para a API (sem passar pelo Next):
+	#  - /socket.io/*  : WebSockets (chat e live-tracking). Os rewrites do Next não fazem proxy de WebSocket.
+	#  - webhooks      : Asaas, Stripe, Mercado Pago, Pagar.me, Strava, Garmin, COROS, WhatsApp
+	#                    (corpo bruto intacto para validar assinatura + menos latência)
+	#  - /api/v1/files : arquivos enviados (uploads) — download direto, sem passar pelo Next
+	#  - /health       : checagem de saúde da API (monitoramento)
+	#  - /api/docs     : Swagger (só existe com ENABLE_SWAGGER=true ou NODE_ENV=development)
+	@api_direct {
+		path /socket.io/* /api/v1/webhooks/* /api/v1/payments/webhook /api/v1/files/* /health /api/docs*
+	}
+	handle @api_direct {
+		reverse_proxy api:3000
+	}
+
+	# Todo o resto (páginas, PWA, e /api/v1/* comum) vai para o Next,
+	# que repassa /api/v1/* para a API pelos rewrites do next.config.js.
+	handle {
+		encode zstd gzip
+		reverse_proxy web:3000
+	}
+
+	header -Server
+
+	log {
+		output stdout
+		format console
+	}
+}

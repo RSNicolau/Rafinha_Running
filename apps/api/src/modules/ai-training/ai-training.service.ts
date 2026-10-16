@@ -1,8 +1,10 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { assertCoachOwnsAthlete, AuthUserLike } from '../../common/utils/ownership';
+import { addCalendarDays, toCalendarDate } from '../../common/utils/date-only';
 import { WorkoutType, HeartRateZone, AthleteLevel, WorkoutStatus } from '@prisma/client';
 import { GeneratePlanDto, TrainingGoal } from './dto/generate-plan.dto';
-import Anthropic from '@anthropic-ai/sdk';
+import { aiComplete, resolveAiCredentials } from '../../common/ai/ai-provider';
 
 interface WorkoutTemplate {
   type: WorkoutType;
@@ -18,7 +20,6 @@ interface WorkoutTemplate {
 @Injectable()
 export class AiTrainingService {
   private readonly logger = new Logger(AiTrainingService.name);
-  private anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? '' });
 
   constructor(private prisma: PrismaService) {}
 
@@ -28,6 +29,7 @@ export class AiTrainingService {
    * Falls back to rule-based descriptions if Claude fails.
    */
   private async humanizeWithClaude(args: {
+    coachId: string;
     athleteName: string;
     athleteLevel: string;
     goal: string;
@@ -38,7 +40,9 @@ export class AiTrainingService {
     avgSensation: number;
     onboardingProfile?: any;
   }): Promise<{ description: string | null; weeklyNarratives: string[] | null }> {
-    if (!process.env.ANTHROPIC_API_KEY) return { description: null, weeklyNarratives: null };
+    // Chave BYOK do treinador ou da plataforma; sem chave → descrição por regras (sem rotular como IA)
+    const creds = await resolveAiCredentials(this.prisma, args.coachId).catch(() => null);
+    if (!creds) return { description: null, weeklyNarratives: null };
 
     const onboardingSummary = args.onboardingProfile?.aiSummary
       ? `Resumo do atleta: ${args.onboardingProfile.aiSummary}`
@@ -70,12 +74,7 @@ RETORNE APENAS UM JSON VÁLIDO no formato:
 }`;
 
     try {
-      const msg = await this.anthropic.messages.create({
-        model: 'claude-opus-4-6',
-        max_tokens: 2000,
-        messages: [{ role: 'user', content: prompt }],
-      });
-      const text = (msg.content[0] as any)?.text ?? '';
+      const text = await aiComplete(creds, { prompt, maxTokens: 2000 });
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) return { description: null, weeklyNarratives: null };
       const parsed = JSON.parse(jsonMatch[0]);
@@ -93,7 +92,10 @@ RETORNE APENAS UM JSON VÁLIDO no formato:
    * Analyze athlete data and generate a training plan.
    * Rule-based engine using periodization principles.
    */
-  async generatePlan(coachId: string, dto: GeneratePlanDto) {
+  async generatePlan(user: AuthUserLike, dto: GeneratePlanDto) {
+    // Atleta precisa pertencer ao coach chamador (ADMIN/SUPER_ADMIN liberados)
+    await assertCoachOwnsAthlete(this.prisma, user, dto.athleteId, { allowSelf: false });
+    const coachId = user.id;
     const athlete = await this.prisma.user.findUnique({
       where: { id: dto.athleteId },
       include: { athleteProfile: true },
@@ -173,14 +175,14 @@ RETORNE APENAS UM JSON VÁLIDO no formato:
       planWorkouts.push(...weekWorkouts);
     }
 
-    const startDate = dto.startDate ? new Date(dto.startDate) : this.nextMonday();
-    const endDate = new Date(startDate);
-    endDate.setDate(endDate.getDate() + dto.weeks * 7);
+    const startDate = toCalendarDate(dto.startDate ? dto.startDate : this.nextMonday());
+    const endDate = addCalendarDays(startDate, dto.weeks * 7 - 1);
 
     // If planId provided, add workouts to existing plan
     if (dto.planId) {
       const plan = await this.prisma.trainingPlan.findFirst({
-        where: { id: dto.planId, coachId },
+        // Acesso ao atleta já validado acima (treinador atribuído ou OWNER/ADMIN da equipe) — planilha é da equipe
+        where: { id: dto.planId, athleteId: dto.athleteId, deletedAt: null },
       });
       if (!plan) throw new NotFoundException('Plano não encontrado');
 
@@ -192,6 +194,7 @@ RETORNE APENAS UM JSON VÁLIDO no formato:
         weeks: dto.weeks,
         goal: dto.goal,
         level,
+        generator: 'rules',
         analysis: { ...this.buildAnalysisReport(profile, athlete.dateOfBirth, recentWorkouts, avgPaceSeconds, weeklyKmActual), feedbackNote, volumeMultiplier },
       };
     }
@@ -207,6 +210,7 @@ RETORNE APENAS UM JSON VÁLIDO no formato:
 
     // Humanize description with Claude (falls back to rule-based if Claude fails)
     const humanized = await this.humanizeWithClaude({
+      coachId,
       athleteName: athlete.name,
       athleteLevel: level,
       goal: dto.goal,
@@ -243,6 +247,8 @@ RETORNE APENAS UM JSON VÁLIDO no formato:
       planDescription: description,
       weeklyNarratives: humanized.weeklyNarratives ?? null,
       humanized: humanized.description !== null,
+      /** 'ai' quando a narrativa veio de um modelo de IA; 'rules' = gerador por periodização (sem IA) */
+      generator: humanized.description !== null ? 'ai' : 'rules',
       generatedWorkouts: planWorkouts.length,
       weeks: dto.weeks,
       goal: dto.goal,
@@ -466,13 +472,12 @@ RETORNE APENAS UM JSON VÁLIDO no formato:
     return `${min}:${sec.toString().padStart(2, '0')}`;
   }
 
+  /** Próxima segunda-feira (dia de calendário em America/Sao_Paulo), às 12:00 UTC. */
   private nextMonday(): Date {
-    const d = new Date();
-    const day = d.getDay();
+    const today = toCalendarDate(new Date());
+    const day = today.getUTCDay();
     const diff = day === 0 ? 1 : 8 - day;
-    d.setDate(d.getDate() + diff);
-    d.setHours(0, 0, 0, 0);
-    return d;
+    return addCalendarDays(today, diff);
   }
 
   private async createWorkoutsForPlan(
@@ -482,8 +487,7 @@ RETORNE APENAS UM JSON VÁLIDO no formato:
     workouts: Array<WorkoutTemplate & { weekDay: number; weekNumber: number }>,
   ) {
     for (const w of workouts) {
-      const scheduledDate = new Date(startDate);
-      scheduledDate.setDate(scheduledDate.getDate() + (w.weekNumber - 1) * 7 + w.weekDay);
+      const scheduledDate = addCalendarDays(startDate, (w.weekNumber - 1) * 7 + w.weekDay);
 
       await this.prisma.workout.create({
         data: {
@@ -520,7 +524,7 @@ RETORNE APENAS UM JSON VÁLIDO no formato:
 
   private getPlanDescription(goal: TrainingGoal, level: AthleteLevel, weeks: number): string {
     const levelStr = { BEGINNER: 'iniciante', INTERMEDIATE: 'intermediário', ADVANCED: 'avançado', ELITE: 'elite' }[level];
-    return `Plano gerado por IA para atleta ${levelStr}. Objetivo: ${this.getPlanName(goal, weeks)}. Inclui periodização com fases de base, construção e pico.`;
+    return `Plano gerado automaticamente (periodização por regras) para atleta ${levelStr}. Objetivo: ${this.getPlanName(goal, weeks)}. Inclui periodização com fases de base, construção e pico.`;
   }
 
   private buildAnalysisReport(profile: any, dateOfBirth: Date | null | undefined, recentWorkouts: any[], avgPace: number, weeklyKm: number) {

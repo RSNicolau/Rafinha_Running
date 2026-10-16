@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { randomBytes } from 'crypto';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { encrypt, decrypt } from '../../../common/utils/encryption';
+import { consumeOAuthState, createOAuthState, OAuthClient } from '../oauth-state';
 import {
   FitnessIntegration, IntegrationProvider, Workout,
   WorkoutSource, WorkoutStatus,
@@ -50,22 +50,14 @@ export class GarminService {
   // OAuth Flow
   // ──────────────────────────────────────
 
-  async getAuthUrl(userId: string) {
+  async getAuthUrl(userId: string, client: OAuthClient = 'web') {
     if (!this.clientId || !this.clientSecret) {
       throw new BadRequestException(
         'Integração com Garmin ainda não configurada. O administrador precisa configurar as credenciais do Garmin (GARMIN_CLIENT_ID e GARMIN_CLIENT_SECRET).',
       );
     }
 
-    // Use a random nonce as state (CSRF protection — store userId lookup in DB)
-    const state = randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min TTL
-
-    await this.prisma.appConfig.upsert({
-      where: { key: `oauth_state:garmin:${state}` },
-      create: { key: `oauth_state:garmin:${state}`, value: { userId, expiresAt } },
-      update: { value: { userId, expiresAt } },
-    });
+    const state = await createOAuthState(this.prisma, IntegrationProvider.GARMIN, userId, client);
 
     const params = new URLSearchParams({
       client_id: this.clientId,
@@ -78,27 +70,18 @@ export class GarminService {
     return {
       url: `https://connect.garmin.com/oauthConfirm?${params.toString()}`,
       provider: IntegrationProvider.GARMIN,
+      state,
     };
   }
 
-  async handleCallback(code: string, state: string) {
-    // Verify and consume the state nonce
-    const stateRecord = await this.prisma.appConfig.findUnique({
-      where: { key: `oauth_state:garmin:${state}` },
-    });
-    if (!stateRecord) throw new BadRequestException('Estado OAuth inválido ou expirado');
-
-    const { userId, expiresAt } = stateRecord.value as any;
-    if (new Date() > new Date(expiresAt)) {
-      await this.prisma.appConfig.delete({ where: { key: `oauth_state:garmin:${state}` } });
-      throw new BadRequestException('Estado OAuth expirado. Tente novamente.');
-    }
-    await this.prisma.appConfig.delete({ where: { key: `oauth_state:garmin:${state}` } });
+  async handleCallback(code: string, state: string, opts: { expectedUserId?: string } = {}) {
+    const { userId } = await consumeOAuthState(this.prisma, IntegrationProvider.GARMIN, state, opts.expectedUserId);
 
     const tokenData = await this.exchangeCodeForToken(code);
 
     // Fetch the Garmin user ID from the Health API — this is what webhooks send as userId
-    let garminUserId = tokenData.access_token; // fallback: use token as identifier
+    // Nunca usar o access token como identificador (ficaria em texto puro em externalUserId)
+    let garminUserId: string | null = null;
     try {
       const userRes = await fetch(`${GARMIN_API_BASE}/wellness-api/rest/user/id`, {
         headers: { Authorization: `Bearer ${tokenData.access_token}` },
@@ -106,10 +89,10 @@ export class GarminService {
       });
       if (userRes.ok) {
         const userData = await userRes.json() as any;
-        garminUserId = userData.userId || userData.id || tokenData.access_token;
+        garminUserId = userData.userId || userData.id || null;
       }
     } catch {
-      this.logger.warn('Could not fetch Garmin user ID — falling back to access token as identifier');
+      this.logger.warn('Could not fetch Garmin user ID — webhooks não serão associados até a próxima conexão');
     }
 
     await this.prisma.fitnessIntegration.upsert({

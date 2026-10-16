@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Param, Query, Res, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { Response } from 'express';
@@ -29,6 +29,10 @@ export class ReportsController {
   ) {
     // "me" is an alias for the authenticated user's own ID
     const athleteId = athleteIdParam === 'me' ? requesterId : athleteIdParam;
+    if (month !== undefined && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      throw new BadRequestException('Mês inválido (use YYYY-MM)');
+    }
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(athleteId)) throw new BadRequestException('Atleta inválido');
 
     const pdfBuffer = await this.reportsService.generateMonthlyPdf(requesterId, athleteId, month);
 

@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { api } from '@/lib/api';
+import { passwordPolicyError, PASSWORD_POLICY_HINT } from '@/lib/password-policy';
 import { useAuthStore } from '@/stores/auth.store';
+import TwoFactorSettings from '@/components/coach/TwoFactorSettings';
 
 interface UserProfile {
   id: string;
@@ -11,13 +13,7 @@ interface UserProfile {
   phone?: string;
   avatarUrl?: string | null;
   profileBannerUrl?: string | null;
-  preferences?: {
-    notifications?: {
-      new_workout?: boolean;
-      athlete_alert?: boolean;
-      payment_confirmation?: boolean;
-    };
-  };
+  bannerUrl?: string | null;
 }
 
 interface ProfileForm {
@@ -36,6 +32,8 @@ interface NotificationPrefs {
   athlete_alert: boolean;
   payment_confirmation: boolean;
 }
+
+const NOTIF_PREFS_STORAGE_KEY = 'rr_notification_prefs';
 
 type FeedbackState = { type: 'success' | 'error'; message: string } | null;
 
@@ -93,6 +91,12 @@ function fileToBase64(file: File): Promise<string> {
  * Resize an image to the exact target dimensions using center-crop (cover fit).
  * Returns a base64 JPEG string. No distortion, no stretching.
  */
+/** Converte data URL (canvas) em Blob para envio multipart. */
+async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const res = await fetch(dataUrl);
+  return res.blob();
+}
+
 function resizeImageCanvas(file: File, width: number, height: number, quality = 0.92): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -188,20 +192,6 @@ export default function SettingsPage() {
   const [brainFeedback, setBrainFeedback] = useState<FeedbackState>(null);
   const [brainTestResult, setBrainTestResult] = useState<{ ok: boolean; latencyMs: number; model: string } | null>(null);
 
-  // Payment gateway settings (COACH only)
-  const [paymentSettings, setPaymentSettings] = useState<{ provider: string; paymentEnabled: boolean; hasPagarmeKey: boolean; hasStripeKey: boolean } | null>(null);
-  const [paymentProvider, setPaymentProvider] = useState<'pagarme' | 'stripe'>('pagarme');
-  const [paymentEnabled, setPaymentEnabled] = useState(false);
-  const [pagarmeApiKey, setPagarmeApiKey] = useState('');
-  const [pagarmeWebhook, setPagarmeWebhook] = useState('');
-  const [stripeKey, setStripeKey] = useState('');
-  const [stripeWebhook, setStripeWebhook] = useState('');
-  const [showPaymentKeys, setShowPaymentKeys] = useState(false);
-  const [savingPayment, setSavingPayment] = useState(false);
-  const [testingPayment, setTestingPayment] = useState(false);
-  const [paymentFeedback, setPaymentFeedback] = useState<FeedbackState>(null);
-  const [paymentTestResult, setPaymentTestResult] = useState<{ ok: boolean; latencyMs: number } | null>(null);
-
   // Branding (COACH only)
   const [brandingForm, setBrandingForm] = useState<BrandingForm>({
     tenantName: '',
@@ -235,14 +225,7 @@ export default function SettingsPage() {
         setProfile(data);
         setProfileForm({ name: data.name || '', phone: data.phone || '' });
         if (data.avatarUrl) setAvatarUrl(data.avatarUrl);
-        if (data.profileBannerUrl) setProfileBannerUrl(data.profileBannerUrl);
-        if (data.preferences?.notifications) {
-          setNotifPrefs({
-            new_workout: data.preferences.notifications.new_workout ?? true,
-            athlete_alert: data.preferences.notifications.athlete_alert ?? true,
-            payment_confirmation: data.preferences.notifications.payment_confirmation ?? true,
-          });
-        }
+        if (data.bannerUrl || data.profileBannerUrl) setProfileBannerUrl((data.bannerUrl || data.profileBannerUrl) as string);
       })
       .catch(() => {
         // Fall back to auth store data
@@ -275,11 +258,6 @@ export default function SettingsPage() {
         setBrainModel(data.model ?? '');
       }).catch(() => {});
 
-      api.get('/settings').then(({ data }) => {
-        setPaymentSettings(data);
-        setPaymentProvider(data.provider ?? 'pagarme');
-        setPaymentEnabled(data.paymentEnabled ?? false);
-      }).catch(() => {});
     }
   }, [storeUser]);
 
@@ -302,8 +280,9 @@ export default function SettingsPage() {
       setPasswordFeedback({ type: 'error', message: 'As senhas não coincidem.' });
       return;
     }
-    if (passwordForm.newPassword.length < 6) {
-      setPasswordFeedback({ type: 'error', message: 'A nova senha deve ter pelo menos 6 caracteres.' });
+    const pwdError = passwordPolicyError(passwordForm.newPassword);
+    if (pwdError) {
+      setPasswordFeedback({ type: 'error', message: pwdError });
       return;
     }
     setSavingPassword(true);
@@ -313,9 +292,19 @@ export default function SettingsPage() {
         currentPassword: passwordForm.currentPassword,
         newPassword: passwordForm.newPassword,
       });
-      setPasswordFeedback({ type: 'success', message: 'Senha alterada com sucesso.' });
+      // A troca de senha encerra todas as sessões (tokenVersion) — é preciso entrar novamente
+      setPasswordFeedback({ type: 'success', message: 'Senha alterada com sucesso. Faça login novamente.' });
       setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      setTimeout(() => {
+        try { localStorage.removeItem('rr_access_token'); localStorage.removeItem('rr_refresh_token'); } catch { /* noop */ }
+        window.location.href = '/login';
+      }, 1500);
+      return;
     } catch (err: any) {
+      if (err?.response?.status === 400 || err?.response?.status === 401) {
+        setPasswordFeedback({ type: 'error', message: err.response?.data?.message || 'Erro ao alterar senha.' });
+        return;
+      }
       // Try fallback endpoint
       try {
         await api.post('/auth/change-password', {
@@ -333,17 +322,31 @@ export default function SettingsPage() {
     }
   };
 
+  // A API (PUT /users/me) não aceita `preferences` e não há endpoint de preferências de notificação:
+  // as escolhas ficam salvas apenas neste navegador.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(NOTIF_PREFS_STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as Partial<NotificationPrefs>;
+      setNotifPrefs((p) => ({
+        new_workout: typeof saved.new_workout === 'boolean' ? saved.new_workout : p.new_workout,
+        athlete_alert: typeof saved.athlete_alert === 'boolean' ? saved.athlete_alert : p.athlete_alert,
+        payment_confirmation: typeof saved.payment_confirmation === 'boolean' ? saved.payment_confirmation : p.payment_confirmation,
+      }));
+    } catch {
+      /* armazenamento indisponível ou valor inválido: mantém os padrões */
+    }
+  }, []);
+
   const handleSaveNotifications = async () => {
     setSavingNotif(true);
     setNotifFeedback(null);
     try {
-      await api.put('/users/me', {
-        preferences: { notifications: notifPrefs },
-      });
-      setNotifFeedback({ type: 'success', message: 'Preferências salvas.' });
-    } catch (err: any) {
-      const msg = err.response?.data?.message || 'Erro ao salvar preferências.';
-      setNotifFeedback({ type: 'error', message: msg });
+      localStorage.setItem(NOTIF_PREFS_STORAGE_KEY, JSON.stringify(notifPrefs));
+      setNotifFeedback({ type: 'success', message: 'Preferências salvas neste navegador.' });
+    } catch {
+      setNotifFeedback({ type: 'error', message: 'Não foi possível salvar as preferências neste navegador.' });
     } finally {
       setSavingNotif(false);
     }
@@ -376,7 +379,11 @@ export default function SettingsPage() {
       setUploadProgress(60);
       setAvatarUrl(resized);
       setUploadProgress(80);
-      await api.put('/users/me', { avatarUrl: resized });
+      // Upload multipart: o servidor valida o tipo real (JPG/PNG/WEBP) e grava no storage
+      const fd = new FormData();
+      fd.append('file', await dataUrlToBlob(resized), 'avatar.jpg');
+      const { data } = await api.post('/users/me/avatar', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      if (data?.avatarUrl) setAvatarUrl(data.avatarUrl);
       setUploadProgress(100);
       setProfileFeedback({ type: 'success', message: 'Foto de perfil atualizada.' });
     } catch {
@@ -400,7 +407,10 @@ export default function SettingsPage() {
       setUploadProgress(65);
       setProfileBannerUrl(resized);
       setUploadProgress(85);
-      await api.put('/users/me', { profileBannerUrl: resized });
+      const fd = new FormData();
+      fd.append('file', await dataUrlToBlob(resized), 'banner.jpg');
+      const { data } = await api.post('/users/me/banner', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      if (data?.bannerUrl) setProfileBannerUrl(data.bannerUrl);
       setUploadProgress(100);
       setProfileFeedback({ type: 'success', message: 'Banner de perfil atualizado.' });
     } catch {
@@ -445,44 +455,6 @@ export default function SettingsPage() {
       setBrandingFeedback({ type: 'error', message: msg });
     } finally {
       setSavingBranding(false);
-    }
-  };
-
-  const handleSavePaymentSettings = async () => {
-    setSavingPayment(true);
-    setPaymentFeedback(null);
-    setPaymentTestResult(null);
-    try {
-      await api.put('/settings', {
-        provider: paymentProvider,
-        paymentEnabled,
-        ...(pagarmeApiKey ? { pagarmeApiKey } : {}),
-        ...(pagarmeWebhook ? { pagarmeWebhookSecret: pagarmeWebhook } : {}),
-        ...(stripeKey ? { stripeSecretKey: stripeKey } : {}),
-        ...(stripeWebhook ? { stripeWebhookSecret: stripeWebhook } : {}),
-      });
-      setPaymentFeedback({ type: 'success', message: 'Configurações de pagamento salvas.' });
-      setPagarmeApiKey(''); setPagarmeWebhook(''); setStripeKey(''); setStripeWebhook('');
-      const { data } = await api.get('/settings');
-      setPaymentSettings(data);
-    } catch (err: any) {
-      setPaymentFeedback({ type: 'error', message: err.response?.data?.message || 'Erro ao salvar.' });
-    } finally {
-      setSavingPayment(false);
-    }
-  };
-
-  const handleTestPaymentConnection = async () => {
-    setTestingPayment(true);
-    setPaymentTestResult(null);
-    setPaymentFeedback(null);
-    try {
-      const { data } = await api.post('/settings/test');
-      setPaymentTestResult({ ok: true, latencyMs: data.latencyMs });
-    } catch (err: any) {
-      setPaymentFeedback({ type: 'error', message: err.response?.data?.message || 'Conexão falhou.' });
-    } finally {
-      setTestingPayment(false);
     }
   };
 
@@ -733,6 +705,7 @@ export default function SettingsPage() {
                 placeholder="••••••••"
                 autoComplete="new-password"
               />
+              <p className="mt-1 text-[11px] text-gray-400">{PASSWORD_POLICY_HINT}</p>
             </div>
 
             <div>
@@ -771,9 +744,14 @@ export default function SettingsPage() {
           <Feedback state={passwordFeedback} />
         </div>
 
-        {/* Notificações */}
+        {/* 2FA */}
+        <TwoFactorSettings />
+
+        {/* Notificações (preferências de treinador — não se aplicam ao atleta) */}
+        {isCoach && (
         <div className="glass-card p-6">
-          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Notificações</h2>
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Notificações</h2>
+          <p className="text-xs text-gray-400 mb-4">Preferências salvas neste navegador.</p>
 
           <div className="space-y-4">
             {(
@@ -825,6 +803,7 @@ export default function SettingsPage() {
 
           <Feedback state={notifFeedback} />
         </div>
+        )}
 
         {/* Aparência */}
         <div className="glass-card p-6">
@@ -1233,146 +1212,21 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* Gateway de Pagamento — COACH only */}
+        {/* Recebimentos — a plataforma recebe pela carteira Asaas da equipe (sem chave de gateway do treinador) */}
         {isCoach && (
           <div className="glass-card p-6">
-            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Gateway de Pagamento</h2>
-            <p className="text-xs text-gray-400 mb-5">Sua conta própria — atletas pagam direto para você</p>
-
-            <div className="space-y-5">
-              {/* Enable toggle */}
-              <div className="flex items-center justify-between p-4 rounded-xl bg-gray-50 border border-gray-100">
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">Pagamentos ativos</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Permite que atletas paguem pelo app</p>
-                </div>
-                <Toggle checked={paymentEnabled} onChange={setPaymentEnabled} />
-              </div>
-
-              {/* Provider selector */}
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1.5">Gateway</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {([
-                    { id: 'pagarme', label: 'Pagar.me', sub: 'Recomendado para BR', hasKey: paymentSettings?.hasPagarmeKey },
-                    { id: 'stripe',  label: 'Stripe',   sub: 'Internacional',        hasKey: paymentSettings?.hasStripeKey },
-                  ] as const).map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => setPaymentProvider(p.id)}
-                      className={`relative p-3 rounded-xl border text-left transition-all ${
-                        paymentProvider === p.id
-                          ? 'border-primary/50 bg-primary/5'
-                          : 'border-gray-200 bg-white hover:border-primary/30'
-                      }`}
-                    >
-                      <p className="text-xs font-semibold text-gray-800">{p.label}</p>
-                      <p className="text-[10px] text-gray-400 mt-0.5">{p.sub}</p>
-                      {p.hasKey && (
-                        <span className="absolute top-2 right-2 text-[9px] font-medium bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full">configurado</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Pagar.me fields */}
-              {paymentProvider === 'pagarme' && (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1.5">
-                      API Key <span className="text-gray-300">(dash.pagar.me → Configurações → API Keys)</span>
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showPaymentKeys ? 'text' : 'password'}
-                        value={pagarmeApiKey}
-                        onChange={e => setPagarmeApiKey(e.target.value)}
-                        placeholder={paymentSettings?.hasPagarmeKey ? '••••• (salva — cole para atualizar)' : 'sk_live_...'}
-                        className="w-full px-3.5 py-2.5 pr-10 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition font-mono"
-                      />
-                      <button type="button" onClick={() => setShowPaymentKeys(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          {showPaymentKeys
-                            ? <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                            : <><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></>
-                          }
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1.5">Webhook Secret</label>
-                    <input
-                      type={showPaymentKeys ? 'text' : 'password'}
-                      value={pagarmeWebhook}
-                      onChange={e => setPagarmeWebhook(e.target.value)}
-                      placeholder="whsec_..."
-                      className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition font-mono"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Stripe fields */}
-              {paymentProvider === 'stripe' && (
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1.5">
-                      Secret Key <span className="text-gray-300">(dashboard.stripe.com → Developers → API Keys)</span>
-                    </label>
-                    <input
-                      type={showPaymentKeys ? 'text' : 'password'}
-                      value={stripeKey}
-                      onChange={e => setStripeKey(e.target.value)}
-                      placeholder={paymentSettings?.hasStripeKey ? '••••• (salva — cole para atualizar)' : 'sk_live_...'}
-                      className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1.5">Webhook Secret</label>
-                    <input
-                      type={showPaymentKeys ? 'text' : 'password'}
-                      value={stripeWebhook}
-                      onChange={e => setStripeWebhook(e.target.value)}
-                      placeholder="whk_..."
-                      className="w-full px-3.5 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition font-mono"
-                    />
-                  </div>
-                </div>
-              )}
-
-              <p className="text-[10px] text-gray-400">Chaves criptografadas com AES-256 antes de salvar</p>
-
-              {/* Test result */}
-              {paymentTestResult && (
-                <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                  <svg className="w-4 h-4 text-emerald-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                  <p className="text-xs text-emerald-700 font-medium">Conexão OK — respondeu em {paymentTestResult.latencyMs}ms</p>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-5 flex items-center gap-3">
-              <button
-                onClick={handleSavePaymentSettings}
-                disabled={savingPayment}
-                className="px-5 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-60 text-white text-sm font-medium rounded-xl transition cursor-pointer flex items-center gap-2"
-              >
-                {savingPayment && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                Salvar
-              </button>
-              <button
-                onClick={handleTestPaymentConnection}
-                disabled={testingPayment || savingPayment || (!paymentSettings?.hasPagarmeKey && !paymentSettings?.hasStripeKey)}
-                className="px-5 py-2.5 border border-gray-200 hover:bg-gray-50 disabled:opacity-40 text-gray-700 text-sm font-medium rounded-xl transition cursor-pointer flex items-center gap-2"
-              >
-                {testingPayment && <span className="w-3.5 h-3.5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />}
-                Testar conexão
-              </button>
-            </div>
-            <Feedback state={paymentFeedback} />
+            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Recebimentos</h2>
+            <p className="text-sm text-gray-600">
+              Mensalidades, loja e inscrições em eventos são processadas pela plataforma via Asaas e repassadas para a
+              carteira Asaas da equipe. Não é preciso cadastrar chave de gateway aqui.
+            </p>
+            <a
+              href="/dashboard/equipe?tab=configuracoes"
+              className="inline-flex items-center gap-1.5 mt-4 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+            >
+              Configurar carteira em Equipe › Configurações →
+            </a>
+            <p className="text-xs text-gray-400 mt-2">Somente o dono da equipe pode alterar a carteira de recebimento.</p>
           </div>
         )}
 

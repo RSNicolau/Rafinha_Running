@@ -29,6 +29,18 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.5,
     },
     {
+      url: `${baseUrl}/termos`,
+      lastModified: new Date('2026-10-14'),
+      changeFrequency: 'yearly',
+      priority: 0.3,
+    },
+    {
+      url: `${baseUrl}/privacidade`,
+      lastModified: new Date('2026-10-14'),
+      changeFrequency: 'yearly',
+      priority: 0.3,
+    },
+    {
       url: `${baseUrl}/join`,
       lastModified: new Date(),
       changeFrequency: 'yearly',

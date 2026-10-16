@@ -10,7 +10,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { UserRole } from '@prisma/client';
-import { CoachBrainService, AIProvider } from './coach-brain.service';
+import { CoachBrainService } from './coach-brain.service';
+import { ApplyPlanDto, CoachBrainChatDto, UpdateCoachBrainSettingsDto } from './dto/coach-brain.dto';
 
 @ApiTags('CoachBrain')
 @ApiBearerAuth()
@@ -29,7 +30,7 @@ export class CoachBrainController {
   }))
   async chat(
     @CurrentUser('id') coachId: string,
-    @Body() body: { message: string; sessionId?: string },
+    @Body() body: CoachBrainChatDto,
     @UploadedFiles() files: Express.Multer.File[],
     @Res() res: Response,
   ) {
@@ -70,9 +71,14 @@ export class CoachBrainController {
   @ApiOperation({ summary: 'Atualizar configurações de IA (provedor, modelo, BYOK, API key)' })
   async updateAISettings(
     @CurrentUser('id') coachId: string,
-    @Body() body: { provider: AIProvider; model?: string; byok: boolean; apiKey?: string },
+    @Body() body: UpdateCoachBrainSettingsDto,
   ) {
-    return this.coachBrainService.updateAISettings(coachId, body);
+    return this.coachBrainService.updateAISettings(coachId, {
+      provider: body.provider,
+      model: body.model,
+      byok: body.byok,
+      apiKey: body.apiKey,
+    });
   }
 
   @Post('settings/test')
@@ -100,9 +106,9 @@ export class CoachBrainController {
   @Post('apply-plan')
   @ApiOperation({ summary: 'Aplicar planilha gerada pela IA como treinos reais' })
   async applyPlan(
-    @CurrentUser('id') coachId: string,
-    @Body() body: { athleteId: string; planText: string },
+    @CurrentUser() user: any,
+    @Body() body: ApplyPlanDto,
   ) {
-    return this.coachBrainService.applyPlanFromChat(coachId, body.athleteId, body.planText);
+    return this.coachBrainService.applyPlanFromChat(user, body.athleteId, body.planText);
   }
 }

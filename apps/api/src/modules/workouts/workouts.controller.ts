@@ -1,10 +1,22 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, BadRequestException } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { WorkoutsService } from './workouts.service';
 import { TrainingLoadService } from './training-load.service';
-import { CreateWorkoutDto, SubmitResultDto, SubmitFeedbackDto } from './dto/workout.dto';
+import { CoachWorkoutsService } from './coach-workouts.service';
+import { CreateWorkoutDto, SubmitResultDto, SubmitFeedbackDto, HealthWorkoutDto, ChangeWorkoutTypeDto } from './dto/workout.dto';
+import { PrismaService } from '../../prisma/prisma.service';
+import { assertCoachOwnsAthlete } from '../../common/utils/ownership';
+
+function validateHealthWorkout(raw: unknown): HealthWorkoutDto {
+  const dto = plainToInstance(HealthWorkoutDto, raw);
+  const errors = validateSync(dto as object, { whitelist: true, forbidNonWhitelisted: true });
+  if (errors.length) throw new BadRequestException('Dados de treino do Apple Health inválidos');
+  return dto;
+}
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -17,6 +29,8 @@ export class WorkoutsController {
   constructor(
     private workoutsService: WorkoutsService,
     private trainingLoadService: TrainingLoadService,
+    private prisma: PrismaService,
+    private coachWorkouts: CoachWorkoutsService,
   ) {}
 
   @Post()
@@ -31,6 +45,18 @@ export class WorkoutsController {
   @ApiQuery({ name: 'weekStart', example: '2026-03-02' })
   async getWeekly(@CurrentUser('id') athleteId: string, @Query('weekStart') weekStart?: string) {
     return this.workoutsService.getWeeklyWorkouts(athleteId, weekStart);
+  }
+
+  @Get('calendar')
+  @ApiOperation({ summary: 'Calendário de treinos do atleta logado (padrão: mês corrente; máx. 62 dias)' })
+  @ApiQuery({ name: 'from', required: false, example: '2026-10-01' })
+  @ApiQuery({ name: 'to', required: false, example: '2026-10-31' })
+  async getCalendar(
+    @CurrentUser('id') athleteId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.workoutsService.getCalendar(athleteId, from, to);
   }
 
   @Get('stats')
@@ -63,9 +89,37 @@ export class WorkoutsController {
   @ApiQuery({ name: 'days', required: false, example: 60 })
   async getAthleteTrainingLoad(
     @Param('athleteId') athleteId: string,
+    @CurrentUser() user: any,
     @Query('days') days?: number,
   ) {
+    await assertCoachOwnsAthlete(this.prisma, user, athleteId);
     return this.trainingLoadService.getTrainingLoad(athleteId, days ? Number(days) : 60);
+  }
+
+  // ── Coach: treinos/estatísticas de um atleta (detalhe do atleta no painel) ──
+
+  @Get('athlete/:athleteId')
+  @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Treinos de um atleta (coach). status=COMPLETED (padrão) | UPCOMING | ALL' })
+  @ApiQuery({ name: 'status', required: false })
+  async getAthleteWorkouts(
+    @Param('athleteId') athleteId: string,
+    @CurrentUser() user: any,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('status') status?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const st = status === 'ALL' || status === 'UPCOMING' ? status : 'COMPLETED';
+    return this.coachWorkouts.listForAthlete(user, athleteId, { page: Number(page) || 1, limit: Number(limit) || 20, status: st, from, to });
+  }
+
+  @Get('athlete/:athleteId/stats')
+  @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Estatísticas de um atleta (coach): total, km no mês, pace médio, sequência, km/semana' })
+  async getAthleteStatsForCoach(@Param('athleteId') athleteId: string, @CurrentUser() user: any) {
+    return this.coachWorkouts.statsForAthlete(user, athleteId);
   }
 
   @Get('group-comparison')
@@ -77,8 +131,8 @@ export class WorkoutsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Detalhe do treino' })
-  async findOne(@Param('id') id: string) {
-    return this.workoutsService.findById(id);
+  async findOne(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.workoutsService.findByIdForUser(id, user);
   }
 
   @Patch(':id/complete')
@@ -105,11 +159,13 @@ export class WorkoutsController {
   @Post('sync/health')
   @Roles(UserRole.ATHLETE)
   @ApiOperation({ summary: 'Sincronizar treino(s) do Apple Health / HealthKit. Aceita objeto único ou array.' })
-  async syncFromHealth(@CurrentUser('id') athleteId: string, @Body() body: any) {
+  async syncFromHealth(@CurrentUser('id') athleteId: string, @Body() body: unknown) {
+    // Corpo pode ser objeto ou array → validação manual com o DTO (whitelist + forbidNonWhitelisted)
     if (Array.isArray(body)) {
-      return this.workoutsService.syncFromAppleHealthBatch(athleteId, body);
+      if (body.length > 200) throw new BadRequestException('Máximo de 200 treinos por sincronização');
+      return this.workoutsService.syncFromAppleHealthBatch(athleteId, body.map(validateHealthWorkout));
     }
-    return this.workoutsService.syncFromAppleHealth(athleteId, body);
+    return this.workoutsService.syncFromAppleHealth(athleteId, validateHealthWorkout(body));
   }
 
   @Patch(':id/type')
@@ -117,10 +173,10 @@ export class WorkoutsController {
   @ApiOperation({ summary: 'Coach muda o tipo do treino (ex: de INTERVAL para RECOVERY após alerta de HRV)' })
   async changeType(
     @Param('id') workoutId: string,
-    @CurrentUser('id') coachId: string,
-    @Body('type') type: string,
+    @CurrentUser() user: any,
+    @Body() dto: ChangeWorkoutTypeDto,
   ) {
-    return this.workoutsService.changeWorkoutType(workoutId, coachId, type);
+    return this.workoutsService.changeWorkoutType(workoutId, user, dto.type);
   }
 
 }

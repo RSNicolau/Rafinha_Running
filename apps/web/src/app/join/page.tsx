@@ -2,15 +2,30 @@
 
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { api } from '@/lib/api';
+import { api, friendlyError } from '@/lib/api';
+import { passwordPolicyError, PASSWORD_POLICY_HINT } from '@/lib/password-policy';
+import { rememberPortal } from '@/lib/portal';
+import { ConsentCheckboxes, EMPTY_CONSENT, isConsentComplete, type ConsentState } from '@/components/legal/ConsentCheckboxes';
 
 interface InviteInfo {
   email: string;
+  existingAccount?: boolean;
   coachName: string;
   tenantName: string;
+  /** Nome da EQUIPE (quando a API envia) — preferido ao nome do treinador */
+  teamName?: string | null;
+  team?: { name?: string | null; logoUrl?: string | null } | null;
   primaryColor: string;
   logoUrl: string | null;
   expiresAt: string;
+}
+
+/** Nome a exibir: equipe > marca (se não for só o nome do treinador) > "sua equipe". */
+function inviteTeamName(inv: InviteInfo): string {
+  const team = inv.teamName || inv.team?.name;
+  if (team) return team;
+  if (inv.tenantName && inv.tenantName !== inv.coachName) return inv.tenantName;
+  return 'Sua nova equipe';
 }
 
 function JoinContent() {
@@ -26,6 +41,33 @@ function JoinContent() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
+  // Mesmos consentimentos do cadastro de atleta (Termos, dados de saúde, 18+, marketing) — o ConsentGate não pergunta de novo
+  const [consent, setConsent] = useState<ConsentState>(EMPTY_CONSENT);
+  const acceptTerms = isConsentComplete(consent, true);
+  const marketingOptIn = consent.marketing;
+  const [legalVersions, setLegalVersions] = useState<{ termsVersion: string; privacyVersion: string } | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [linked, setLinked] = useState(false);
+
+  useEffect(() => {
+    api.get('/legal/versions').then(({ data }) => setLegalVersions(data)).catch(() => {});
+    try { setIsLoggedIn(!!localStorage.getItem('rr_access_token')); } catch { /* sem storage */ }
+  }, []);
+
+  // Conta já existente: aceitar convite autenticado (o e-mail logado precisa ser o do convite)
+  const handleAcceptExisting = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      await api.post('/invites/accept-existing', { token });
+      setLinked(true);
+      setTimeout(() => router.push('/athlete'), 2500);
+    } catch (err: any) {
+      setError(friendlyError(err, 'Não foi possível aceitar o convite.'));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!token) {
@@ -35,25 +77,49 @@ function JoinContent() {
     api.get(`/invites/check?token=${token}`)
       .then(({ data }) => setInvite(data))
       .catch((err) => {
-        const msg = err?.response?.data?.message ?? 'Convite inválido ou expirado.';
+        const msg = friendlyError(err, 'Convite inválido ou expirado.');
         setInviteError(msg);
       });
   }, [token]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || password.length < 6) {
-      setError('Nome e senha (mín. 6 caracteres) são obrigatórios.');
+    if (!name.trim()) {
+      setError('Informe seu nome.');
+      return;
+    }
+    const pwdError = passwordPolicyError(password);
+    if (pwdError) {
+      setError(pwdError);
+      return;
+    }
+    if (!acceptTerms) {
+      setError('Marque os itens obrigatórios: Termos de Uso e Política de Privacidade, dados de saúde e idade.');
+      return;
+    }
+    if (!legalVersions) {
+      setError('Não foi possível carregar os Termos. Recarregue a página.');
       return;
     }
     setLoading(true);
     setError('');
     try {
-      await api.post('/invites/accept', { token, name, password });
+      await api.post('/invites/accept', {
+        token,
+        name,
+        password,
+        acceptTerms: true,
+        termsVersion: legalVersions.termsVersion,
+        privacyVersion: legalVersions.privacyVersion,
+        marketingOptIn,
+        healthDataConsent: consent.health,
+      });
       setSuccess(true);
-      setTimeout(() => router.push('/login'), 2500);
+      // Convite é sempre de atleta: o login certo é o da área do atleta
+      rememberPortal('athlete');
+      setTimeout(() => router.push(`/athlete-login?registered=1&email=${encodeURIComponent(invite?.email ?? '')}`), 2500);
     } catch (err: any) {
-      setError(err?.response?.data?.message ?? 'Erro ao aceitar convite.');
+      setError(friendlyError(err, 'Não foi possível aceitar o convite.'));
     } finally {
       setLoading(false);
     }
@@ -72,7 +138,7 @@ function JoinContent() {
           </div>
           <h2 className="text-xl font-semibold text-gray-800 mb-2">Convite inválido</h2>
           <p className="text-gray-500 mb-6">{inviteError}</p>
-          <a href="/login" className="text-sm text-blue-600 hover:underline">Ir para login</a>
+          <a href="/athlete-login" className="text-sm text-blue-600 hover:underline">Ir para login</a>
         </div>
       </div>
     );
@@ -82,6 +148,53 @@ function JoinContent() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="w-8 h-8 border-4 border-gray-200 border-t-red-500 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (linked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
+          <h2 className="text-xl font-semibold text-gray-800 mb-2">Convite aceito!</h2>
+          <p className="text-gray-500">Agora você faz parte da equipe {inviteTeamName(invite) === 'Sua nova equipe' ? `de ${invite.coachName}` : inviteTeamName(invite)}.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (invite.existingAccount) {
+    const next = typeof window !== 'undefined' ? encodeURIComponent(`/join?token=${token}`) : '';
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
+          <h1 className="text-xl font-bold text-gray-900 mb-2">{inviteTeamName(invite)}</h1>
+          <p className="text-sm text-gray-500 mb-6">
+            {invite.coachName} te convidou para treinar juntos. Já existe uma conta com o e-mail{' '}
+            <span className="font-medium text-gray-700">{invite.email}</span>.
+          </p>
+          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-4">{error}</p>}
+          {isLoggedIn ? (
+            <button
+              type="button"
+              onClick={handleAcceptExisting}
+              disabled={loading}
+              className="w-full py-3 rounded-xl text-white font-semibold transition-opacity disabled:opacity-60"
+              style={{ backgroundColor: primaryColor }}
+            >
+              {loading ? 'Aceitando...' : 'Aceitar convite com minha conta'}
+            </button>
+          ) : (
+            <a
+              href={`/athlete-login?next=${next}`}
+              className="block w-full py-3 rounded-xl text-white font-semibold"
+              style={{ backgroundColor: primaryColor }}
+            >
+              Fazer login para aceitar
+            </a>
+          )}
+          <p className="text-xs text-gray-400 mt-4">Entre com a conta de {invite.email} para aceitar este convite.</p>
+        </div>
       </div>
     );
   }
@@ -108,16 +221,16 @@ function JoinContent() {
         {/* Header with branding */}
         <div className="text-center mb-8">
           {invite.logoUrl ? (
-            <img src={invite.logoUrl} alt={invite.tenantName} className="h-14 mx-auto mb-4 object-contain" />
+            <img src={invite.logoUrl} alt={inviteTeamName(invite)} className="h-14 mx-auto mb-4 object-contain" />
           ) : (
             <div
               className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 text-white text-2xl font-bold"
               style={{ backgroundColor: primaryColor }}
             >
-              {invite.tenantName.charAt(0).toUpperCase()}
+              {inviteTeamName(invite).charAt(0).toUpperCase()}
             </div>
           )}
-          <h1 className="text-2xl font-bold text-gray-900">{invite.tenantName}</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{inviteTeamName(invite)}</h1>
           <p className="text-gray-500 mt-1 text-sm">
             {invite.coachName} te convidou para treinar juntos
           </p>
@@ -150,14 +263,15 @@ function JoinContent() {
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Mínimo 6 caracteres"
+                  placeholder="Mínimo 8 caracteres"
                   required
-                  minLength={6}
+                  minLength={8}
                   className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 text-gray-900 pr-12"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
                   {showPassword ? (
@@ -172,7 +286,10 @@ function JoinContent() {
                   )}
                 </button>
               </div>
+              <p className="mt-1 text-[11px] text-gray-400">{PASSWORD_POLICY_HINT}</p>
             </div>
+
+            <ConsentCheckboxes value={consent} onChange={setConsent} showHealth accent={primaryColor} idPrefix="join" />
 
             {error && (
               <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
@@ -190,7 +307,7 @@ function JoinContent() {
 
           <p className="text-center text-xs text-gray-400 mt-6">
             Já tem conta?{' '}
-            <a href="/login" className="text-blue-600 hover:underline">Fazer login</a>
+            <a href="/athlete-login" className="text-blue-600 hover:underline">Fazer login</a>
           </p>
         </div>
       </div>

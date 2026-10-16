@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Put, Delete, Param, Body, UseGuards, Query,
+  Controller, Get, Post, Put, Delete, Param, Body, UseGuards, Query, Req,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -7,9 +7,13 @@ import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { UserRole, QuestionType } from '@prisma/client';
+import { UserRole } from '@prisma/client';
 import { OnboardingService } from './onboarding.service';
-import { SubmitOnboardingDto, CreateCheckoutDto } from './dto/onboarding.dto';
+import {
+  SubmitOnboardingDto, CreateCheckoutDto, MyCheckoutDto,
+  UpdateOnboardingFormDto, AddQuestionDto, UpdateQuestionDto, ReorderQuestionsDto,
+} from './dto/onboarding.dto';
+import { clientIp } from '../../common/utils/client-ip';
 
 @ApiTags('Onboarding')
 @Controller('onboarding')
@@ -30,6 +34,7 @@ export class OnboardingController {
   async submitForm(
     @Param('slug') slug: string,
     @Body() body: SubmitOnboardingDto,
+    @Req() req: any,
   ) {
     // coachId resolved from slug on server side — never trusted from body
     return this.onboardingService.submitFormBySlug(slug, {
@@ -38,17 +43,36 @@ export class OnboardingController {
       athletePhone: body.athletePhone,
       answers: body.answers,
       referralCode: body.referralCode,
-    });
+      acceptTerms: body.acceptTerms,
+      termsVersion: body.termsVersion,
+      privacyVersion: body.privacyVersion,
+      healthDataConsent: body.healthDataConsent,
+      marketingOptIn: body.marketingOptIn,
+    }, { ip: clientIp(req), userAgent: req.headers?.['user-agent'] });
   }
 
   @Post('public/:slug/checkout')
   @Throttle({ default: { limit: 3, ttl: 60_000 } })
-  @ApiOperation({ summary: 'Criar checkout de pagamento para atleta após onboarding' })
+  @ApiOperation({ summary: 'Criar mensalidade + 1ª cobrança após o onboarding (Asaas/FAKE) — devolve payPath /pedido/<id>' })
   async createCheckout(
     @Param('slug') slug: string,
     @Body() body: CreateCheckoutDto,
   ) {
-    return this.onboardingService.createAthleteCheckout(body.athleteId, body.planType);
+    return this.onboardingService.createCheckoutWithToken(slug, body.onboardingToken, body.planType, {
+      planId: body.planId,
+      billingType: body.billingType,
+      buyer: body.buyer,
+    });
+  }
+
+  @Post('me/checkout')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.ATHLETE)
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Criar checkout de assinatura para o atleta logado' })
+  async createMyCheckout(@CurrentUser('id') athleteId: string, @Body() body: MyCheckoutDto) {
+    return this.onboardingService.createAthleteCheckout(athleteId, body.planType, { planId: body.planId, billingType: body.billingType, buyer: body.buyer });
   }
 
   // ── Coach endpoints ──
@@ -69,9 +93,11 @@ export class OnboardingController {
   @ApiOperation({ summary: 'Atualizar metadados do formulário' })
   async updateForm(
     @CurrentUser('id') coachId: string,
-    @Body() body: { title?: string; description?: string; isActive?: boolean },
+    @Body() body: UpdateOnboardingFormDto,
   ) {
-    return this.onboardingService.updateForm(coachId, body);
+    return this.onboardingService.updateForm(coachId, {
+      title: body.title, description: body.description, isActive: body.isActive,
+    });
   }
 
   @Post('form/questions')
@@ -81,16 +107,21 @@ export class OnboardingController {
   @ApiOperation({ summary: 'Adicionar pergunta ao formulário' })
   async addQuestion(
     @CurrentUser('id') coachId: string,
-    @Body() body: {
-      question: string;
-      type: QuestionType;
-      options?: string[];
-      required?: boolean;
-      placeholder?: string;
-      aiHint?: string;
-    },
+    @Body() body: AddQuestionDto,
   ) {
     return this.onboardingService.addQuestion(coachId, body);
+  }
+
+  @Put('form/questions/reorder')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Reordenar perguntas do formulário' })
+  async reorderQuestions(
+    @CurrentUser('id') coachId: string,
+    @Body() body: ReorderQuestionsDto,
+  ) {
+    return this.onboardingService.reorderQuestions(coachId, body.orders);
   }
 
   @Put('form/questions/:id')
@@ -101,30 +132,9 @@ export class OnboardingController {
   async updateQuestion(
     @CurrentUser('id') coachId: string,
     @Param('id') questionId: string,
-    @Body() body: {
-      question?: string;
-      type?: QuestionType;
-      options?: string[];
-      required?: boolean;
-      placeholder?: string;
-      aiHint?: string;
-      isActive?: boolean;
-      order?: number;
-    },
+    @Body() body: UpdateQuestionDto,
   ) {
     return this.onboardingService.updateQuestion(coachId, questionId, body);
-  }
-
-  @Put('form/questions/reorder')
-  @ApiBearerAuth()
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  @ApiOperation({ summary: 'Reordenar perguntas do formulário' })
-  async reorderQuestions(
-    @CurrentUser('id') coachId: string,
-    @Body() body: { orders: { id: string; order: number }[] },
-  ) {
-    return this.onboardingService.reorderQuestions(coachId, body.orders);
   }
 
   @Delete('form/questions/:id')

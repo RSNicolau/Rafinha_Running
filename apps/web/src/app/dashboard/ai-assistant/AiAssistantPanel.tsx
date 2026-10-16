@@ -1,8 +1,21 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { api } from '@/lib/api';
-import { useAuthStore } from '@/stores/auth.store';
+import { api, friendlyError } from '@/lib/api';
+import AthletePicker from '@/components/coach/AthletePicker';
+import AiUnavailableNotice from '@/components/coach/AiUnavailableNotice';
+
+/** Cabeçalhos iguais aos do cliente compartilhado (token do localStorage + equipe ativa). */
+function authHeaders(): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('rr_access_token');
+    if (token) h.Authorization = `Bearer ${token}`;
+  }
+  const team = api.defaults.headers.common['x-team-id'];
+  if (typeof team === 'string' && team) h['x-team-id'] = team;
+  return h;
+}
 
 interface Message {
   role: 'user' | 'assistant';
@@ -10,10 +23,6 @@ interface Message {
   streaming?: boolean;
 }
 
-interface Athlete {
-  id: string;
-  name: string;
-}
 
 interface AiConfig {
   assistantName: string;
@@ -25,13 +34,13 @@ const hasSpeechRecognition =
   ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
 
 export default function AiAssistantPanel() {
-  const { user } = useAuthStore();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
   const [selectedAthleteId, setSelectedAthleteId] = useState<string>('');
-  const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [selectedAthleteName, setSelectedAthleteName] = useState<string>('');
+  const [aiStatus, setAiStatus] = useState<{ configured: boolean; message?: string } | null>(null);
   const [config, setConfig] = useState<AiConfig>({ assistantName: 'Rafinha', voiceEnabled: false });
   const [toolIndicator, setToolIndicator] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -43,14 +52,12 @@ export default function AiAssistantPanel() {
   }, [messages]);
 
   useEffect(() => {
-    // Load athletes and config
-    Promise.all([
-      api.get('/users/athletes').catch(() => ({ data: [] })),
-      api.get('/ai-assistant/config').catch(() => ({ data: { assistantName: 'Rafinha', voiceEnabled: false } })),
-    ]).then(([athletesRes, configRes]) => {
-      setAthletes(athletesRes.data?.athletes ?? athletesRes.data ?? []);
-      setConfig(configRes.data);
-    });
+    api.get('/ai-assistant/config')
+      .then(({ data }) => setConfig({ assistantName: data?.assistantName || 'Rafinha', voiceEnabled: !!data?.voiceEnabled }))
+      .catch(() => {});
+    api.get('/ai-assistant/status')
+      .then(({ data }) => setAiStatus({ configured: !!data?.configured, message: data?.message }))
+      .catch(() => setAiStatus({ configured: true })); // sem status: deixa tentar e trata o erro no envio
   }, []);
 
   const speak = useCallback((text: string) => {
@@ -72,38 +79,55 @@ export default function AiAssistantPanel() {
     setLoading(true);
     setToolIndicator(null);
 
-    try {
-      const token = (api.defaults.headers.common['Authorization'] as string)?.replace('Bearer ', '') ?? '';
-      const res = await fetch('/api/v1/ai-assistant/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ message: text, athleteId: selectedAthleteId || undefined, history }),
+    const setLast = (content: string, streaming = false) =>
+      setMessages(prev => {
+        const next = [...prev];
+        next[next.length - 1] = { role: 'assistant', content, streaming };
+        return next;
       });
 
-      if (!res.ok || !res.body) throw new Error('Erro na resposta');
+    try {
+      const body = JSON.stringify({ message: text, athleteId: selectedAthleteId || undefined, history });
+      let res = await fetch('/api/v1/ai-assistant/chat', { method: 'POST', headers: authHeaders(), body });
+      if (res.status === 401) {
+        // Token expirado: uma chamada pelo cliente compartilhado dispara a renovação; depois tenta de novo
+        await api.get('/users/me').catch(() => {});
+        res = await fetch('/api/v1/ai-assistant/chat', { method: 'POST', headers: authHeaders(), body });
+      }
+
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({} as any));
+        const msg = typeof data?.message === 'string' ? data.message : '';
+        if (res.status === 503 && /IA não configurada/i.test(msg)) {
+          setAiStatus({ configured: false, message: msg });
+          setMessages(prev => prev.slice(0, -2));
+          return;
+        }
+        throw Object.assign(new Error('http'), { response: { status: res.status, data } });
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let fullText = '';
+      let errorText = '';
+      let buf = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
         for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
           try {
             const data = JSON.parse(line.slice(6));
             if (data.type === 'text') {
               fullText += data.content;
-              setMessages(prev => {
-                const next = [...prev];
-                next[next.length - 1] = { role: 'assistant', content: fullText, streaming: true };
-                return next;
-              });
+              setLast(fullText, true);
+            } else if (data.type === 'error') {
+              errorText = String(data.content ?? '');
+              if (data.code === 'AI_NOT_CONFIGURED') setAiStatus({ configured: false, message: errorText });
             } else if (data.type === 'tool_call') {
               setToolIndicator(data.tool);
             } else if (data.type === 'done') {
@@ -113,18 +137,14 @@ export default function AiAssistantPanel() {
         }
       }
 
-      setMessages(prev => {
-        const next = [...prev];
-        next[next.length - 1] = { role: 'assistant', content: fullText, streaming: false };
-        return next;
-      });
-      speak(fullText);
-    } catch {
-      setMessages(prev => {
-        const next = [...prev];
-        next[next.length - 1] = { role: 'assistant', content: 'Desculpe, ocorreu um erro. Tente novamente.', streaming: false };
-        return next;
-      });
+      if (!fullText && errorText) {
+        setLast(`⚠️ ${errorText}`);
+      } else {
+        setLast(fullText || 'Não recebi resposta da IA. Tente novamente.');
+        if (fullText) speak(fullText);
+      }
+    } catch (e) {
+      setLast(`⚠️ ${friendlyError(e, 'Não foi possível falar com a IA agora. Tente novamente.')}`);
     } finally {
       setLoading(false);
       setToolIndicator(null);
@@ -163,16 +183,19 @@ export default function AiAssistantPanel() {
     setListening(false);
   };
 
+  const who = selectedAthleteName || 'o atleta selecionado';
   const quickActions = [
-    { label: 'Analisar performance', prompt: `Analise a performance do atleta selecionado nas últimas 4 semanas.` },
-    { label: 'Sugerir treino', prompt: `Sugira um treino para amanhã com base no histórico recente.` },
-    { label: 'Gerar plano 8 semanas', prompt: `Crie um plano de treino de 8 semanas para o atleta selecionado.` },
+    { label: 'Analisar performance', prompt: `Analise a performance de ${who} nas últimas 4 semanas.`, needsAthlete: true },
+    { label: 'Sugerir treino', prompt: `Sugira um treino para amanhã para ${who} com base no histórico recente.`, needsAthlete: true },
+    { label: 'Gerar plano 8 semanas', prompt: `Crie um plano de treino de 8 semanas para ${who}.`, needsAthlete: true },
+    { label: 'Resumo da semana', prompt: 'Faça um resumo da semana da assessoria e aponte atletas que merecem atenção.', needsAthlete: false },
   ];
+  const aiBlocked = aiStatus?.configured === false;
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] gap-0 rounded-2xl overflow-hidden border border-gray-200 bg-white shadow-sm">
+    <div className="flex flex-col md:flex-row md:h-[calc(100vh-8rem)] gap-0 rounded-2xl overflow-hidden border border-gray-200 bg-white shadow-sm">
       {/* Sidebar */}
-      <aside className="w-52 border-r border-gray-100 bg-gray-50 flex flex-col p-4 gap-4 shrink-0">
+      <aside className="md:w-60 border-b md:border-b-0 md:border-r border-gray-100 bg-gray-50 flex flex-col p-4 gap-4 shrink-0">
         {/* Avatar */}
         <div className="text-center pt-2">
           <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-[#DC2626] to-red-800 flex items-center justify-center mb-2 shadow-lg shadow-red-200">
@@ -185,21 +208,25 @@ export default function AiAssistantPanel() {
         </div>
 
         {/* Athlete selector */}
-        {athletes.length > 0 && (
-          <div>
-            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Atleta</p>
-            <select
-              value={selectedAthleteId}
-              onChange={e => setSelectedAthleteId(e.target.value)}
-              className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-[#DC2626]"
+        <div>
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Atleta (contexto)</p>
+          <AthletePicker
+            value={selectedAthleteId}
+            initialLabel={selectedAthleteName}
+            onChange={(a) => { setSelectedAthleteId(a?.id ?? ''); setSelectedAthleteName(a?.name ?? ''); }}
+          />
+          {selectedAthleteId ? (
+            <button
+              type="button"
+              onClick={() => { setSelectedAthleteId(''); setSelectedAthleteName(''); }}
+              className="mt-1 text-[11px] text-gray-400 hover:text-gray-600"
             >
-              <option value="">Geral</option>
-              {athletes.map(a => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-          </div>
-        )}
+              Usar visão geral (sem atleta)
+            </button>
+          ) : (
+            <p className="mt-1 text-[11px] text-gray-400">Sem atleta: perguntas gerais da assessoria.</p>
+          )}
+        </div>
 
         {/* Quick actions */}
         <div>
@@ -209,7 +236,8 @@ export default function AiAssistantPanel() {
               <button
                 key={a.label}
                 onClick={() => sendMessage(a.prompt)}
-                disabled={loading}
+                disabled={loading || aiBlocked || (a.needsAthlete && !selectedAthleteId)}
+                title={a.needsAthlete && !selectedAthleteId ? 'Selecione um atleta primeiro' : undefined}
                 className="text-left text-xs px-2.5 py-2 rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-[#DC2626] hover:text-[#DC2626] transition-colors disabled:opacity-50"
               >
                 {a.label}
@@ -240,8 +268,9 @@ export default function AiAssistantPanel() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {messages.length === 0 && (
+        <div className="flex-1 overflow-y-auto p-5 space-y-4 min-h-[320px]">
+          {aiBlocked && <AiUnavailableNotice message={aiStatus?.message} />}
+          {messages.length === 0 && !aiBlocked && (
             <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 gap-3">
               <div className="w-12 h-12 rounded-2xl bg-red-50 flex items-center justify-center">
                 <svg className="w-6 h-6 text-[#DC2626]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -305,13 +334,17 @@ export default function AiAssistantPanel() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }}
-            placeholder="Digite sua mensagem..."
+            placeholder={aiBlocked ? 'IA não configurada' : 'Digite sua mensagem...'}
+            disabled={aiBlocked}
+            aria-label="Mensagem para a IA"
             rows={1}
             className="flex-1 resize-none border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-[#DC2626] transition-colors max-h-32 overflow-y-auto"
           />
           <button
             type="submit"
-            disabled={loading || !input.trim()}
+            disabled={loading || aiBlocked || !input.trim()}
+            aria-label="Enviar"
+
             className="p-2.5 rounded-xl bg-[#DC2626] text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

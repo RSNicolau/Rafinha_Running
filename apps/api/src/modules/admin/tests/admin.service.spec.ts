@@ -10,8 +10,13 @@
  */
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
-import { AdminService } from '../admin.service';
+import { NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { AdminService, COACH_WHERE } from '../admin.service';
+import { ConflictException } from '@nestjs/common';
+import 'reflect-metadata';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { SetCoachPlatformFeeDto } from '../dto/admin.dto';
 import { PrismaService } from '../../../prisma/prisma.service';
 
 // ── Prisma mock ────────────────────────────────────────────────────────────────
@@ -38,10 +43,20 @@ const mockPrisma = {
     upsert:     jest.fn(),
   },
   auditLog: {
-    create: jest.fn(),
+    create: jest.fn().mockResolvedValue({}),
+  },
+  coachProfile: {
+    findUnique: jest.fn(),
+    findFirst:  jest.fn(),
+    update:     jest.fn(),
+    create:     jest.fn(),
+    upsert:     jest.fn(),
   },
   $transaction: jest.fn(),
 };
+
+const ADMIN = { id: 'admin-1', role: 'ADMIN' as const };
+const SUPER = { id: 'super-1', role: 'SUPER_ADMIN' as const };
 
 // ── Test suite ─────────────────────────────────────────────────────────────────
 
@@ -146,7 +161,7 @@ describe('AdminService', () => {
       mockPrisma.user.update.mockResolvedValue({});
       mockPrisma.auditLog.create.mockResolvedValue({});
 
-      const result = await service.deleteUser('u1', 'admin-1');
+      const result = await service.deleteUser('u1', ADMIN);
       expect(result.success).toBe(true);
       expect(mockPrisma.$transaction).toHaveBeenCalled();
     });
@@ -166,7 +181,7 @@ describe('AdminService', () => {
       mockPrisma.subscription.updateMany.mockResolvedValue({});
       mockPrisma.auditLog.create.mockResolvedValue({});
 
-      const result = await service.hardDeleteUser('u1', 'admin-1');
+      const result = await service.hardDeleteUser('u1', ADMIN);
       expect(result.message).toContain('sucesso');
       expect(mockPrisma.$transaction).toHaveBeenCalled();
     });
@@ -175,13 +190,77 @@ describe('AdminService', () => {
   // ── updateUserRole ─────────────────────────────────────────────────────────
 
   describe('updateUserRole', () => {
-    it('atualiza role do usuário', async () => {
+    it('SUPER_ADMIN atualiza role do usuário e revoga as sessões', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1', role: 'ATHLETE' });
       mockPrisma.user.update.mockResolvedValue({ id: 'u1', role: 'COACH' });
-      const result = await service.updateUserRole('u1', 'COACH' as any);
+      const result = await service.updateUserRole('u1', 'COACH' as any, SUPER);
       expect(mockPrisma.user.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { role: 'COACH' } }),
+        expect.objectContaining({ data: { role: 'COACH', tokenVersion: { increment: 1 } } }),
       );
       expect(result.role).toBe('COACH');
+      expect(mockPrisma.auditLog.create).toHaveBeenCalled();
+    });
+
+    it('ADMIN não pode alterar roles (nem promover a SUPER_ADMIN)', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1', role: 'ATHLETE' });
+      await expect(service.updateUserRole('u1', 'SUPER_ADMIN' as any, ADMIN)).rejects.toThrow(ForbiddenException);
+      await expect(service.updateUserRole('u1', 'COACH' as any, ADMIN)).rejects.toThrow(ForbiddenException);
+      await expect(service.updateUserRole('u1', 'COACH' as any)).rejects.toThrow(ForbiddenException);
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejeita role inválida', async () => {
+      await expect(service.updateUserRole('u1', 'ROOT' as any, SUPER)).rejects.toThrow(BadRequestException);
+    });
+
+    it('SUPER_ADMIN não pode rebaixar a si mesmo', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'super-1', role: 'SUPER_ADMIN' });
+      await expect(service.updateUserRole('super-1', 'ADMIN' as any, SUPER)).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('proteção de contas SUPER_ADMIN', () => {
+    beforeEach(() => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 's2', email: 's@x.com', role: 'SUPER_ADMIN' });
+    });
+
+    it('ADMIN não pode desativar/excluir SUPER_ADMIN', async () => {
+      await expect(service.deleteUser('s2', ADMIN)).rejects.toThrow(ForbiddenException);
+      await expect(service.hardDeleteUser('s2', ADMIN)).rejects.toThrow(ForbiddenException);
+      await expect(service.setUserActiveStatus('s2', false, ADMIN)).rejects.toThrow(ForbiddenException);
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('SUPER_ADMIN pode desativar outro SUPER_ADMIN (com revogação de sessão)', async () => {
+      mockPrisma.user.update.mockResolvedValue({});
+      await service.setUserActiveStatus('s2', false, SUPER);
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 's2' },
+        data: { isActive: false, tokenVersion: { increment: 1 } },
+      });
+    });
+  });
+
+  describe('setUserPassword / setUserPasswordByEmail', () => {
+    it('exigem SUPER_ADMIN', async () => {
+      await expect(service.setUserPassword('u1', 'senhaforte1', ADMIN)).rejects.toThrow(ForbiddenException);
+      await expect(service.setUserPasswordByEmail('a@b.com', 'senhaforte1', ADMIN)).rejects.toThrow(ForbiddenException);
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejeita senha curta', async () => {
+      await expect(service.setUserPassword('u1', '123', SUPER)).rejects.toThrow(BadRequestException);
+    });
+
+    it('SUPER_ADMIN redefine senha por e-mail e revoga sessões', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.com', role: 'COACH' });
+      mockPrisma.user.update.mockResolvedValue({});
+      const res = await service.setUserPasswordByEmail('a@b.com', 'senhaforte1', SUPER);
+      expect(res.success).toBe(true);
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ tokenVersion: { increment: 1 } }) }),
+      );
     });
   });
 
@@ -214,6 +293,81 @@ describe('AdminService', () => {
       expect(mockPrisma.appConfig.upsert).toHaveBeenCalledWith(
         expect.objectContaining({ where: { key: 'plans' } }),
       );
+    });
+  });
+
+  // ── coach slug / taxa / métricas (QA plataforma M2, B1, B6) ────────────────
+  describe('setCoachSlug', () => {
+    beforeEach(() => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'c1', role: 'COACH' });
+      mockPrisma.coachProfile.findFirst.mockResolvedValue(null);
+      mockPrisma.coachProfile.findUnique.mockResolvedValue({ userId: 'c1', slug: 'velho' });
+      mockPrisma.coachProfile.update.mockResolvedValue({});
+    });
+
+    it('normaliza e grava slug válido', async () => {
+      await expect(service.setCoachSlug('c1', '  Equipe-Run ')).resolves.toEqual({ success: true, userId: 'c1', slug: 'equipe-run' });
+      expect(mockPrisma.coachProfile.update).toHaveBeenCalledWith({ where: { userId: 'c1' }, data: { slug: 'equipe-run' } });
+    });
+
+    it('rejeita slug com caracteres inválidos (400) sem tocar no banco', async () => {
+      await expect(service.setCoachSlug('c1', '../<script>alert(1)</script>')).rejects.toThrow(BadRequestException);
+      await expect(service.setCoachSlug('c1', 'admin')).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.coachProfile.update).not.toHaveBeenCalled();
+    });
+
+    it('slug de outro treinador → 409', async () => {
+      mockPrisma.coachProfile.findFirst.mockResolvedValue({ id: 'outro' });
+      await expect(service.setCoachSlug('c1', 'rafinha')).rejects.toThrow(ConflictException);
+      expect(mockPrisma.coachProfile.update).not.toHaveBeenCalled();
+    });
+
+    it('corrida na unique (P2002) → 409', async () => {
+      mockPrisma.coachProfile.update.mockRejectedValue(Object.assign(new Error('unique'), { code: 'P2002' }));
+      await expect(service.setCoachSlug('c1', 'rafinha')).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('setCoachPlatformFee', () => {
+    beforeEach(() => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'c1' });
+      mockPrisma.coachProfile.upsert.mockResolvedValue({});
+    });
+
+    it('aceita 0–50', async () => {
+      await expect(service.setCoachPlatformFee('c1', 12.5)).resolves.toEqual({ success: true, coachId: 'c1', platformFeePercent: 12.5 });
+    });
+
+    it.each([NaN, -1, 51, 'abc' as any])('rejeita %p com 400 (antes: 500)', async (v) => {
+      await expect(service.setCoachPlatformFee('c1', v)).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.coachProfile.upsert).not.toHaveBeenCalled();
+    });
+
+    it('DTO valida número 0–50 (como /admin/teams/:id/fee)', async () => {
+      const errs = async (body: any) => validate(plainToInstance(SetCoachPlatformFeeDto, body));
+      expect(await errs({ platformFeePercent: 5 })).toHaveLength(0);
+      expect(await errs({ platformFeePercent: 'abc' })).not.toHaveLength(0);
+      expect(await errs({ platformFeePercent: 60 })).not.toHaveLength(0);
+      expect(await errs({ platformFeePercent: -1 })).not.toHaveLength(0);
+      expect(await errs({})).not.toHaveLength(0);
+    });
+  });
+
+  describe('getPlatformStats / getCoaches — só treinadores (sem ADMIN)', () => {
+    it('conta apenas COACH dono/membro de equipe', async () => {
+      mockPrisma.user.count.mockResolvedValue(3);
+      mockPrisma.payment.aggregate.mockResolvedValue({ _sum: { amount: 100 } });
+      await service.getPlatformStats();
+      const wheres = mockPrisma.user.count.mock.calls.map((c: any[]) => c[0].where);
+      expect(wheres[0]).toEqual(COACH_WHERE);
+      expect(wheres[1]).toEqual({ ...COACH_WHERE, isActive: true });
+      expect(JSON.stringify(wheres[0])).not.toContain('ADMIN');
+    });
+
+    it('listagem usa o mesmo critério', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([]);
+      await service.getCoaches();
+      expect(mockPrisma.user.findMany.mock.calls[0][0].where).toEqual(COACH_WHERE);
     });
   });
 });

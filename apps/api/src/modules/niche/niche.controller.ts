@@ -5,6 +5,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { NicheService } from './niche.service';
 import { SportNiche } from '@prisma/client';
+import { PowerZonesDto, SwimZonesDto, UpdateNicheDto } from './dto/niche.dto';
 
 @Controller('niche')
 export class NicheController {
@@ -49,7 +50,7 @@ export class NicheController {
   @Roles('COACH')
   async updateMyNiche(
     @CurrentUser() user: any,
-    @Body() body: { niche: SportNiche; seedQuestions?: boolean },
+    @Body() body: UpdateNicheDto,
   ) {
     return this.nicheService.updateCoachNiche(user.id, body.niche, body.seedQuestions ?? true);
   }
@@ -57,7 +58,7 @@ export class NicheController {
   /** Coach: calculate power zones from FTP */
   @Post('calculate/power-zones')
   @UseGuards(AuthGuard('jwt'))
-  calculatePowerZones(@Body() body: { ftp: number; weightKg?: number }) {
+  calculatePowerZones(@Body() body: PowerZonesDto) {
     const zones = this.nicheService.calculatePowerZones(body.ftp);
     if (body.weightKg) {
       return { ...zones, wPerKg: Math.round((body.ftp / body.weightKg) * 100) / 100 };
@@ -68,7 +69,7 @@ export class NicheController {
   /** Coach: calculate swimming CSS zones */
   @Post('calculate/swim-zones')
   @UseGuards(AuthGuard('jwt'))
-  calculateSwimZones(@Body() body: { best100mSeconds: number; best400mSeconds: number }) {
+  calculateSwimZones(@Body() body: SwimZonesDto) {
     return this.nicheService.calculateSwimmingZones(body.best100mSeconds, body.best400mSeconds);
   }
 }

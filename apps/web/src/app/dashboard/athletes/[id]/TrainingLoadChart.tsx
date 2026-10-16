@@ -6,6 +6,7 @@ import {
   Legend, ReferenceLine, ResponsiveContainer,
 } from 'recharts';
 import { api } from '@/lib/api';
+import { formatKm } from '@/lib/coach-format';
 
 interface TLPoint {
   date: string;
@@ -112,7 +113,7 @@ export default function TrainingLoadChart({ athleteId }: Props) {
               <Tooltip
                 formatter={(value: number, name: string) => {
                   const labels: Record<string, string> = { ctl: 'Fitness (CTL)', atl: 'Fadiga (ATL)', tsb: 'Forma (TSB)', load: 'Carga do dia' };
-                  return [`${(value as number).toFixed(1)} km`, labels[name] ?? name];
+                  return [formatKm(value as number), labels[name] ?? name];
                 }}
                 labelFormatter={(l) => `Data: ${formatDate(l as string)}`}
                 contentStyle={{ fontSize: 12, borderRadius: 8 }}

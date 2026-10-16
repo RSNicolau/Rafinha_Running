@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 import { api } from '@/lib/api';
+import QrScanner from './QrScanner';
 
 interface EventInfo {
   eventId: string;
@@ -24,6 +26,7 @@ interface Registration {
   avatarUrl?: string;
   shirtSize?: string;
   kitType?: string;
+  distanceName?: string | null;
   paymentStatus: string;
   status: string;
   kitDeliveredAt?: string;
@@ -33,7 +36,7 @@ interface Registration {
 
 type Screen = 'loading' | 'error' | 'main' | 'confirm' | 'result';
 
-export default function KitEntregaPage() {
+function KitEntregaContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token') ?? '';
 
@@ -47,6 +50,7 @@ export default function KitEntregaPage() {
   const [delivering, setDelivering] = useState(false);
   const [deliveryResult, setDeliveryResult] = useState<{ success: boolean; message: string } | null>(null);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [scanning, setScanning] = useState(false);
 
   // Load session on mount
   useEffect(() => {
@@ -90,6 +94,27 @@ export default function KitEntregaPage() {
     if (searchTimeout.current) clearTimeout(searchTimeout.current);
     searchTimeout.current = setTimeout(() => doSearch(v), 400);
   };
+
+  // QR da inscrição (RRKIT:<id>) via câmera ou leitor USB → abre direto a confirmação
+  const handleScanned = useCallback(async (code: string) => {
+    setScanning(false);
+    setQuery(code);
+    if (!eventInfo) return;
+    setSearching(true);
+    try {
+      const r = await api.get(`/events/kit-delivery/search?token=${token}&q=${encodeURIComponent(code)}`);
+      const list: Registration[] = r.data || [];
+      setResults(list);
+      if (list.length === 1) {
+        setSelected(list[0]);
+        setScreen('confirm');
+      }
+    } catch {
+      setResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }, [eventInfo, token]);
 
   const handleSelect = (reg: Registration) => {
     setSelected(reg);
@@ -268,14 +293,27 @@ export default function KitEntregaPage() {
           <label className="block text-sm font-semibold text-gray-700 mb-2">
             🔍 Buscar Atleta
           </label>
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => handleQueryChange(e.target.value)}
-            placeholder="Nome ou número de peito..."
-            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-            autoFocus
-          />
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => handleQueryChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && query.trim().toUpperCase().startsWith('RRKIT:')) handleScanned(query.trim());
+              }}
+              placeholder="Nome, número de peito ou leia o QR..."
+              className="flex-1 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              autoFocus
+            />
+            <button
+              onClick={() => setScanning(true)}
+              className="px-4 rounded-xl bg-gray-900 text-white text-sm font-semibold"
+              title="Ler QR Code da inscrição"
+            >
+              📷 QR
+            </button>
+          </div>
+          {scanning && <QrScanner onResult={handleScanned} onClose={() => setScanning(false)} />}
           {searching && (
             <p className="text-xs text-gray-400 mt-2">Buscando...</p>
           )}
@@ -302,7 +340,7 @@ export default function KitEntregaPage() {
                     <div>
                       <p className="font-semibold text-sm text-gray-900">{reg.name}</p>
                       <p className="text-xs text-gray-500">
-                        Nº {reg.bibNumber ?? '?'} · {reg.shirtSize ?? '—'} {reg.kitType ? `· ${reg.kitType}` : ''}
+                        Nº {reg.bibNumber ?? '?'} · {reg.shirtSize ?? '—'} {reg.kitType ? `· ${reg.kitType}` : ''}{reg.distanceName ? ` · ${reg.distanceName}` : ''}
                       </p>
                     </div>
                   </div>
@@ -342,5 +380,14 @@ export default function KitEntregaPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+
+export default function KitEntregaPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-sm text-zinc-500">Carregando…</div>}>
+      <KitEntregaContent />
+    </Suspense>
   );
 }

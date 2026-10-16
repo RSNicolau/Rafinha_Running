@@ -1,18 +1,26 @@
 import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, ForbiddenException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { NutritionService } from './nutrition.service';
-import { CreateMealDto, UpdateWaterDto, CreateNutritionLogDto, CreateWaterLogDto } from './dto/nutrition.dto';
+import {
+  CreateMealDto, UpdateWaterDto, CreateNutritionLogDto, CreateWaterLogDto,
+  AnalyzeMacrosDto, CreateSupplementDto, ToggleSupplementDto,
+} from './dto/nutrition.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { PrismaService } from '../../prisma/prisma.service';
+import { assertCoachOwnsAthlete } from '../../common/utils/ownership';
 
 @Controller('nutrition')
 @UseGuards(AuthGuard('jwt'))
 export class NutritionController {
-  constructor(private readonly nutritionService: NutritionService) {}
+  constructor(
+    private readonly nutritionService: NutritionService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   // ── AI macro estimation ────────────────────────────────────────────────────
 
   @Post('analyze')
-  analyzeMacros(@Body() body: { description: string }) {
+  analyzeMacros(@Body() body: AnalyzeMacrosDto) {
     return this.nutritionService.analyzeMacrosWithAI(body.description);
   }
 
@@ -56,9 +64,11 @@ export class NutritionController {
   @Post('supplements')
   createSupplement(
     @CurrentUser('id') userId: string,
-    @Body() body: { name: string; dose?: string; timeOfDay?: string; color?: string; icon?: string },
+    @Body() body: CreateSupplementDto,
   ) {
-    return this.nutritionService.createSupplement(userId, body);
+    return this.nutritionService.createSupplement(userId, {
+      name: body.name, dose: body.dose, timeOfDay: body.timeOfDay, color: body.color, icon: body.icon,
+    });
   }
 
   @Delete('supplements/:id')
@@ -71,7 +81,7 @@ export class NutritionController {
   toggleSupplement(
     @CurrentUser('id') userId: string,
     @Param('id') id: string,
-    @Body() body: { date?: string },
+    @Body() body: ToggleSupplementDto,
   ) {
     const today = new Date().toISOString().slice(0, 10);
     return this.nutritionService.toggleSupplementIntake(userId, id, body?.date || today);
@@ -126,7 +136,7 @@ export class NutritionController {
 
   /** GET /nutrition/coach/:athleteId — coach views athlete logs */
   @Get('coach/:athleteId')
-  getAthleteLogsForCoach(
+  async getAthleteLogsForCoach(
     @CurrentUser() user: { id: string; role: string },
     @Param('athleteId') athleteId: string,
     @Query('date') date: string,
@@ -134,6 +144,8 @@ export class NutritionController {
     if (user.role !== 'COACH' && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') {
       throw new ForbiddenException('Acesso restrito a coaches');
     }
+    // Coach só vê atletas vinculados a ele (ADMIN/SUPER_ADMIN liberados)
+    await assertCoachOwnsAthlete(this.prisma, user, athleteId, { allowSelf: false, healthData: true });
     const today = new Date().toISOString().slice(0, 10);
     return this.nutritionService.getDaySummary(athleteId, date || today);
   }

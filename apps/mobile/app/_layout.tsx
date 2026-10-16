@@ -7,6 +7,7 @@ import * as Sentry from '@sentry/react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStore } from '../src/stores/auth.store';
 import { OfflineIndicator } from '../src/components/ui/OfflineIndicator';
+import { ConsentGateModal } from '../src/components/legal/ConsentGateModal';
 import { registerForPushNotifications } from '../src/services/push-notifications.service';
 
 // Keep splash screen visible while we initialise
@@ -97,6 +98,8 @@ function RootLayout() {
           <Stack.Screen name="(admin)" />
         </Stack>
         <OfflineIndicator />
+        {/* LGPD — bloqueia o app até o aceite da versão vigente dos Termos/Política */}
+        <ConsentGateModal />
       </QueryClientProvider>
     </View>
   );

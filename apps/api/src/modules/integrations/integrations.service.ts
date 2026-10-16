@@ -1,13 +1,30 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException, ForbiddenException, HttpException, HttpStatus, Injectable, Logger, NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { GarminService } from './garmin/garmin.service';
 import { StravaService } from './strava/strava.service';
 import { CorosService } from './coros/coros.service';
 import { GoogleFitService } from './google-fit/google-fit.service';
-import { IntegrationProvider } from '@prisma/client';
+import { IntegrationProvider, UserRole } from '@prisma/client';
+import { StravaWebhookEvent } from './strava/strava.service';
+import { OAuthClient, peekOAuthState } from './oauth-state';
+import {
+  isGarminConfigured, isProviderConnectable, providerAvailability, publicApiBaseUrl,
+} from './integration-env';
+
+const MANUAL_SYNC_COOLDOWN_MS = 60_000;
+
+export interface AuthUser {
+  id: string;
+  role?: UserRole | string | null;
+}
 
 @Injectable()
 export class IntegrationsService {
+  private readonly logger = new Logger(IntegrationsService.name);
+  private readonly lastManualSync = new Map<string, number>();
+
   constructor(
     private prisma: PrismaService,
     private garminService: GarminService,
@@ -15,6 +32,10 @@ export class IntegrationsService {
     private corosService: CorosService,
     private googleFitService: GoogleFitService,
   ) {}
+
+  getProviders() {
+    return providerAvailability();
+  }
 
   async getUserIntegrations(userId: string) {
     return this.prisma.fitnessIntegration.findMany({
@@ -30,35 +51,52 @@ export class IntegrationsService {
     });
   }
 
-  async getConnectUrl(userId: string, provider: IntegrationProvider) {
+  async getConnectUrl(
+    userId: string,
+    provider: IntegrationProvider,
+    client: OAuthClient = 'web',
+  ): Promise<{ url: string; provider: IntegrationProvider; state: string }> {
+    if (!isProviderConnectable(provider)) {
+      const info = providerAvailability().find((p) => p.provider === provider);
+      throw new BadRequestException(info?.reason || `Integração ${provider} indisponível`);
+    }
     switch (provider) {
       case IntegrationProvider.GARMIN:
-        return this.garminService.getAuthUrl(userId);
+        return this.garminService.getAuthUrl(userId, client);
       case IntegrationProvider.STRAVA:
-        return this.stravaService.getAuthUrl(userId);
+        return this.stravaService.getAuthUrl(userId, client);
       case IntegrationProvider.COROS:
-        return this.corosService.getAuthUrl(userId);
+        return this.corosService.getAuthUrl(userId, client);
       case IntegrationProvider.GOOGLE_FIT:
-        return this.googleFitService.getAuthUrl(userId);
+        return this.googleFitService.getAuthUrl(userId, client);
       default:
         throw new NotFoundException(`Integração ${provider} não suportada`);
     }
+  }
+
+  /** Lê (sem consumir) o estado OAuth — usado pelo callback público para decidir web × mobile. */
+  peekOAuthState(provider: IntegrationProvider, state: string) {
+    return peekOAuthState(this.prisma, provider, state);
   }
 
   async handleCallback(
     provider: IntegrationProvider,
     code: string,
     state: string,
+    opts: { expectedUserId?: string; grantedScope?: string } = {},
   ) {
+    if (!isProviderConnectable(provider)) {
+      throw new BadRequestException(`Integração ${provider} indisponível`);
+    }
     switch (provider) {
       case IntegrationProvider.GARMIN:
-        return this.garminService.handleCallback(code, state);
+        return this.garminService.handleCallback(code, state, opts);
       case IntegrationProvider.STRAVA:
-        return this.stravaService.handleCallback(code, state);
+        return this.stravaService.handleCallback(code, state, opts);
       case IntegrationProvider.COROS:
-        return this.corosService.handleCallback(code, state);
+        return this.corosService.handleCallback(code, state, opts);
       case IntegrationProvider.GOOGLE_FIT:
-        return this.googleFitService.handleCallback(code, state);
+        return this.googleFitService.handleCallback(code, state, opts);
       default:
         throw new NotFoundException(`Integração ${provider} não suportada`);
     }
@@ -73,35 +111,54 @@ export class IntegrationsService {
       throw new NotFoundException('Integração não encontrada');
     }
 
+    if (integration.provider === IntegrationProvider.STRAVA && integration.isActive) {
+      await this.stravaService.deauthorize(integration);
+    }
+
+    // Desativa e apaga os tokens (não guardamos credenciais de conexões encerradas)
     await this.prisma.fitnessIntegration.update({
       where: { id: integrationId },
-      data: { isActive: false },
+      data: { isActive: false, accessToken: '', refreshToken: null, expiresAt: null },
     });
 
     return { message: 'Integração desconectada' };
   }
 
   async syncActivities(userId: string) {
+    // Protege a cota de API do app (Strava: 100 req/15 min, 1000/dia para o app inteiro)
+    const last = this.lastManualSync.get(userId) ?? 0;
+    if (Date.now() - last < MANUAL_SYNC_COOLDOWN_MS) {
+      throw new HttpException('Aguarde um minuto antes de sincronizar novamente.', HttpStatus.TOO_MANY_REQUESTS);
+    }
+    this.lastManualSync.set(userId, Date.now());
+    if (this.lastManualSync.size > 10_000) this.lastManualSync.clear();
+
     const integrations = await this.prisma.fitnessIntegration.findMany({
       where: { userId, isActive: true },
     });
 
-    const results = [];
+    const results: any[] = [];
 
     for (const integration of integrations) {
-      switch (integration.provider) {
-        case IntegrationProvider.GARMIN:
-          results.push(await this.garminService.syncActivities(userId, integration));
-          break;
-        case IntegrationProvider.STRAVA:
-          results.push(await this.stravaService.syncActivities(userId, integration));
-          break;
-        case IntegrationProvider.COROS:
-          results.push(await this.corosService.syncActivities(userId, integration));
-          break;
-        case IntegrationProvider.GOOGLE_FIT:
-          results.push(await this.googleFitService.syncActivities(userId, integration));
-          break;
+      if (!isProviderConnectable(integration.provider)) continue;
+      try {
+        switch (integration.provider) {
+          case IntegrationProvider.GARMIN:
+            results.push(await this.garminService.syncActivities(userId, integration));
+            break;
+          case IntegrationProvider.STRAVA:
+            results.push(await this.stravaService.syncActivities(userId, integration));
+            break;
+          case IntegrationProvider.COROS:
+            results.push(await this.corosService.syncActivities(userId, integration));
+            break;
+          case IntegrationProvider.GOOGLE_FIT:
+            results.push(await this.googleFitService.syncActivities(userId, integration));
+            break;
+        }
+      } catch (err: any) {
+        this.logger.warn(`Sync ${integration.provider} falhou para ${userId}: ${err?.message}`);
+        results.push({ provider: integration.provider, synced: 0, error: err?.message || 'erro' });
       }
     }
 
@@ -110,18 +167,62 @@ export class IntegrationsService {
 
   // ── Strava Webhook Setup ──
 
-  async setupStravaWebhook(apiBaseUrl: string) {
-    const callbackUrl = `${apiBaseUrl}/webhooks/strava`;
-    return this.stravaService.registerWebhook(callbackUrl);
+  /** URL de callback derivada SÓ do ambiente (nunca do header Host da requisição). */
+  stravaWebhookCallbackUrl(): string {
+    return process.env.STRAVA_WEBHOOK_CALLBACK_URL || `${publicApiBaseUrl()}/webhooks/strava`;
+  }
+
+  async setupStravaWebhook() {
+    return this.stravaService.registerWebhook(this.stravaWebhookCallbackUrl());
   }
 
   // ── Garmin Push (Training API) ──
 
-  async pushWorkoutToGarmin(workoutId: string) {
+  /**
+   * Quem pode operar treinos/planos de um atleta: o próprio atleta, o coach dele
+   * (AthleteProfile.coachId) ou ADMIN/SUPER_ADMIN. Sem acesso → 404 (não revela existência).
+   */
+  private async assertCanManageAthlete(user: AuthUser, athleteId: string, notFoundMsg: string) {
+    if (!user?.id) throw new ForbiddenException('Acesso negado');
+    if (user.role === UserRole.ADMIN || user.role === UserRole.SUPER_ADMIN) return;
+    if (user.id === athleteId) return;
+    if (user.role === UserRole.COACH) {
+      const profile = await this.prisma.athleteProfile.findUnique({
+        where: { userId: athleteId },
+        select: { coachId: true },
+      });
+      if (profile?.coachId && profile.coachId === user.id) return;
+    }
+    throw new NotFoundException(notFoundMsg);
+  }
+
+  private assertGarminAvailable() {
+    if (!isGarminConfigured()) {
+      throw new BadRequestException(
+        'Integração direta com Garmin indisponível. Use Strava: conecte seu relógio à Strava e ele sincroniza automaticamente.',
+      );
+    }
+  }
+
+  async pushWorkoutToGarmin(user: AuthUser, workoutId: string) {
+    this.assertGarminAvailable();
+    const workout = await this.prisma.workout.findUnique({
+      where: { id: workoutId },
+      select: { id: true, athleteId: true },
+    });
+    if (!workout) throw new NotFoundException('Treino não encontrado');
+    await this.assertCanManageAthlete(user, workout.athleteId, 'Treino não encontrado');
     return this.garminService.pushWorkoutToGarmin(workoutId);
   }
 
-  async pushPlanToGarmin(planId: string) {
+  async pushPlanToGarmin(user: AuthUser, planId: string) {
+    this.assertGarminAvailable();
+    const plan = await this.prisma.trainingPlan.findUnique({
+      where: { id: planId },
+      select: { id: true, athleteId: true, deletedAt: true },
+    });
+    if (!plan || plan.deletedAt) throw new NotFoundException('Plano não encontrado');
+    await this.assertCanManageAthlete(user, plan.athleteId, 'Plano não encontrado');
     return this.garminService.pushPlanToGarmin(planId);
   }
 
@@ -136,54 +237,14 @@ export class IntegrationsService {
   }
 
   async getAthleteGarminHealthHistory(coachId: string, athleteId: string, days: number) {
-    return this.garminService.getHealthHistory(coachId, athleteId, days);
+    const safeDays = Math.min(Math.max(1, days || 30), 365);
+    return this.garminService.getHealthHistory(coachId, athleteId, safeDays);
   }
 
-  // ── Strava Webhook Handlers ──
+  // ── Strava Webhook ──
 
-  async handleStravaActivity(data: {
-    athleteId: string;
-    activityId: string;
-    aspectType: string;
-    updates?: any;
-  }) {
-    const integration = await this.prisma.fitnessIntegration.findFirst({
-      where: {
-        externalUserId: data.athleteId,
-        provider: IntegrationProvider.STRAVA,
-        isActive: true,
-      },
-    });
-
-    if (!integration) return;
-
-    if (data.aspectType === 'create') {
-      await this.stravaService.syncSingleActivity(
-        integration.userId,
-        integration,
-        data.activityId,
-      );
-    } else if (data.aspectType === 'delete') {
-      await this.prisma.workoutResult.updateMany({
-        where: { externalId: data.activityId },
-        data: { externalId: null },
-      });
-    }
-
-    await this.prisma.fitnessIntegration.update({
-      where: { id: integration.id },
-      data: { lastSyncAt: new Date() },
-    });
-  }
-
-  async handleStravaDeauth(stravaAthleteId: string) {
-    await this.prisma.fitnessIntegration.updateMany({
-      where: {
-        externalUserId: stravaAthleteId,
-        provider: IntegrationProvider.STRAVA,
-      },
-      data: { isActive: false },
-    });
+  async handleStravaWebhook(event: StravaWebhookEvent) {
+    return this.stravaService.handleWebhookEvent(event);
   }
 
   // ── Garmin Webhook Handlers ──

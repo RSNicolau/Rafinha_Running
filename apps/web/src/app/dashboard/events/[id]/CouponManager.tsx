@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { parseBRLToCents } from '../../../checkout/_lib/money';
 
 interface Coupon {
   id: string;
@@ -56,7 +57,8 @@ export default function CouponManager({ eventId, eventPrice }: Props) {
       await api.post(`/events/${eventId}/coupons`, {
         code: form.code,
         type: form.type,
-        value: form.type !== 'COURTESY' ? parseFloat(form.value) : 0,
+        // FIXED: digitado em R$ (pt-BR) → centavos; PERCENT: número
+        value: form.type === 'COURTESY' ? 0 : form.type === 'FIXED' ? parseBRLToCents(form.value) ?? 0 : parseFloat(form.value.replace(',', '.')) || 0,
         maxUses: form.maxUses ? parseInt(form.maxUses) : undefined,
         expiresAt: form.expiresAt || undefined,
       });
@@ -147,20 +149,19 @@ export default function CouponManager({ eventId, eventPrice }: Props) {
             {form.type !== 'COURTESY' && (
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                  {form.type === 'PERCENT' ? 'Desconto (%)' : 'Desconto (em centavos)'} *
+                  {form.type === 'PERCENT' ? 'Desconto (%)' : 'Desconto (R$)'} *
                 </label>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   required
-                  min={0}
-                  max={form.type === 'PERCENT' ? 100 : eventPrice}
                   value={form.value}
                   onChange={(e) => setForm({ ...form, value: e.target.value })}
-                  placeholder={form.type === 'PERCENT' ? '10' : '1000'}
+                  placeholder={form.type === 'PERCENT' ? '10' : '10,00'}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
-                {form.type === 'FIXED' && form.value && (
-                  <p className="text-xs text-gray-400 mt-0.5">= R$ {(parseInt(form.value) / 100).toFixed(2)}</p>
+                {form.type === 'FIXED' && (
+                  <p className="text-xs text-gray-400 mt-0.5">O limite é o maior preço de inscrição (percurso mais caro + kit) — validado ao salvar.</p>
                 )}
               </div>
             )}
@@ -235,13 +236,28 @@ export default function CouponManager({ eventId, eventPrice }: Props) {
                     {c.expiresAt ? ` · expira ${new Date(c.expiresAt).toLocaleDateString('pt-BR')}` : ''}
                   </p>
                 </div>
-                <button
-                  onClick={() => copyToClipboard(c.code)}
-                  className="text-xs text-gray-400 hover:text-primary transition-colors px-2 py-1 rounded hover:bg-primary/5"
-                  title="Copiar código"
-                >
-                  📋
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.put(`/events/coupons/${c.id}`, { isActive: !c.isActive });
+                        await load();
+                      } catch (err: any) {
+                        alert(err?.response?.data?.message ?? 'Erro ao atualizar cupom');
+                      }
+                    }}
+                    className={`text-xs px-2 py-1 rounded border ${c.isActive ? 'border-gray-200 text-gray-600' : 'border-emerald-200 text-emerald-700'}`}
+                  >
+                    {c.isActive ? 'Desativar' : 'Ativar'}
+                  </button>
+                  <button
+                    onClick={() => copyToClipboard(c.code)}
+                    className="text-xs text-gray-400 hover:text-primary transition-colors px-2 py-1 rounded hover:bg-primary/5"
+                    title="Copiar código"
+                  >
+                    📋
+                  </button>
+                </div>
               </div>
             ))}
           </div>

@@ -3,6 +3,26 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 
+/**
+ * Origem do gateway Socket.IO. O proxy do Next (/api/v1) NÃO encaminha WebSocket, então:
+ *  1. NEXT_PUBLIC_WS_URL, se definido;
+ *  2. NEXT_PUBLIC_API_URL absoluto (sem /api/v1);
+ *  3. em dev (web na :3001) a API na :3000 do mesmo host;
+ *  4. senão a própria origem (produção com proxy de WS no mesmo domínio).
+ */
+function resolveSocketBase(): string {
+  const ws = process.env.NEXT_PUBLIC_WS_URL;
+  if (ws && /^https?:\/\//.test(ws)) return ws.replace(/\/+$/, '');
+  const api = process.env.NEXT_PUBLIC_API_URL;
+  if (api && /^https?:\/\//.test(api)) return api.replace(/\/api\/v1\/?$/, '').replace(/\/+$/, '');
+  if (typeof window !== 'undefined') {
+    const { protocol, hostname, port, origin } = window.location;
+    if (port === '3001') return `${protocol}//${hostname}:3000`;
+    return origin;
+  }
+  return 'http://localhost:3000';
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface LivePosition {
@@ -224,26 +244,27 @@ export default function LiveTrackingPage() {
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [connectError, setConnectError] = useState<'auth' | 'server' | null>(null);
   const [liveAthletes, setLiveAthletes] = useState<LiveAthleteInfo[]>([]);
   const [watchedPositions, setWatchedPositions] = useState<Map<string, LivePosition>>(new Map());
   const [selectedAthleteId, setSelectedAthleteId] = useState<string | null>(null);
 
   useEffect(() => {
-    const apiBase = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api/v1')
-      .replace('/api/v1', '');
-    const token = localStorage.getItem('rr_access_token') || '';
-
-    const socket = io(`${apiBase}/live`, {
+    const socket = io(`${resolveSocketBase()}/live`, {
       transports: ['websocket'],
       autoConnect: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      auth: { token },
+      // Lê o token a cada (re)conexão — após renovação de sessão usa o token novo
+      auth: (cb: (data: object) => void) => cb({ token: localStorage.getItem('rr_access_token') || '' }),
     });
 
-    socket.on('connect', () => { setIsConnected(true); setReconnecting(false); });
+    socket.on('connect', () => { setIsConnected(true); setReconnecting(false); setConnectError(null); });
+    socket.on('connect_error', (err: Error) => {
+      setConnectError(/unauthor|jwt|token/i.test(err?.message ?? '') ? 'auth' : 'server');
+    });
     socket.on('disconnect', () => { setIsConnected(false); setReconnecting(false); });
     socket.on('reconnect_attempt', () => setReconnecting(true));
     socket.on('reconnect_failed', () => setReconnecting(false));
@@ -324,7 +345,9 @@ export default function LiveTrackingPage() {
           <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
           </svg>
-          Sem conexão com o servidor de live tracking. Verifique sua rede.
+          {connectError === 'auth'
+            ? 'Sua sessão não foi aceita pelo servidor de tempo real. Saia e entre novamente.'
+            : 'O servidor de tempo real (live tracking) não está acessível agora. Tentaremos reconectar automaticamente.'}
         </div>
       )}
       {/* Header */}

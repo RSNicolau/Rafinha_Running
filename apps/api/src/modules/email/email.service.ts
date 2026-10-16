@@ -448,4 +448,274 @@ export class EmailService {
     </div>`,
     );
   }
+
+  /**
+   * Envio genérico de e-mail transacional (ex.: avisos LGPD). O HTML deve ser montado
+   * pelo chamador com dados já escapados.
+   */
+  async sendTransactional(to: string, subject: string, html: string): Promise<void> {
+    await this.send(to, subject, html);
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // Checkout — loja, eventos e plano da plataforma
+  // ════════════════════════════════════════════════════════════════════════
+
+  private esc(v: unknown): string {
+    return String(v ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  private brl(cents: number): string {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((cents || 0) / 100);
+  }
+
+  private layout(title: string, body: string): string {
+    const platformName = this.esc(process.env.PLATFORM_NAME || 'Rafinha Running');
+    return `<div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px">
+      <h2 style="color:#DC2626;margin-bottom:8px">${title}</h2>
+      ${body}
+      <hr style="border:none;border-top:1px solid #E5E7EB;margin:24px 0"/>
+      <p style="color:#9CA3AF;font-size:12px">${platformName} &bull; Treinamento de corrida personalizado</p>
+    </div>`;
+  }
+
+  async sendStoreOrderPaid(
+    to: string,
+    data: {
+      name: string;
+      orderId: string;
+      productName: string;
+      quantity: number;
+      size?: string | null;
+      color?: string | null;
+      totalInCents: number;
+      isPreOrder: boolean;
+      estimatedDelivery?: Date | null;
+      deliveryMethod?: string | null;
+    },
+  ): Promise<void> {
+    const code = data.orderId.slice(0, 8).toUpperCase();
+    const variant = [data.size && `Tamanho ${this.esc(data.size)}`, data.color && `Cor ${this.esc(data.color)}`]
+      .filter(Boolean)
+      .join(' · ');
+    const delivery = data.isPreOrder
+      ? `<p>Este item é uma <strong>encomenda</strong>. ${
+          data.estimatedDelivery
+            ? `Previsão de entrega: <strong>${data.estimatedDelivery.toLocaleDateString('pt-BR')}</strong>.`
+            : 'Avisaremos assim que a produção for concluída.'
+        }</p>`
+      : `<p>Vamos separar seu pedido e avisar quando ${
+          data.deliveryMethod === 'PICKUP' ? 'estiver pronto para retirada' : 'for enviado'
+        }.</p>`;
+    await this.send(
+      to,
+      `Pagamento confirmado — pedido #${code}`,
+      this.layout(
+        'Pagamento confirmado! 🎉',
+        `<p>Olá, <strong>${this.esc(data.name)}</strong>!</p>
+        <p>Recebemos o pagamento do seu pedido <strong>#${code}</strong>:</p>
+        <p style="background:#F4F4F5;border-radius:8px;padding:12px">
+          <strong>${this.esc(data.productName)}</strong> × ${data.quantity}<br/>
+          ${variant ? `${variant}<br/>` : ''}
+          Total pago: <strong>${this.brl(data.totalInCents)}</strong>
+        </p>
+        ${delivery}`,
+      ),
+    );
+  }
+
+  async sendStoreOrderStatus(
+    to: string,
+    data: { name: string; orderId: string; productName: string; status: string; trackingCode?: string | null },
+  ): Promise<void> {
+    const code = data.orderId.slice(0, 8).toUpperCase();
+    const labels: Record<string, string> = {
+      PROCESSING: 'Seu pedido está em separação/produção.',
+      SHIPPED: 'Seu pedido foi enviado!',
+      READY_FOR_PICKUP: 'Seu pedido está pronto para retirada com a assessoria.',
+      DELIVERED: 'Seu pedido foi entregue. Bons treinos!',
+      CANCELLED: 'Seu pedido foi cancelado.',
+      REFUNDED: 'O pagamento do seu pedido foi estornado.',
+    };
+    const msg = labels[data.status];
+    if (!msg) return;
+    await this.send(
+      to,
+      `Pedido #${code} — atualização`,
+      this.layout(
+        'Atualização do seu pedido',
+        `<p>Olá, <strong>${this.esc(data.name)}</strong>!</p>
+        <p><strong>${this.esc(data.productName)}</strong> — ${msg}</p>
+        ${data.trackingCode ? `<p>Código de rastreio: <strong>${this.esc(data.trackingCode)}</strong></p>` : ''}`,
+      ),
+    );
+  }
+
+  async sendEventRegistrationConfirmed(
+    to: string,
+    data: {
+      name: string;
+      eventTitle: string;
+      eventDate: Date;
+      bibNumber?: string | null;
+      distanceName?: string | null;
+      kitPickupLocation?: string | null;
+      kitPickupDate?: Date | null;
+      amountPaidInCents?: number | null;
+    },
+  ): Promise<void> {
+    await this.send(
+      to,
+      `Inscrição confirmada — ${data.eventTitle}`,
+      this.layout(
+        'Inscrição confirmada! 🏁',
+        `<p>Olá, <strong>${this.esc(data.name)}</strong>!</p>
+        <p>Sua inscrição em <strong>${this.esc(data.eventTitle)}</strong> (${data.eventDate.toLocaleDateString('pt-BR')}) está confirmada.</p>
+        ${data.bibNumber ? `<p style="font-size:28px;font-weight:800;color:#DC2626;margin:16px 0">Peito nº ${this.esc(data.bibNumber)}</p>` : ''}
+        ${data.distanceName ? `<p>Percurso: <strong>${this.esc(data.distanceName)}</strong></p>` : ''}
+        ${data.amountPaidInCents ? `<p>Valor pago: <strong>${this.brl(data.amountPaidInCents)}</strong></p>` : ''}
+        ${
+          data.kitPickupLocation || data.kitPickupDate
+            ? `<p>Retirada do kit: ${this.esc(data.kitPickupLocation ?? '')} ${
+                data.kitPickupDate ? `— ${data.kitPickupDate.toLocaleString('pt-BR')}` : ''
+              }<br/><span style="color:#6B7280;font-size:13px">Apresente o QR Code da inscrição no app e um documento com foto.</span></p>`
+            : ''
+        }`,
+      ),
+    );
+  }
+
+  async sendEventSpotAvailable(
+    to: string,
+    data: { name: string; eventTitle: string; eventId: string; expiresAt: Date },
+  ): Promise<void> {
+    const url = `${this.appUrl}/eventos/${encodeURIComponent(data.eventId)}`;
+    await this.send(
+      to,
+      `Vaga liberada — ${data.eventTitle}`,
+      this.layout(
+        'Abriu uma vaga para você!',
+        `<p>Olá, <strong>${this.esc(data.name)}</strong>!</p>
+        <p>Você estava na lista de espera de <strong>${this.esc(data.eventTitle)}</strong> e uma vaga foi liberada.</p>
+        <p>Conclua o pagamento até <strong>${data.expiresAt.toLocaleString('pt-BR')}</strong> para garantir sua inscrição.</p>
+        <a href="${url}" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#DC2626;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">Concluir inscrição</a>`,
+      ),
+    );
+  }
+
+  async sendPlatformPlanActivated(
+    to: string,
+    data: { name: string; planName: string; periodEnd: Date; amountInCents: number },
+  ): Promise<void> {
+    await this.send(
+      to,
+      `Plano ${data.planName} ativado`,
+      this.layout(
+        'Plano ativado! 🚀',
+        `<p>Olá, <strong>${this.esc(data.name)}</strong>!</p>
+        <p>Recebemos o pagamento de <strong>${this.brl(data.amountInCents)}</strong> e seu plano <strong>${this.esc(data.planName)}</strong> está ativo até <strong>${data.periodEnd.toLocaleDateString('pt-BR')}</strong>.</p>`,
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // Mensalidade (atleta → equipe)
+  // ════════════════════════════════════════════════════════════════════════
+
+  private button(href: string, label: string): string {
+    return `<a href="${this.esc(href)}" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#DC2626;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">${this.esc(label)}</a>`;
+  }
+
+  private dateBR(d: Date | string | null | undefined): string {
+    if (!d) return '—';
+    return new Date(d).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  }
+
+  async sendMembershipPaid(
+    to: string,
+    data: { name: string; teamName: string; planName: string; amountInCents: number; periodEnd?: Date | null },
+  ): Promise<void> {
+    await this.send(
+      to,
+      `Mensalidade confirmada — ${data.teamName}`,
+      this.layout(
+        'Mensalidade confirmada! ✅',
+        `<p>Olá, <strong>${this.esc(data.name)}</strong>!</p>
+        <p>Recebemos <strong>${this.brl(data.amountInCents)}</strong> referente ao plano <strong>${this.esc(data.planName)}</strong> da <strong>${this.esc(data.teamName)}</strong>.</p>
+        ${data.periodEnd ? `<p>Seu período está garantido até <strong>${this.dateBR(data.periodEnd)}</strong>.</p>` : ''}
+        <p>Bons treinos!</p>`,
+      ),
+    );
+  }
+
+  async sendMembershipReminder(
+    to: string,
+    data: { name: string; teamName: string; planName: string; amountInCents: number; dueDate?: Date | null; invoiceUrl: string; overdue: boolean },
+  ): Promise<void> {
+    await this.send(
+      to,
+      data.overdue ? `Mensalidade em atraso — ${data.teamName}` : `Lembrete de mensalidade — ${data.teamName}`,
+      this.layout(
+        data.overdue ? 'Sua mensalidade está em atraso' : 'Lembrete da sua mensalidade',
+        `<p>Olá, <strong>${this.esc(data.name)}</strong>!</p>
+        <p>A mensalidade do plano <strong>${this.esc(data.planName)}</strong> (${this.brl(data.amountInCents)})
+        ${data.overdue ? 'venceu em' : 'vence em'} <strong>${this.dateBR(data.dueDate)}</strong>.</p>
+        ${this.button(data.invoiceUrl, 'Pagar mensalidade')}
+        <p style="color:#6B7280;font-size:13px">Se você já pagou, desconsidere esta mensagem — a confirmação pode levar alguns minutos.</p>`,
+      ),
+    );
+  }
+
+  async sendMembershipPastDue(
+    to: string,
+    data: { name: string; teamName: string; planName: string; amountInCents: number; dueDate?: Date | null; invoiceUrl?: string | null },
+  ): Promise<void> {
+    await this.send(
+      to,
+      `Mensalidade em atraso — ${data.teamName}`,
+      this.layout(
+        'Mensalidade em atraso',
+        `<p>Olá, <strong>${this.esc(data.name)}</strong>!</p>
+        <p>Não identificamos o pagamento da mensalidade do plano <strong>${this.esc(data.planName)}</strong>
+        (${this.brl(data.amountInCents)}), vencida em <strong>${this.dateBR(data.dueDate)}</strong>.</p>
+        ${data.invoiceUrl ? this.button(data.invoiceUrl, 'Regularizar agora') : `<p>Acesse o app para regularizar.</p>`}
+        <p style="color:#6B7280;font-size:13px">Dúvidas? Fale com a sua assessoria.</p>`,
+      ),
+    );
+  }
+
+  async sendMembershipPastDueSummary(
+    to: string,
+    data: { name: string; teamName: string; athletes: Array<{ name: string; planName: string; amountInCents: number; dueDate?: Date | null }> },
+  ): Promise<void> {
+    if (!data.athletes.length) return;
+    const total = data.athletes.reduce((acc, a) => acc + (a.amountInCents || 0), 0);
+    const rows = data.athletes
+      .slice(0, 50)
+      .map(
+        (a) => `<tr><td style="padding:4px 8px">${this.esc(a.name)}</td><td style="padding:4px 8px">${this.esc(a.planName)}</td>
+        <td style="padding:4px 8px;text-align:right">${this.brl(a.amountInCents)}</td><td style="padding:4px 8px">${this.dateBR(a.dueDate)}</td></tr>`,
+      )
+      .join('');
+    await this.send(
+      to,
+      `${data.athletes.length} mensalidade(s) em atraso — ${data.teamName}`,
+      this.layout(
+        'Mensalidades em atraso',
+        `<p>Olá, <strong>${this.esc(data.name)}</strong>!</p>
+        <p>Hoje ${data.athletes.length === 1 ? '1 atleta passou' : `${data.athletes.length} atletas passaram`} a constar como inadimplente(s)
+        na <strong>${this.esc(data.teamName)}</strong> (total ${this.brl(total)}):</p>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;background:#F4F4F5;border-radius:8px">
+          <tr style="text-align:left;color:#6B7280"><th style="padding:4px 8px">Atleta</th><th style="padding:4px 8px">Plano</th><th style="padding:4px 8px;text-align:right">Valor</th><th style="padding:4px 8px">Vencimento</th></tr>
+          ${rows}
+        </table>
+        ${this.button(`${this.appUrl}/dashboard/mensalidades?status=PAST_DUE`, 'Ver mensalidades')}`,
+      ),
+    );
+  }
 }

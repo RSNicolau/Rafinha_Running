@@ -2,7 +2,8 @@ import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nes
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
-import { PartnersService, PartnerDto } from './partners.service';
+import { PartnersService } from './partners.service';
+import { CreatePartnerDto, UpdatePartnerDto } from './dto/partner.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -32,8 +33,8 @@ export class PartnersController {
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Treinador lista todos os seus parceiros (inclui inativos)' })
-  async getForCoach(@CurrentUser('id') coachId: string) {
-    return this.partnersService.getForCoach(coachId);
+  async getForCoach(@CurrentUser() user: { id: string; role: UserRole }) {
+    return this.partnersService.getForCoach(user);
   }
 
   @Post()
@@ -41,7 +42,7 @@ export class PartnersController {
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Treinador cadastra um parceiro' })
-  async create(@CurrentUser('id') coachId: string, @Body() dto: PartnerDto) {
+  async create(@CurrentUser('id') coachId: string, @Body() dto: CreatePartnerDto) {
     return this.partnersService.create(coachId, dto);
   }
 
@@ -52,10 +53,10 @@ export class PartnersController {
   @ApiOperation({ summary: 'Treinador atualiza um parceiro' })
   async update(
     @Param('id') id: string,
-    @CurrentUser('id') coachId: string,
-    @Body() dto: Partial<PartnerDto>,
+    @CurrentUser() user: { id: string; role: UserRole },
+    @Body() dto: UpdatePartnerDto,
   ) {
-    return this.partnersService.update(id, coachId, dto);
+    return this.partnersService.update(id, user, dto);
   }
 
   @Delete(':id')
@@ -63,7 +64,7 @@ export class PartnersController {
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Treinador remove um parceiro' })
-  async remove(@Param('id') id: string, @CurrentUser('id') coachId: string) {
-    return this.partnersService.remove(id, coachId);
+  async remove(@Param('id') id: string, @CurrentUser() user: { id: string; role: UserRole }) {
+    return this.partnersService.remove(id, user);
   }
 }

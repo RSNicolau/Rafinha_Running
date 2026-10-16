@@ -1,8 +1,9 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, Optional } from '@nestjs/common';
 import * as crypto from 'crypto';
 import * as Sentry from '@sentry/nestjs';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { PaymentStatus, SubscriptionStatus } from '@prisma/client';
+import { PaymentStatus, SubscriptionStatus, PaymentPurpose } from '@prisma/client';
+import { FulfillmentService } from '../checkout/fulfillment.service';
 
 export interface PagarmePixOrderResult {
   orderId: string;
@@ -26,7 +27,37 @@ export class PagarmeService {
   private readonly logger = new Logger(PagarmeService.name);
   private readonly baseUrl = 'https://api.pagar.me/core/v5';
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly fulfillment?: FulfillmentService,
+  ) {}
+
+  /**
+   * Confirmação a partir de dados obtidos DIRETO da API do Pagar.me (resposta da criação do
+   * pedido com cartão, ou GET /orders/:id no polling). Mesmo caminho do webhook: transição
+   * condicional + ativação, idempotente.
+   */
+  async confirmOrderPaid(orderId: string, verifiedOrder?: { status?: string; amount?: number } | null) {
+    const order = verifiedOrder ?? (await this.getOrder(orderId));
+    if (order?.status !== 'paid') return { processed: false };
+    return this.applyPaid({ ...order, id: orderId }, true);
+  }
+
+  /** Polling do cliente: nunca escreve status diretamente; só transições condicionais. */
+  async syncOrderStatus(payment: { id: string; externalPaymentId: string | null; status: PaymentStatus }) {
+    if (!payment.externalPaymentId) return null;
+    const order = await this.getOrder(payment.externalPaymentId);
+    if (order?.status === 'paid') {
+      await this.applyPaid({ ...order, id: payment.externalPaymentId }, true);
+    } else if (order?.status === 'failed' || order?.status === 'canceled') {
+      // só PENDING → FAILED (nunca rebaixa SUCCEEDED/REFUNDED)
+      await this.prisma.payment.updateMany({
+        where: { id: payment.id, status: PaymentStatus.PENDING },
+        data: { status: PaymentStatus.FAILED },
+      });
+    }
+    return order;
+  }
 
   private get apiKey(): string {
     return process.env.PAGARME_API_KEY || '';
@@ -246,42 +277,77 @@ export class PagarmeService {
 
   // ── Private webhook handlers ──────────────────────────────────
 
+  /** order.paid do webhook (assinado). */
   private async handleOrderPaid(order: any) {
     if (!order?.id) return;
+    await this.applyPaid(order, false);
+  }
 
-    try {
-      const payment = await this.prisma.payment.findFirst({
-        where: { externalPaymentId: order.id },
-      });
+  /**
+   * Efetiva um pedido pago. Regras:
+   *  - PENDING → SUCCEEDED pela transição condicional (só a primeira entrega tem efeito);
+   *  - FAILED só vira SUCCEEDED com confirmação da API do Pagar.me (replay de webhook não basta);
+   *  - REFUNDED nunca volta a SUCCEEDED;
+   *  - valor diferente do cobrado → sinaliza AMOUNT_MISMATCH e não ativa nada;
+   *  - erro na ativação → exceção (rollback) → o webhook responde 5xx e o Pagar.me reenvia.
+   */
+  private async applyPaid(order: any, verifiedWithApi: boolean): Promise<{ processed: boolean }> {
+    const payment = await this.prisma.payment.findFirst({ where: { externalPaymentId: order.id } });
+    if (!payment) {
+      this.logger.warn(`Pagamento Pagar.me não encontrado para order: ${order.id}`);
+      return { processed: false };
+    }
+    if (payment.status === PaymentStatus.SUCCEEDED) return { processed: false };
+    if (payment.status === PaymentStatus.REFUNDED) {
+      this.logger.warn(`Pagar.me order.paid para pagamento estornado ${payment.id} — ignorado`);
+      return { processed: false };
+    }
 
-      if (!payment) {
-        this.logger.warn(`Pagamento Pagar.me não encontrado para order: ${order.id}`);
-        return;
+    let source = order;
+    if (payment.status === PaymentStatus.FAILED && !verifiedWithApi) {
+      source = await this.getOrder(order.id); // falha de rede → exceção → 5xx → retry
+      if (source?.status !== 'paid') {
+        this.logger.warn(`Pagar.me: replay de order.paid para ${payment.id} não confirmado pela API (${source?.status})`);
+        return { processed: false };
       }
+    }
+    const amount = typeof source?.amount === 'number' ? source.amount : null;
+    if (amount !== null && amount !== payment.amount) {
+      this.logger.error(`[REVISAR PAGAMENTO ${payment.id}] AMOUNT_MISMATCH: Pagar.me ${amount} ≠ ${payment.amount}`);
+      await this.prisma.payment.update({ where: { id: payment.id }, data: { failureReason: 'AMOUNT_MISMATCH' } });
+      return { processed: false };
+    }
 
-      // Use $transaction to ensure atomicity: payment + subscription updated together
-      await this.prisma.$transaction(async (tx) => {
-        await tx.payment.update({
-          where: { id: payment.id },
-          data: {
-            status: PaymentStatus.SUCCEEDED,
-            paidAt: new Date(),
-          },
+    const allowedFrom = payment.status === PaymentStatus.FAILED ? [PaymentStatus.FAILED] : [PaymentStatus.PENDING];
+    try {
+      const processed = await this.prisma.$transaction(async (tx) => {
+        const res = await tx.payment.updateMany({
+          where: { id: payment.id, status: { in: allowedFrom } },
+          data: { status: PaymentStatus.SUCCEEDED, paidAt: new Date() },
         });
+        if (res.count === 0) return false;
 
-        // If there's a linked subscription, activate it atomically
         if (payment.subscriptionId) {
           await tx.subscription.update({
             where: { id: payment.subscriptionId },
             data: { status: SubscriptionStatus.ACTIVE },
           });
         }
+        // Plano da plataforma (coach) pago via Pagar.me → ativa a CoachSubscription
+        if (payment.purpose === PaymentPurpose.PLATFORM_PLAN && this.fulfillment) {
+          const r = await this.fulfillment.platformPlanPaid(tx as any, payment);
+          if (r.outcome === 'NEEDS_REFUND') {
+            await tx.payment.update({ where: { id: payment.id }, data: { failureReason: 'NEEDS_REFUND' } });
+          }
+        }
+        return true;
       });
-
-      this.logger.log(`Pagamento Pagar.me confirmado: ${payment.id} (order: ${order.id})`);
+      if (processed) this.logger.log(`Pagamento Pagar.me confirmado: ${payment.id} (order: ${order.id})`);
+      return { processed };
     } catch (err: any) {
       Sentry.captureException(err, { extra: { orderId: order?.id } });
       this.logger.error(`Erro ao processar order.paid Pagar.me: ${err.message}`);
+      throw err; // 5xx → Pagar.me reenvia
     }
   }
 
@@ -293,8 +359,9 @@ export class PagarmeService {
         where: { externalPaymentId: order.id },
       });
 
+      // nunca rebaixa SUCCEEDED/REFUNDED
       await this.prisma.payment.updateMany({
-        where: { externalPaymentId: order.id },
+        where: { externalPaymentId: order.id, status: PaymentStatus.PENDING },
         data: { status: PaymentStatus.FAILED },
       });
 
@@ -306,19 +373,11 @@ export class PagarmeService {
     }
   }
 
+  /** charge.paid: encaminha para o mesmo caminho do order.paid (com verificação na API). */
   private async handleChargePaid(charge: any) {
-    if (!charge?.id) return;
-
-    try {
-      await this.prisma.payment.updateMany({
-        where: { externalPaymentId: charge.id },
-        data: {
-          status: PaymentStatus.SUCCEEDED,
-          paidAt: new Date(),
-        },
-      });
-    } catch (err: any) {
-      this.logger.error(`Erro ao processar charge.paid Pagar.me: ${err.message}`);
-    }
+    const orderId: string | undefined = charge?.order?.id ?? charge?.order_id;
+    if (!orderId) return;
+    const order = await this.getOrder(orderId);
+    if (order?.status === 'paid') await this.applyPaid({ ...order, id: orderId }, true);
   }
 }

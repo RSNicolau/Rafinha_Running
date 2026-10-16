@@ -1,22 +1,17 @@
-import { Controller, Get, Put, Patch, Post, Delete, Body, Param, Query, UseGuards, BadRequestException, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Put, Patch, Post, Delete, Body, Param, Query, Req, UseGuards, BadRequestException, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
-import { IsString, MinLength } from 'class-validator';
 import { UsersService } from './users.service';
 import { TwoFactorService } from './two-factor.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { AddAthleteDto, ChangePasswordDto, TotpTokenDto, UpdateAiSettingsDto } from './dto/user-settings.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { UploadsService } from '../uploads/uploads.service';
-
-class ChangePasswordDto {
-  @IsString() currentPassword: string;
-  @IsString() @MinLength(6) newPassword: string;
-}
 
 @ApiTags('Usuários')
 @ApiBearerAuth()
@@ -31,8 +26,9 @@ export class UsersController {
 
   @Get('me')
   @ApiOperation({ summary: 'Obter perfil do usuário atual' })
-  async getProfile(@CurrentUser('id') userId: string) {
-    return this.usersService.findById(userId);
+  async getProfile(@CurrentUser('id') userId: string, @Req() req: any) {
+    const h = req?.headers?.['x-team-id'];
+    return this.usersService.findById(userId, typeof h === 'string' ? h : null);
   }
 
   @Post('me/avatar')
@@ -44,14 +40,13 @@ export class UsersController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('Arquivo não enviado');
-    const ext = file.originalname.split('.').pop() || 'jpg';
-    const path = `avatars/${userId}/avatar.${ext}`;
-    const url = await this.uploadsService.uploadFile(file.buffer, file.originalname, file.mimetype, path);
+    // Tipo validado por magic bytes (jpeg/png/webp, ≤5MB); extensão derivada do tipo detectado
+    const url = await this.uploadsService.uploadPublicImage(file, `avatars/${userId}/avatar`);
     return this.usersService.updateAvatarUrl(userId, url);
   }
 
   @Post('me/banner')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }))
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Upload de banner de perfil' })
   async uploadBanner(
@@ -59,17 +54,16 @@ export class UsersController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('Arquivo não enviado');
-    const ext = file.originalname.split('.').pop() || 'jpg';
-    const path = `banners/${userId}/banner.${ext}`;
-    const url = await this.uploadsService.uploadFile(file.buffer, file.originalname, file.mimetype, path);
+    const url = await this.uploadsService.uploadPublicImage(file, `banners/${userId}/banner`);
     return this.usersService.updateBannerUrl(userId, url);
   }
 
   @Patch('me/ai-settings')
-  @ApiOperation({ summary: 'Atualizar configurações de IA do usuário' })
+  @Roles(UserRole.COACH)
+  @ApiOperation({ summary: 'Atualizar configurações de IA do treinador (chave BYOK criptografada)' })
   async updateAiSettings(
     @CurrentUser('id') userId: string,
-    @Body() body: { aiProvider?: string; aiModel?: string; aiByok?: boolean; aiApiKey?: string },
+    @Body() body: UpdateAiSettingsDto,
   ) {
     return this.usersService.updateAiSettings(userId, body);
   }
@@ -106,14 +100,14 @@ export class UsersController {
 
   @Post('me/2fa/enable')
   @ApiOperation({ summary: 'Ativar 2FA verificando o código TOTP' })
-  async enable2FA(@CurrentUser('id') userId: string, @Body('token') token: string) {
-    return this.twoFactorService.enableTotp(userId, token);
+  async enable2FA(@CurrentUser('id') userId: string, @Body() dto: TotpTokenDto) {
+    return this.twoFactorService.enableTotp(userId, dto.token);
   }
 
   @Post('me/2fa/disable')
   @ApiOperation({ summary: 'Desativar 2FA' })
-  async disable2FA(@CurrentUser('id') userId: string, @Body('token') token: string) {
-    return this.twoFactorService.disableTotp(userId, token);
+  async disable2FA(@CurrentUser('id') userId: string, @Body() dto: TotpTokenDto) {
+    return this.twoFactorService.disableTotp(userId, dto.token);
   }
 
   @Get('me/2fa/status')
@@ -129,8 +123,11 @@ export class UsersController {
     @CurrentUser('id') coachId: string,
     @Query('page') page = 1,
     @Query('limit') limit = 20,
+    @Query('q') q?: string,
   ) {
-    return this.usersService.getCoachAthletes(coachId, +page, +limit);
+    const p = Math.max(1, Math.floor(+page) || 1);
+    const l = Math.min(100, Math.max(1, Math.floor(+limit) || 20));
+    return this.usersService.getCoachAthletes(coachId, p, l, typeof q === 'string' ? q.slice(0, 100) : undefined);
   }
 
   @Get('athletes/alerts')
@@ -149,14 +146,29 @@ export class UsersController {
 
   @Post('athletes/add')
   @Roles(UserRole.COACH)
-  @ApiOperation({ summary: 'Adicionar atleta por e-mail' })
-  async addAthlete(@CurrentUser('id') coachId: string, @Body('email') email: string) {
-    return this.usersService.addAthleteByEmail(coachId, email);
+  @ApiOperation({ summary: 'Convidar atleta por e-mail (o vínculo só ocorre quando o atleta aceita)' })
+  async addAthlete(@CurrentUser('id') coachId: string, @Body() dto: AddAthleteDto) {
+    return this.usersService.addAthleteByEmail(coachId, dto.email);
+  }
+
+  /**
+   * Perfil completo do atleta para o painel do treinador (detalhe, relatório, criação de planos).
+   * Escopo: treinador atribuído, OWNER/ADMIN/STAFF da equipe do atleta (STAFF sem dados de saúde) ou admin.
+   * Precisa ficar ANTES de @Get(':id').
+   */
+  @Get('athletes/:athleteId')
+  @Roles(UserRole.COACH)
+  @ApiOperation({ summary: 'Obter atleta do treinador/equipe (STAFF sem dados de saúde)' })
+  async getAthlete(
+    @Param('athleteId') athleteId: string,
+    @CurrentUser() caller: { id: string; role: string },
+  ) {
+    return this.usersService.getAthleteForCoach(caller, athleteId);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Obter usuário por ID (campos públicos)' })
-  async getUser(@Param('id') id: string) {
-    return this.usersService.findPublicById(id);
+  @ApiOperation({ summary: 'Obter usuário por ID (campos públicos; só usuários relacionados ao chamador)' })
+  async getUser(@Param('id') id: string, @CurrentUser() caller: { id: string; role: string }) {
+    return this.usersService.findPublicById(id, caller);
   }
 }

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { authService, AuthResponse } from '../services/auth.service';
+import { authService, AuthResponse, RegisterRequest } from '../services/auth.service';
 import { setAuthLogout } from '../services/api';
 
 interface User {
@@ -17,7 +17,13 @@ interface AuthState {
   error: string | null;
 
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name: string) => Promise<void>;
+  /** `consent` = registerConsentPayload(marketingOptIn) — aceite LGPD exigido pela API. */
+  register: (
+    email: string,
+    password: string,
+    name: string,
+    consent: Pick<RegisterRequest, 'acceptTerms' | 'termsVersion' | 'privacyVersion' | 'marketingOptIn'>,
+  ) => Promise<void>;
   googleLogin: (idToken: string) => Promise<void>;
   appleLogin: (identityToken: string, fullName?: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -46,10 +52,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  register: async (email: string, password: string, name: string) => {
+  register: async (email, password, name, consent) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await authService.register({ email, password, name });
+      const response = await authService.register({ email, password, name, ...consent });
       set({ user: response.user, isAuthenticated: true, isLoading: false });
     } catch (err: any) {
       const message = err.response?.data?.message || 'Erro ao criar conta';

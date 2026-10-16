@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAuthStore } from '@/stores/auth.store';
-import { api } from '@/lib/api';
+import { api, friendlyError } from '@/lib/api';
 
 // ─── Training plan detection ──────────────────────────────────────────────────
 
@@ -13,6 +14,23 @@ function isTrainingPlan(text: string): boolean {
   const planKeywords = ['segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'domingo', 'seg:', 'ter:', 'qui:', 'sex:', 'sáb:'];
   const matchCount = lines.filter(l => planKeywords.some(k => l.toLowerCase().includes(k))).length;
   return matchCount >= 3;
+}
+
+/**
+ * GET /users/athletes devolve {data,total,...} com itens AthleteProfile:
+ * { id: <id do perfil>, userId, user: { id, name, email, avatarUrl } }.
+ * Para conversa/planilha usamos SEMPRE o id do usuário (user.id / userId).
+ */
+function mapAthleteList(raw: any): { id: string; name: string; email?: string; avatarUrl?: string | null }[] {
+  const list = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : [];
+  return list
+    .map((a: any) => ({
+      id: a?.user?.id ?? a?.userId ?? a?.id,
+      name: a?.user?.name ?? a?.name ?? '',
+      email: a?.user?.email ?? a?.email,
+      avatarUrl: a?.user?.avatarUrl ?? a?.avatarUrl ?? null,
+    }))
+    .filter((a: { id?: string }) => !!a.id);
 }
 
 // ─── Apply Plan Button ────────────────────────────────────────────────────────
@@ -26,7 +44,9 @@ function ApplyPlanButton({ planText }: { planText: string }) {
 
   useEffect(() => {
     if (open) {
-      api.get('/users/athletes').then(r => setAthletes(r.data?.data ?? r.data ?? [])).catch(() => {});
+      api.get('/users/athletes', { params: { limit: 100 } })
+        .then(r => setAthletes(mapAthleteList(r.data).map(a => ({ id: a.id, name: a.name }))))
+        .catch(() => {});
     }
   }, [open]);
 
@@ -37,7 +57,7 @@ function ApplyPlanButton({ planText }: { planText: string }) {
       const { data } = await api.post('/coach-brain/apply-plan', { athleteId, planText });
       setResult(data);
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'Erro ao aplicar plano');
+      alert(friendlyError(e, 'Não foi possível aplicar o plano.'));
     } finally { setApplying(false); }
   };
 
@@ -160,8 +180,8 @@ function CoachBrainPanel() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentProvider, setCurrentProvider] = useState<string>('anthropic');
-  const [currentModel, setCurrentModel] = useState<string>('claude-opus-4-6');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [currentModel, setCurrentModel] = useState<string>('');
+  const [sidebarOpen, setSidebarOpen] = useState(() => (typeof window === 'undefined' ? true : window.innerWidth >= 768));
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [recording, setRecording] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -175,7 +195,8 @@ function CoachBrainPanel() {
     api.get('/coach-brain/sessions').then(r => setSessions(r.data ?? [])).catch(() => {});
     api.get('/coach-brain/settings').then(r => {
       setCurrentProvider(r.data?.provider ?? 'anthropic');
-      setCurrentModel(r.data?.model ?? r.data?.defaultModel ?? 'claude-opus-4-6');
+      // Só exibe o modelo quando a IA está realmente configurada (sem chave → sem selo)
+      setCurrentModel(r.data?.configured === false ? '' : (r.data?.model ?? r.data?.defaultModel ?? ''));
     }).catch(() => {});
   }, []);
 
@@ -355,7 +376,7 @@ function CoachBrainPanel() {
         const updated = [...prev];
         updated[updated.length - 1] = {
           role: 'assistant',
-          content: `⚠️ Erro ao conectar com a IA: ${err.message ?? 'Tente novamente.'}`,
+          content: '⚠️ Não foi possível falar com a IA agora. Tente novamente em instantes.',
         };
         return updated;
       });
@@ -372,7 +393,7 @@ function CoachBrainPanel() {
   };
 
   const providerInfo = PROVIDER_LABELS[currentProvider] ?? PROVIDER_LABELS.anthropic;
-  const modelShort = currentModel?.split('-').slice(0, 3).join('-') ?? currentModel;
+  const modelShort = currentModel ? currentModel.split('-').slice(0, 3).join('-') : '';
 
   return (
     <div className="flex h-full">
@@ -450,9 +471,11 @@ function CoachBrainPanel() {
             <p className="text-xs text-gray-400 leading-tight truncate">Assistente com contexto completo dos seus atletas</p>
           </div>
 
-          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${providerInfo.color}`}>
-            {modelShort}
-          </span>
+          {modelShort && (
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${providerInfo.color}`} title={currentModel}>
+              {modelShort}
+            </span>
+          )}
         </div>
 
         {/* Messages */}
@@ -529,7 +552,7 @@ function CoachBrainPanel() {
                   {/* Provider badge below AI message */}
                   {!isUser && msg.content && msgProviderInfo && (
                     <span className={`text-[10px] font-medium mt-1 px-2 py-0.5 rounded-full ${msgProviderInfo.color}`}>
-                      {msg.model ?? msgProviderInfo.label}
+                      {msg.model || msgProviderInfo.label}
                     </span>
                   )}
                 </div>
@@ -649,13 +672,47 @@ interface Message {
   createdAt: string;
 }
 
+interface ChatUser { id: string; name: string; email?: string; avatarUrl?: string | null }
+
 interface Conversation {
   id: string;
   athleteId: string;
   coachId: string;
   lastMessageAt: string | null;
-  athlete: { id: string; name: string; avatarUrl?: string | null };
-  messages?: Message[];
+  athlete?: ChatUser;
+  coach?: ChatUser;
+  otherUser?: ChatUser | null;
+  myRole?: 'COACH' | 'ATHLETE';
+  unreadCount?: number;
+  lastMessage?: Message | null;
+}
+
+interface MessagesPage { data: Message[]; total: number; page: number; totalPages: number }
+
+/** A API devolve {data,total,page,totalPages}; versões antigas devolviam um array. */
+function normalizeMessages(raw: any): MessagesPage {
+  if (Array.isArray(raw)) return { data: raw, total: raw.length, page: 1, totalPages: 1 };
+  const data = Array.isArray(raw?.data) ? raw.data : [];
+  return {
+    data,
+    total: Number(raw?.total ?? data.length),
+    page: Number(raw?.page ?? 1),
+    totalPages: Number(raw?.totalPages ?? 1),
+  };
+}
+
+/** Outro participante da conversa (título): nunca o próprio usuário. */
+function otherParticipant(conv: Conversation, userId: string): ChatUser {
+  if (conv.otherUser?.name) return conv.otherUser;
+  const other = conv.coachId === userId ? conv.athlete : conv.coach;
+  return other ?? { id: '', name: 'Conversa' };
+}
+
+function mergeMessages(prev: Message[], incoming: Message[]): Message[] {
+  const map = new Map<string, Message>();
+  for (const m of prev) map.set(m.id, m);
+  for (const m of incoming) if (m?.id) map.set(m.id, m);
+  return Array.from(map.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 }
 
 function avatarColor(name: string) {
@@ -674,6 +731,17 @@ function formatTime(iso: string) {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
 }
 
+/** Base do servidor de websocket: origem da API quando absoluta; senão a própria origem (Caddy faz o proxy). */
+function socketBase(): string {
+  const env = process.env.NEXT_PUBLIC_API_URL || '';
+  if (/^https?:\/\//.test(env)) {
+    try { return new URL(env).origin; } catch {}
+  }
+  return typeof window !== 'undefined' ? window.location.origin : '';
+}
+
+const POLL_MS = 5000;
+
 type BroadcastGroup = 'ALL' | 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' | 'ELITE';
 
 const BROADCAST_GROUPS: { value: BroadcastGroup; label: string }[] = [
@@ -684,15 +752,43 @@ const BROADCAST_GROUPS: { value: BroadcastGroup; label: string }[] = [
   { value: 'ELITE', label: 'Elite' },
 ];
 
-function AthletesChatPanel({ userId, isCoach }: { userId: string; isCoach: boolean }) {
+function Avatar({ name, size = 40 }: { name: string; size?: number }) {
+  return (
+    <div
+      className="rounded-full flex items-center justify-center shrink-0 text-white text-sm font-bold"
+      style={{ width: size, height: size, backgroundColor: avatarColor(name || '?') }}
+    >
+      {(name || '?').charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
+function AthletesChatPanel({ userId, isCoach, initialAthleteId }: { userId: string; isCoach: boolean; initialAthleteId?: string }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selected, setSelected] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [msgPage, setMsgPage] = useState(1);
+  const [msgTotalPages, setMsgTotalPages] = useState(1);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [error, setError] = useState('');
+  const [starting, setStarting] = useState(false);
+  const [socketOk, setSocketOk] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const socketRef = useRef<any>(null);
+  const selectedRef = useRef<Conversation | null>(null);
+  selectedRef.current = selected;
+
+  // Nova conversa (coach escolhe atleta)
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [athletes, setAthletes] = useState<ChatUser[]>([]);
+  const [athleteSearch, setAthleteSearch] = useState('');
+  const [loadingAthletes, setLoadingAthletes] = useState(false);
+  const [athletesTotal, setAthletesTotal] = useState(0);
+  const [searchResults, setSearchResults] = useState<ChatUser[] | null>(null);
 
   // Broadcast state
   const [broadcastOpen, setBroadcastOpen] = useState(false);
@@ -701,12 +797,97 @@ function AthletesChatPanel({ userId, isCoach }: { userId: string; isCoach: boole
   const [broadcasting, setBroadcasting] = useState(false);
   const [broadcastResult, setBroadcastResult] = useState<{ sent: number } | null>(null);
 
-  useEffect(() => {
-    api.get('/conversations')
-      .then(r => setConversations(r.data || []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  const scrollToBottom = (delay = 50) => setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), delay);
+
+  const loadConversations = useCallback(async () => {
+    try {
+      const r = await api.get('/conversations');
+      const list: Conversation[] = Array.isArray(r.data) ? r.data : Array.isArray(r.data?.data) ? r.data.data : [];
+      setConversations(list);
+      return list;
+    } catch (e) {
+      setError(friendlyError(e, 'Não foi possível carregar as conversas.'));
+      return [];
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { loadConversations(); }, [loadConversations]);
+
+  // ─── Tempo real (socket.io) com fallback de polling a cada 5s ───
+  useEffect(() => {
+    let cancelled = false;
+    let socket: any = null;
+    (async () => {
+      try {
+        const { io } = await import('socket.io-client');
+        if (cancelled) return;
+        const token = localStorage.getItem('rr_access_token') || '';
+        socket = io(`${socketBase()}/chat`, {
+          transports: ['websocket'],
+          auth: { token },
+          reconnectionAttempts: 3,
+          timeout: 5000,
+        });
+        socketRef.current = socket;
+        socket.on('connect', () => {
+          setSocketOk(true);
+          const conv = selectedRef.current;
+          if (conv) socket.emit('conversation:join', { conversationId: conv.id });
+        });
+        socket.on('disconnect', () => setSocketOk(false));
+        socket.on('connect_error', () => setSocketOk(false));
+        socket.on('message:received', (m: Message & { conversationId?: string }) => {
+          const conv = selectedRef.current;
+          if (conv && (!m.conversationId || m.conversationId === conv.id)) {
+            setMessages((prev) => mergeMessages(prev, [m]));
+            scrollToBottom();
+          }
+        });
+        socket.on('conversation:updated', () => { loadConversations(); });
+      } catch {
+        setSocketOk(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      socket?.disconnect();
+      socketRef.current = null;
+    };
+  }, [loadConversations]);
+
+  // Entra na sala da conversa selecionada
+  useEffect(() => {
+    if (selected && socketRef.current?.connected) {
+      socketRef.current.emit('conversation:join', { conversationId: selected.id });
+    }
+  }, [selected]);
+
+  // Polling quando o websocket não está disponível (ex.: dev sem proxy de WS)
+  useEffect(() => {
+    if (socketOk) return;
+    const t = setInterval(async () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      const conv = selectedRef.current;
+      if (conv) {
+        try {
+          const { data } = await api.get(`/conversations/${conv.id}/messages`, { params: { page: 1, limit: 50 } });
+          const page = normalizeMessages(data);
+          setMessages((prev) => {
+            const merged = mergeMessages(prev, page.data);
+            if (merged.length !== prev.length) {
+              scrollToBottom();
+              api.post(`/conversations/${conv.id}/read`).catch(() => {});
+            }
+            return merged;
+          });
+        } catch {}
+      }
+      loadConversations();
+    }, POLL_MS);
+    return () => clearInterval(t);
+  }, [socketOk, loadConversations]);
 
   const handleBroadcast = async () => {
     if (!broadcastMsg.trim() || broadcasting) return;
@@ -719,8 +900,9 @@ function AthletesChatPanel({ userId, isCoach }: { userId: string; isCoach: boole
       });
       setBroadcastResult(data);
       setBroadcastMsg('');
-    } catch {
-      // ignore
+      loadConversations();
+    } catch (e) {
+      setError(friendlyError(e, 'Não foi possível enviar a mensagem para o grupo.'));
     } finally {
       setBroadcasting(false);
     }
@@ -728,16 +910,42 @@ function AthletesChatPanel({ userId, isCoach }: { userId: string; isCoach: boole
 
   const selectConversation = async (conv: Conversation) => {
     setSelected(conv);
+    setMessages([]);
+    setMsgPage(1);
+    setMsgTotalPages(1);
     setLoadingMsgs(true);
+    setError('');
     try {
-      const { data } = await api.get(`/conversations/${conv.id}/messages`);
-      setMessages(data || []);
+      const { data } = await api.get(`/conversations/${conv.id}/messages`, { params: { page: 1, limit: 50 } });
+      const page = normalizeMessages(data);
+      setMessages(page.data);
+      setMsgPage(page.page);
+      setMsgTotalPages(page.totalPages);
       api.post(`/conversations/${conv.id}/read`).catch(() => {});
-    } catch {
+      setConversations((prev) => prev.map((c) => (c.id === conv.id ? { ...c, unreadCount: 0 } : c)));
+    } catch (e) {
       setMessages([]);
+      setError(friendlyError(e, 'Não foi possível carregar as mensagens.'));
     } finally {
       setLoadingMsgs(false);
-      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      scrollToBottom(100);
+    }
+  };
+
+  const loadOlder = async () => {
+    if (!selected || loadingOlder || msgPage >= msgTotalPages) return;
+    setLoadingOlder(true);
+    try {
+      const next = msgPage + 1;
+      const { data } = await api.get(`/conversations/${selected.id}/messages`, { params: { page: next, limit: 50 } });
+      const page = normalizeMessages(data);
+      setMessages((prev) => mergeMessages(prev, page.data));
+      setMsgPage(next);
+      setMsgTotalPages(page.totalPages);
+    } catch (e) {
+      setError(friendlyError(e, 'Não foi possível carregar mensagens anteriores.'));
+    } finally {
+      setLoadingOlder(false);
     }
   };
 
@@ -748,20 +956,96 @@ function AthletesChatPanel({ userId, isCoach }: { userId: string; isCoach: boole
     setSending(true);
     try {
       const { data } = await api.post(`/conversations/${selected.id}/messages`, { content: text });
-      setMessages(prev => [...prev, data]);
-      setConversations(prev =>
-        prev.map(c => c.id === selected.id ? { ...c, lastMessageAt: new Date().toISOString() } : c)
+      setMessages((prev) => mergeMessages(prev, [data]));
+      setConversations((prev) =>
+        prev.map((c) => (c.id === selected.id ? { ...c, lastMessageAt: new Date().toISOString(), lastMessage: data } : c)),
       );
-      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-    } catch {
+      scrollToBottom();
+    } catch (e) {
       setInput(text);
+      setError(friendlyError(e, 'Não foi possível enviar a mensagem.'));
     } finally {
       setSending(false);
     }
   };
 
+  /** Atleta: abre (ou cria) a conversa com o próprio treinador. Coach: com o atleta escolhido. */
+  const startConversation = async (athleteId?: string) => {
+    if (starting) return;
+    setStarting(true);
+    setError('');
+    try {
+      const { data } = await api.post('/conversations', athleteId ? { athleteId } : {});
+      const list = await loadConversations();
+      const conv = list.find((c) => c.id === data?.id) ?? (data as Conversation);
+      setPickerOpen(false);
+      await selectConversation(conv);
+    } catch (e: any) {
+      const msg = e?.response?.data?.message;
+      setError(
+        typeof msg === 'string' && /vinculado/i.test(msg)
+          ? 'Você ainda não tem um treinador vinculado. Assim que sua equipe definir seu treinador, você poderá conversar por aqui.'
+          : friendlyError(e, 'Não foi possível iniciar a conversa.'),
+      );
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const openPicker = async () => {
+    setPickerOpen(true);
+    setAthleteSearch('');
+    setSearchResults(null);
+    if (athletes.length) return;
+    setLoadingAthletes(true);
+    try {
+      // A API limita a 100 por página; acima disso a busca vai para o servidor (?q=)
+      const r = await api.get('/users/athletes', { params: { limit: 100 } });
+      setAthletes(mapAthleteList(r.data));
+      setAthletesTotal(Number(r.data?.total ?? 0));
+    } catch (e) {
+      setError(friendlyError(e, 'Não foi possível carregar seus atletas.'));
+    } finally {
+      setLoadingAthletes(false);
+    }
+  };
+
+  // Busca no servidor quando a equipe tem mais atletas do que a primeira página carregada
+  useEffect(() => {
+    const term = athleteSearch.trim();
+    if (!pickerOpen || term.length < 2 || athletesTotal <= athletes.length) { setSearchResults(null); return; }
+    const t = setTimeout(async () => {
+      try {
+        const r = await api.get('/users/athletes', { params: { limit: 50, q: term } });
+        setSearchResults(mapAthleteList(r.data));
+      } catch { setSearchResults(null); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [athleteSearch, pickerOpen, athletesTotal, athletes.length]);
+
+  // Deep link: /dashboard/chat?athleteId=<id do usuário> abre/cria a conversa direto (a cada novo id)
+  const router = useRouter();
+  const deepLinkDone = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialAthleteId) { deepLinkDone.current = null; return; }
+    if (!isCoach || loading || deepLinkDone.current === initialAthleteId) return;
+    deepLinkDone.current = initialAthleteId;
+    startConversation(initialAthleteId).finally(() => {
+      router.replace('/dashboard/chat', { scroll: false });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCoach, initialAthleteId, loading]);
+
+  const searchTerm = athleteSearch.trim().toLowerCase();
+  const filteredAthletes = searchResults ?? athletes.filter((a) =>
+    (a.name || '').toLowerCase().includes(searchTerm) || (a.email || '').toLowerCase().includes(searchTerm),
+  );
+  const myCoachConv = !isCoach ? conversations.find((c) => c.athleteId === userId) : undefined;
+  const selectedOther = selected ? otherParticipant(selected, userId) : null;
+  const selectedOtherLabel = selected ? (selected.coachId === userId ? 'Atleta' : 'Treinador') : '';
+
   return (
-    <div className="flex h-full">
+    <div className="flex h-full relative">
       {/* Broadcast Modal */}
       {broadcastOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
@@ -771,6 +1055,7 @@ function AthletesChatPanel({ userId, isCoach }: { userId: string; isCoach: boole
               <button
                 onClick={() => { setBroadcastOpen(false); setBroadcastResult(null); setBroadcastMsg(''); }}
                 className="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center text-gray-400"
+                aria-label="Fechar"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -780,11 +1065,6 @@ function AthletesChatPanel({ userId, isCoach }: { userId: string; isCoach: boole
 
             {broadcastResult ? (
               <div className="text-center py-4">
-                <div className="w-14 h-14 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-3">
-                  <svg className="w-7 h-7 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
                 <p className="text-sm font-semibold text-gray-900 mb-1">
                   Mensagem enviada para {broadcastResult.sent} atleta{broadcastResult.sent !== 1 ? 's' : ''}
                 </p>
@@ -835,23 +1115,85 @@ function AthletesChatPanel({ userId, isCoach }: { userId: string; isCoach: boole
         </div>
       )}
 
-      {/* Sidebar */}
-      <div className="w-72 shrink-0 border-r border-gray-100 flex flex-col">
-        <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+      {/* Escolher atleta (coach) */}
+      {pickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl border border-gray-100 p-5 w-full sm:max-w-md shadow-xl sm:mx-4 max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-bold text-gray-900">Nova conversa</h2>
+              <button onClick={() => setPickerOpen(false)} className="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center text-gray-400" aria-label="Fechar">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <input
+              value={athleteSearch}
+              onChange={(e) => setAthleteSearch(e.target.value)}
+              placeholder="Buscar atleta..."
+              className="w-full px-3.5 py-2.5 mb-3 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#DC2626]/20"
+            />
+            <div className="flex-1 overflow-y-auto -mx-2">
+              {loadingAthletes ? (
+                <p className="text-sm text-gray-400 text-center py-6">Carregando atletas...</p>
+              ) : filteredAthletes.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-6">Nenhum atleta encontrado</p>
+              ) : (
+                filteredAthletes.map((a) => (
+                  <button
+                    key={a.id}
+                    onClick={() => startConversation(a.id)}
+                    disabled={starting}
+                    className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-gray-50 text-left disabled:opacity-50"
+                  >
+                    <Avatar name={a.name || a.email || '?'} size={36} />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-gray-900 truncate">{a.name || 'Atleta sem nome'}</span>
+                      {a.email && <span className="block text-xs text-gray-400 truncate">{a.email}</span>}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lista de conversas — no celular some quando uma conversa está aberta */}
+      <div className={`${selected ? 'hidden md:flex' : 'flex'} w-full md:w-72 shrink-0 md:border-r border-gray-100 flex-col min-h-0`}>
+        <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-2">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Conversas</p>
-          {isCoach && (
-            <button
-              onClick={() => { setBroadcastOpen(true); setBroadcastResult(null); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition"
-              title="Enviar mensagem para grupo"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
-              </svg>
-              Broadcast
-            </button>
+          {isCoach ? (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={openPicker}
+                className="px-3 py-1.5 rounded-xl bg-[#DC2626] text-white text-xs font-semibold hover:bg-[#B91C1C] transition"
+              >
+                + Nova
+              </button>
+              <button
+                onClick={() => { setBroadcastOpen(true); setBroadcastResult(null); }}
+                className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition"
+                title="Enviar mensagem para grupo"
+              >
+                Broadcast
+              </button>
+            </div>
+          ) : (
+            !myCoachConv && !loading && (
+              <button
+                onClick={() => startConversation()}
+                disabled={starting}
+                className="px-3 py-1.5 rounded-xl bg-[#DC2626] text-white text-xs font-semibold hover:bg-[#B91C1C] transition disabled:opacity-50"
+              >
+                {starting ? 'Abrindo...' : 'Falar com meu treinador'}
+              </button>
+            )
           )}
         </div>
+        {error && !selected && (
+          <p className="mx-4 mt-3 text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{error}</p>
+        )}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
             Array.from({ length: 4 }).map((_, i) => (
@@ -866,60 +1208,81 @@ function AthletesChatPanel({ userId, isCoach }: { userId: string; isCoach: boole
           ) : conversations.length === 0 ? (
             <div className="p-6 text-center">
               <p className="text-sm text-gray-400">Nenhuma conversa ainda</p>
-              <p className="text-xs text-gray-300 mt-1">As conversas aparecem quando atletas enviam mensagens</p>
+              <p className="text-xs text-gray-300 mt-1">
+                {isCoach
+                  ? 'Toque em “+ Nova” para conversar com um atleta.'
+                  : 'Toque em “Falar com meu treinador” para enviar sua primeira mensagem.'}
+              </p>
             </div>
           ) : (
-            conversations.map(conv => (
-              <button
-                key={conv.id}
-                onClick={() => selectConversation(conv)}
-                className={`w-full flex items-center gap-3 p-4 hover:bg-gray-50 transition text-left cursor-pointer ${selected?.id === conv.id ? 'bg-red-50/60' : ''}`}
-              >
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-white text-sm font-bold"
-                  style={{ backgroundColor: avatarColor(conv.athlete.name) }}
+            conversations.map(conv => {
+              const other = otherParticipant(conv, userId);
+              return (
+                <button
+                  key={conv.id}
+                  onClick={() => selectConversation(conv)}
+                  className={`w-full flex items-center gap-3 p-4 hover:bg-gray-50 transition text-left cursor-pointer ${selected?.id === conv.id ? 'bg-red-50/60' : ''}`}
                 >
-                  {conv.athlete.name.charAt(0).toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{conv.athlete.name}</p>
-                  {conv.lastMessageAt && (
-                    <p className="text-xs text-gray-400">{formatTime(conv.lastMessageAt)}</p>
-                  )}
-                </div>
-              </button>
-            ))
+                  <Avatar name={other.name} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{other.name}</p>
+                    <p className="text-xs text-gray-400 truncate">
+                      {conv.lastMessage?.content
+                        ? conv.lastMessage.content
+                        : conv.coachId === userId ? 'Atleta' : 'Treinador'}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    {conv.lastMessageAt && <span className="text-[10px] text-gray-400">{formatTime(conv.lastMessageAt)}</span>}
+                    {!!conv.unreadCount && (
+                      <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#DC2626] text-white text-[10px] font-bold flex items-center justify-center">
+                        {conv.unreadCount}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })
           )}
         </div>
       </div>
 
-      {/* Chat area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {!selected ? (
+      {/* Conversa */}
+      <div className={`${selected ? 'flex' : 'hidden md:flex'} flex-1 flex-col min-w-0 min-h-0`}>
+        {!selected || !selectedOther ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
-            <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mb-4">
-              <svg className="w-8 h-8 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
-              </svg>
-            </div>
             <p className="text-sm font-medium text-gray-500">Selecione uma conversa</p>
           </div>
         ) : (
           <>
-            <div className="flex items-center gap-3 p-4 border-b border-gray-100">
-              <div
-                className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0"
-                style={{ backgroundColor: avatarColor(selected.athlete.name) }}
+            <div className="flex items-center gap-3 p-3 md:p-4 border-b border-gray-100">
+              <button
+                onClick={() => { setSelected(null); setMessages([]); setError(''); }}
+                className="md:hidden w-9 h-9 -ml-1 rounded-lg hover:bg-gray-100 flex items-center justify-center text-gray-500"
+                aria-label="Voltar para as conversas"
               >
-                {selected.athlete.name.charAt(0).toUpperCase()}
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                </svg>
+              </button>
+              <Avatar name={selectedOther.name} size={36} />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-gray-900 truncate">{selectedOther.name}</p>
+                <p className="text-xs text-gray-400">{selectedOtherLabel}</p>
               </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-900">{selected.athlete.name}</p>
-                <p className="text-xs text-gray-400">Atleta</p>
-              </div>
+              {!socketOk && (
+                <span className="text-[10px] text-gray-400" title="Atualizando a cada 5 segundos">atualização automática</span>
+              )}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-3 min-h-0">
+              {msgPage < msgTotalPages && !loadingMsgs && (
+                <div className="flex justify-center">
+                  <button onClick={loadOlder} disabled={loadingOlder} className="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg bg-gray-100">
+                    {loadingOlder ? 'Carregando...' : 'Carregar mensagens anteriores'}
+                  </button>
+                </div>
+              )}
               {loadingMsgs ? (
                 <div className="flex justify-center py-8">
                   <div className="w-6 h-6 border-2 border-[#DC2626]/30 border-t-[#DC2626] rounded-full animate-spin" />
@@ -933,8 +1296,8 @@ function AthletesChatPanel({ userId, isCoach }: { userId: string; isCoach: boole
                   const isMe = msg.senderId === userId;
                   return (
                     <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[70%] px-4 py-2.5 rounded-2xl text-sm ${isMe ? 'bg-[#DC2626] text-white rounded-br-sm' : 'bg-gray-100 text-gray-900 rounded-bl-sm'}`}>
-                        <p className="leading-relaxed">{msg.content}</p>
+                      <div className={`max-w-[85%] md:max-w-[70%] px-4 py-2.5 rounded-2xl text-sm break-words ${isMe ? 'bg-[#DC2626] text-white rounded-br-sm' : 'bg-gray-100 text-gray-900 rounded-bl-sm'}`}>
+                        <p className="leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                         <p className={`text-xs mt-1 ${isMe ? 'text-white/60' : 'text-gray-400'}`}>{formatTime(msg.createdAt)}</p>
                       </div>
                     </div>
@@ -944,20 +1307,25 @@ function AthletesChatPanel({ userId, isCoach }: { userId: string; isCoach: boole
               <div ref={bottomRef} />
             </div>
 
-            <div className="p-4 border-t border-gray-100">
-              <div className="flex items-end gap-3">
+            {error && (
+              <p className="mx-3 mb-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">{error}</p>
+            )}
+            <div className="p-3 md:p-4 border-t border-gray-100 bg-white">
+              <div className="flex items-end gap-2 md:gap-3">
                 <textarea
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
                   placeholder="Escreva uma mensagem..."
                   rows={1}
-                  className="flex-1 px-4 py-3 rounded-xl border border-gray-200 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#DC2626]/20 focus:border-[#DC2626]/40 resize-none"
+                  maxLength={5000}
+                  className="flex-1 min-w-0 px-4 py-3 rounded-xl border border-gray-200 text-base md:text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#DC2626]/20 focus:border-[#DC2626]/40 resize-none"
                 />
                 <button
                   onClick={sendMessage}
                   disabled={!input.trim() || sending}
-                  className="w-10 h-10 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white flex items-center justify-center shrink-0 transition disabled:opacity-40 cursor-pointer"
+                  aria-label="Enviar"
+                  className="w-11 h-11 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white flex items-center justify-center shrink-0 transition disabled:opacity-40 cursor-pointer"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
@@ -977,15 +1345,24 @@ function AthletesChatPanel({ userId, isCoach }: { userId: string; isCoach: boole
 export default function ChatPage() {
   const { user } = useAuthStore();
   const isCoach = user?.role === 'COACH' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
-  const [tab, setTab] = useState<'athletes' | 'brain'>(isCoach ? 'brain' : 'athletes');
+  // ?athleteId=… (link do detalhe do atleta) abre direto a aba Atletas com a conversa.
+  // useSearchParams reage à navegação client-side (window.location ainda não mudou no 1º render).
+  const searchParams = useSearchParams();
+  const initialAthleteId = searchParams?.get('athleteId') || undefined;
+  const [tab, setTab] = useState<'athletes' | 'brain'>(initialAthleteId || !isCoach ? 'athletes' : 'brain');
+  useEffect(() => {
+    if (initialAthleteId) setTab('athletes');
+  }, [initialAthleteId]);
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Chat</h1>
           <p className="text-sm text-gray-400 mt-1">
-            {tab === 'brain' ? 'Assistente IA com contexto completo dos atletas' : 'Mensagens com seus atletas'}
+            {tab === 'brain'
+              ? 'Assistente IA com contexto completo dos atletas'
+              : isCoach ? 'Mensagens com seus atletas' : 'Mensagens com seu treinador'}
           </p>
         </div>
         {isCoach && (
@@ -1006,9 +1383,9 @@ export default function ChatPage() {
         )}
       </div>
 
-      <div className="glass-card overflow-hidden" style={{ height: 'calc(100vh - 220px)', minHeight: 500 }}>
+      <div className="glass-card overflow-hidden" style={{ height: 'calc(100dvh - 200px)', minHeight: 420 }}>
         {tab === 'brain' && isCoach && <CoachBrainPanel />}
-        {tab === 'athletes' && <AthletesChatPanel userId={user?.id ?? ''} isCoach={isCoach} />}
+        {tab === 'athletes' && <AthletesChatPanel userId={user?.id ?? ''} isCoach={isCoach} initialAthleteId={initialAthleteId} />}
       </div>
     </div>
   );

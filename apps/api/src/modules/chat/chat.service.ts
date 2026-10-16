@@ -1,16 +1,19 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { AthleteLevel, NotificationType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { assertCoachOwnsAthlete, AuthUserLike, isPlatformAdmin } from '../../common/utils/ownership';
 
 @Injectable()
 export class ChatService {
   constructor(private prisma: PrismaService) {}
 
-  async getConversations(userId: string, role: string) {
-    const where = role === 'COACH' ? { coachId: userId } : { athleteId: userId };
-
+  /**
+   * Conversas em que o usuário participa (como treinador OU como atleta — ADMIN/OWNER também podem
+   * ser treinadores). `otherUser` é SEMPRE o outro participante (título da conversa).
+   */
+  async getConversations(userId: string, _role?: string) {
     const conversations = await this.prisma.conversation.findMany({
-      where,
+      where: { OR: [{ coachId: userId }, { athleteId: userId }] },
       include: {
         athlete: { select: { id: true, name: true, avatarUrl: true } },
         coach: { select: { id: true, name: true, avatarUrl: true } },
@@ -31,15 +34,96 @@ export class ChatService {
             readAt: null,
           },
         });
-        return {
-          ...conv,
-          lastMessage: conv.messages[0] || null,
-          otherUser: role === 'COACH' ? conv.athlete : conv.coach,
-          unreadCount,
-        };
+        return this.decorate(conv, userId, unreadCount);
       }),
     );
     return withUnread;
+  }
+
+  /** Acrescenta lastMessage / otherUser / myRole do ponto de vista de `userId`. */
+  decorate(conv: any, userId: string, unreadCount = 0) {
+    const iAmCoach = conv.coachId === userId;
+    return {
+      ...conv,
+      lastMessage: conv.messages?.[0] || null,
+      otherUser: iAmCoach ? conv.athlete : conv.coach,
+      myRole: iAmCoach ? 'COACH' : 'ATHLETE',
+      unreadCount,
+    };
+  }
+
+  /**
+   * Garante que o usuário participa da conversa (ADMIN/SUPER_ADMIN liberados). 404 se não participa.
+   */
+  async assertParticipant(conversationId: string, user: AuthUserLike) {
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { id: true, athleteId: true, coachId: true },
+    });
+    if (!conv) throw new NotFoundException('Conversa não encontrada');
+    if (isPlatformAdmin(user)) return conv;
+    if (conv.athleteId !== user.id && conv.coachId !== user.id) {
+      throw new NotFoundException('Conversa não encontrada');
+    }
+    return conv;
+  }
+
+  /**
+   * Obtém/cria conversa derivando o lado do chamador do JWT:
+   *  - COACH: coachId = ele mesmo; athleteId precisa ser atleta dele.
+   *  - ATHLETE: athleteId = ele mesmo; coachId = seu treinador (se informado, precisa coincidir).
+   *  - ADMIN/SUPER_ADMIN: informa ambos; o atleta precisa estar vinculado a esse coach.
+   */
+  async getOrCreateForUser(
+    user: AuthUserLike,
+    dto: { athleteId?: string; coachId?: string; message?: string },
+  ) {
+    let athleteId: string;
+    let coachId: string;
+
+    if (user.role === 'ATHLETE') {
+      athleteId = user.id;
+      const profile = await this.prisma.athleteProfile.findUnique({
+        where: { userId: user.id },
+        select: { coachId: true },
+      });
+      if (!profile?.coachId) throw new BadRequestException('Você ainda não está vinculado a um treinador');
+      if (dto.coachId && dto.coachId !== profile.coachId) throw new ForbiddenException('Acesso negado');
+      coachId = profile.coachId;
+    } else if (user.role === 'COACH') {
+      if (!dto.athleteId) throw new BadRequestException('athleteId é obrigatório');
+      coachId = user.id;
+      athleteId = dto.athleteId;
+      await assertCoachOwnsAthlete(this.prisma, user, athleteId, { allowSelf: false });
+    } else if (isPlatformAdmin(user)) {
+      if (!dto.athleteId) throw new BadRequestException('athleteId é obrigatório');
+      athleteId = dto.athleteId;
+      const profile = await this.prisma.athleteProfile.findUnique({
+        where: { userId: athleteId },
+        select: { coachId: true },
+      });
+      if (!profile) throw new NotFoundException('Atleta não encontrado');
+      coachId = dto.coachId ?? profile.coachId ?? user.id;
+      if (profile.coachId !== coachId && coachId !== user.id) {
+        throw new BadRequestException('O atleta não está vinculado a este treinador');
+      }
+    } else {
+      throw new ForbiddenException('Acesso negado');
+    }
+
+    const conversation = await this.getOrCreateConversation(athleteId, coachId);
+    if (dto.message && dto.message.trim()) {
+      await this.sendMessage(conversation.id, user.id, dto.message.trim());
+    }
+    const full = await this.prisma.conversation.findUnique({
+      where: { id: conversation.id },
+      include: {
+        athlete: { select: { id: true, name: true, avatarUrl: true } },
+        coach: { select: { id: true, name: true, avatarUrl: true } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
+    });
+    return this.decorate(full ?? conversation, user.id);
   }
 
   async getMessages(conversationId: string, page = 1, limit = 50) {
@@ -92,6 +176,7 @@ export class ChatService {
     });
   }
 
+  /** Interno: NÃO verifica permissão — use getOrCreateForUser a partir de rotas. */
   async getOrCreateConversation(athleteId: string, coachId: string) {
     let conversation = await this.prisma.conversation.findFirst({
       where: { athleteId, coachId },

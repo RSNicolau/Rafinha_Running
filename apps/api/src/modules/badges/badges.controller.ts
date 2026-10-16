@@ -6,13 +6,18 @@ import { BadgesService } from './badges.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { PrismaService } from '../../prisma/prisma.service';
+import { assertCoachOwnsAthlete } from '../../common/utils/ownership';
 
 @ApiTags('Badges')
 @ApiBearerAuth()
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('badges')
 export class BadgesController {
-  constructor(private badgesService: BadgesService) {}
+  constructor(
+    private badgesService: BadgesService,
+    private prisma: PrismaService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Listar todos os badges com status do atleta logado' })
@@ -29,7 +34,8 @@ export class BadgesController {
   @Get('athlete/:athleteId')
   @Roles(UserRole.COACH)
   @ApiOperation({ summary: 'Badges de um atleta específico (coach)' })
-  async getAthleteBadges(@Param('athleteId') athleteId: string) {
+  async getAthleteBadges(@Param('athleteId') athleteId: string, @CurrentUser() user: any) {
+    await assertCoachOwnsAthlete(this.prisma, user, athleteId);
     return this.badgesService.getAthleteBadges(athleteId);
   }
 
@@ -43,14 +49,15 @@ export class BadgesController {
   @Post('check/:athleteId')
   @Roles(UserRole.COACH)
   @ApiOperation({ summary: 'Verificar e conceder badges de um atleta (coach)' })
-  async checkAthleteBadges(@Param('athleteId') athleteId: string) {
+  async checkAthleteBadges(@Param('athleteId') athleteId: string, @CurrentUser() user: any) {
+    await assertCoachOwnsAthlete(this.prisma, user, athleteId);
     const awarded = await this.badgesService.checkAndAwardBadges(athleteId);
     return { awarded, count: awarded.length };
   }
 
   @Post('seed')
-  @Roles(UserRole.COACH)
-  @ApiOperation({ summary: 'Inicializar badges padrão (admin/coach)' })
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Inicializar badges padrão (somente SUPER_ADMIN)' })
   async seedBadges() {
     return this.badgesService.seedBadges();
   }

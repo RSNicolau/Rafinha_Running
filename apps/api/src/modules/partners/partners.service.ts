@@ -1,5 +1,9 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthUserLike, canManageCoachContent, coachIdsWhere, managedCoachIds, teamContentCoachIds } from '../../common/utils/ownership';
+
+type ActorArg = string | AuthUserLike;
+const toActor = (a: ActorArg): AuthUserLike => (typeof a === 'string' ? { id: a, role: 'COACH' } : a);
 
 export interface PartnerDto {
   name: string;
@@ -17,37 +21,48 @@ export interface PartnerDto {
 export class PartnersService {
   constructor(private prisma: PrismaService) {}
 
-  // Atleta: parceiros ativos do próprio coach
+  // Atleta: parceiros ativos da equipe (ou do próprio coach, se o atleta não tiver equipe)
   async getForAthlete(athleteId: string) {
     const athleteProfile = await this.prisma.athleteProfile.findUnique({
       where: { userId: athleteId },
     });
-    if (!athleteProfile?.coachId) return [];
+    if (!athleteProfile?.coachId && !athleteProfile?.teamId) return [];
+    const coachIds = athleteProfile.teamId
+      ? await teamContentCoachIds(this.prisma, athleteProfile.teamId)
+      : [athleteProfile.coachId as string];
 
     return this.prisma.partner.findMany({
-      where: { coachId: athleteProfile.coachId, isActive: true },
+      where: { ...coachIdsWhere(coachIds.length ? coachIds : [athleteProfile.coachId ?? '']), isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     });
   }
 
-  // Público: parceiros ativos de um coach por slug ou id (landing/site do evento)
+  // Público: parceiros ativos por slug/id da EQUIPE (todos os treinadores) ou do treinador (landing/site do evento)
   async getPublic(coachSlugOrId: string) {
-    let coachId = coachSlugOrId;
-    const bySlug = await this.prisma.coachProfile.findFirst({
-      where: { slug: coachSlugOrId },
-    });
-    if (bySlug) coachId = bySlug.userId;
-
+    const coachIds = await this.publicCoachIds(coachSlugOrId);
     return this.prisma.partner.findMany({
-      where: { coachId, isActive: true },
+      where: { ...coachIdsWhere(coachIds), isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     });
   }
 
-  // Coach: lista completa (inclui inativos)
-  async getForCoach(coachId: string) {
+  private async publicCoachIds(slugOrId: string): Promise<string[]> {
+    const team = (this.prisma as any).team?.findFirst
+      ? await this.prisma.team.findFirst({ where: { slug: slugOrId, status: 'ACTIVE' }, select: { id: true, ownerId: true } })
+      : null;
+    if (team) {
+      const ids = await teamContentCoachIds(this.prisma, team.id);
+      return ids.length ? ids : [team.ownerId];
+    }
+    const bySlug = await this.prisma.coachProfile.findFirst({ where: { slug: slugOrId } });
+    if (bySlug) return [bySlug.userId];
+    return [slugOrId];
+  }
+
+  // Coach: lista completa (inclui inativos). Gestão da equipe vê os parceiros de todos os treinadores.
+  async getForCoach(actorArg: ActorArg) {
     return this.prisma.partner.findMany({
-      where: { coachId },
+      where: coachIdsWhere(await managedCoachIds(this.prisma, toActor(actorArg))),
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     });
   }
@@ -70,10 +85,10 @@ export class PartnersService {
     });
   }
 
-  async update(id: string, coachId: string, dto: Partial<PartnerDto>) {
+  async update(id: string, actorArg: ActorArg, dto: Partial<PartnerDto>) {
     const partner = await this.prisma.partner.findUnique({ where: { id } });
     if (!partner) throw new NotFoundException('Parceiro não encontrado');
-    if (partner.coachId !== coachId) throw new ForbiddenException('Sem permissão');
+    if (!(await canManageCoachContent(this.prisma, toActor(actorArg), partner.coachId))) throw new ForbiddenException('Sem permissão');
 
     return this.prisma.partner.update({
       where: { id },
@@ -91,10 +106,10 @@ export class PartnersService {
     });
   }
 
-  async remove(id: string, coachId: string) {
+  async remove(id: string, actorArg: ActorArg) {
     const partner = await this.prisma.partner.findUnique({ where: { id } });
     if (!partner) throw new NotFoundException('Parceiro não encontrado');
-    if (partner.coachId !== coachId) throw new ForbiddenException('Sem permissão');
+    if (!(await canManageCoachContent(this.prisma, toActor(actorArg), partner.coachId))) throw new ForbiddenException('Sem permissão');
 
     await this.prisma.partner.delete({ where: { id } });
     return { deleted: true };

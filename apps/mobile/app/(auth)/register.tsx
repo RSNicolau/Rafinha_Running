@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  View, Text, KeyboardAvoidingView, Platform, ScrollView, Pressable, Image,
+  View, Text, KeyboardAvoidingView, Platform, ScrollView, Pressable, Image, Linking,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,6 +11,12 @@ import { GlassInput } from '../../src/components/ui';
 import { useAuthStore } from '../../src/stores/auth.store';
 import { useGoogleAuth } from '../../src/hooks/useGoogleAuth';
 import { ptBR } from '../../src/i18n/pt-BR';
+import { authService } from '../../src/services/auth.service';
+import { api } from '../../src/services/api';
+import { ConsentCheckboxes } from '../../src/components/legal/ConsentCheckboxes';
+import {
+  EMPTY_CONSENT, isConsentComplete, registerConsentPayload, LEGAL_URLS, type ConsentState,
+} from '../../src/components/legal/legal';
 
 export default function RegisterScreen() {
   const [name, setName] = useState('');
@@ -18,9 +24,12 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [consent, setConsent] = useState<ConsentState>(EMPTY_CONSENT);
+  // Cadastro pelo app cria conta de ATLETA → consentimento de saúde obrigatório
+  const consentOk = isConsentComplete(consent, true);
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
-  const { register, googleLogin, isLoading, error, clearError } = useAuthStore();
+  const { googleLogin, isLoading, error, clearError } = useAuthStore();
 
   const handleGoogleSuccess = async (idToken: string) => {
     clearError();
@@ -39,7 +48,8 @@ export default function RegisterScreen() {
     const e: Record<string, string> = {};
     if (!name.trim()) e.name = ptBR.auth.nameRequired;
     if (!email || !/\S+@\S+\.\S+/.test(email)) e.email = ptBR.auth.invalidEmail;
-    if (!password || password.length < 6) e.password = ptBR.auth.passwordMin;
+    if (!password || password.length < 8) e.password = 'A senha deve ter no mínimo 8 caracteres';
+    if (!consentOk) e.consent = 'Marque os itens obrigatórios para criar sua conta';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -47,13 +57,27 @@ export default function RegisterScreen() {
   const handleRegister = async () => {
     clearError();
     if (!validate()) return;
+    useAuthStore.setState({ isLoading: true, error: null });
     try {
-      await register(email, password, name);
+      const response = await authService.register({
+        email: email.trim(),
+        password,
+        name: name.trim(),
+        ...registerConsentPayload(consent.marketing),
+      });
+      // Consentimento específico de dados de saúde (LGPD art. 11, I), registrado em separado.
+      // Se falhar, o modal de consentimento pedirá novamente ao abrir o app.
+      await api.post('/legal/health-data', { granted: consent.health }).catch(() => undefined);
+      useAuthStore.setState({ user: response.user, isAuthenticated: true, isLoading: false });
       const user = useAuthStore.getState().user;
       if (user?.role === 'COACH') router.replace('/(coach)');
       else if (user?.role === 'ADMIN') router.replace('/(admin)');
       else router.replace('/(athlete)');
-    } catch {}
+    } catch (err: any) {
+      const raw = err?.response?.data?.message;
+      const message = (Array.isArray(raw) ? raw.join(' ') : raw) || 'Erro ao criar conta';
+      useAuthStore.setState({ error: message, isLoading: false });
+    }
   };
 
   return (
@@ -190,14 +214,22 @@ export default function RegisterScreen() {
                 />
               }
               onRightIconPress={() => setShowPassword(!showPassword)}
-              containerStyle={{ marginBottom: 24 }}
+              containerStyle={{ marginBottom: 18 }}
             />
+
+            {/* LGPD — consentimentos */}
+            <View style={{ marginBottom: 20 }}>
+              <ConsentCheckboxes value={consent} onChange={setConsent} showHealth />
+              {!!errors.consent && (
+                <Text style={{ fontSize: 12, color: colors.error, marginTop: 6 }}>{errors.consent}</Text>
+              )}
+            </View>
 
             {/* Register button */}
             <Pressable
               onPress={handleRegister}
-              disabled={isLoading}
-              style={{ borderRadius: 14, overflow: 'hidden', opacity: isLoading ? 0.7 : 1, marginBottom: 20 }}
+              disabled={isLoading || !consentOk}
+              style={{ borderRadius: 14, overflow: 'hidden', opacity: isLoading || !consentOk ? 0.5 : 1, marginBottom: 20 }}
             >
               <LinearGradient
                 colors={['#EF4444', '#DC2626', '#B91C1C']}
@@ -250,6 +282,16 @@ export default function RegisterScreen() {
                 Continuar com Google
               </Text>
             </Pressable>
+          </View>
+
+          {/* Links legais */}
+          <View style={{ flexDirection: 'row', marginTop: 16, gap: 14 }}>
+            <Text onPress={() => Linking.openURL(LEGAL_URLS.terms).catch(() => {})} style={{ fontSize: 12, color: colors.textTertiary }}>
+              Termos de Uso
+            </Text>
+            <Text onPress={() => Linking.openURL(LEGAL_URLS.privacy).catch(() => {})} style={{ fontSize: 12, color: colors.textTertiary }}>
+              Política de Privacidade
+            </Text>
           </View>
 
           {/* Login link */}

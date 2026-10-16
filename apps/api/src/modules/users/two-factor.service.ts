@@ -1,26 +1,12 @@
-import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import * as crypto from 'crypto';
+import { encryptTotpSecret, decryptTotpSecret } from '../coach-brain/byok-crypto';
 import { authenticator } from 'otplib';
 import * as QRCode from 'qrcode';
 
-const ENCRYPTION_KEY = process.env.API_KEY_ENCRYPTION_SECRET || 'fallback-32-char-key-for-dev-only';
-
-function encryptSecret(text: string): string {
-  const key = crypto.scryptSync(ENCRYPTION_KEY, 'totp-salt', 32);
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-  const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
-  return `${iv.toString('hex')}:${encrypted.toString('hex')}`;
-}
-
-function decryptSecret(ciphertext: string): string {
-  const [ivHex, encHex] = ciphertext.split(':');
-  const key = crypto.scryptSync(ENCRYPTION_KEY, 'totp-salt', 32);
-  const decipher = crypto.createDecipheriv('aes-256-cbc', key, Buffer.from(ivHex, 'hex'));
-  const decrypted = Buffer.concat([decipher.update(Buffer.from(encHex, 'hex')), decipher.final()]);
-  return decrypted.toString('utf8');
-}
+// Sem chave de fallback — lança se API_KEY_ENCRYPTION_SECRET não estiver configurada.
+const encryptSecret = encryptTotpSecret;
+const decryptSecret = decryptTotpSecret;
 
 @Injectable()
 export class TwoFactorService {
@@ -28,6 +14,9 @@ export class TwoFactorService {
 
   /** Step 1: Generate secret + QR code (does NOT enable 2FA yet) */
   async generateSetup(userId: string, userEmail: string) {
+    const current = await (this.prisma.user as any).findUnique({ where: { id: userId }, select: { totpEnabled: true } });
+    // Não sobrescreve o segredo de um 2FA já ativo (quebraria o login do usuário)
+    if (current?.totpEnabled) throw new BadRequestException('O 2FA já está ativado. Desative-o antes de configurar novamente.');
     const secret = authenticator.generateSecret(32);
     const otpAuthUrl = authenticator.keyuri(userEmail, 'RR Rafinha Running', secret);
     const qrCodeDataUrl = await QRCode.toDataURL(otpAuthUrl);
@@ -49,14 +38,15 @@ export class TwoFactorService {
     });
 
     if (!user?.totpSecret) {
-      throw new BadRequestException('Configure o 2FA antes de ativar. Chame POST /users/me/2fa/setup primeiro.');
+      throw new BadRequestException('Gere o QR Code do 2FA antes de ativar.');
     }
 
     const secret = decryptSecret(user.totpSecret);
     const isValid = authenticator.verify({ token, secret });
 
     if (!isValid) {
-      throw new UnauthorizedException('Código TOTP inválido');
+      // 400 (e não 401): um código errado não pode encerrar a sessão do usuário no front
+      throw new BadRequestException('Código inválido. Confira o código de 6 dígitos no seu app autenticador.');
     }
 
     await (this.prisma.user as any).update({
@@ -82,7 +72,8 @@ export class TwoFactorService {
     const isValid = authenticator.verify({ token, secret });
 
     if (!isValid) {
-      throw new UnauthorizedException('Código TOTP inválido');
+      // 400 (e não 401): um código errado não pode encerrar a sessão do usuário no front
+      throw new BadRequestException('Código inválido. Confira o código de 6 dígitos no seu app autenticador.');
     }
 
     await (this.prisma.user as any).update({

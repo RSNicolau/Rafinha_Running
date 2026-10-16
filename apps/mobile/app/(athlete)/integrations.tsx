@@ -4,6 +4,8 @@ import {
   Alert, Linking, ActivityIndicator, Platform,
 } from 'react-native';
 import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+import * as ExpoLinking from 'expo-linking';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../src/theme';
 import { GlassCard, GlassButton, GlassBadge } from '../../src/components/ui';
@@ -15,9 +17,23 @@ import {
   syncHealthKitToAPI,
 } from '../../src/services/apple-health.service';
 
+interface ProviderInfo {
+  provider: string;
+  available: boolean;
+  primary?: boolean;
+  platforms: Array<'web' | 'ios' | 'android'>;
+  reason?: string;
+}
+
+/** Deep link para onde a API devolve o OAuth do app (app.json → "scheme"). */
+const OAUTH_RETURN_URL = 'rrrafinha://integrations/complete';
+
+const VIA_STRAVA_COPY =
+  'Use Garmin, Coros, Polar, Apple Watch? Conecte seu relógio à Strava e ele sincroniza aqui automaticamente.';
+
 interface Integration {
   id: string;
-  provider: 'GARMIN' | 'STRAVA' | 'APPLE_HEALTH' | 'COROS' | 'POLAR';
+  provider: 'GARMIN' | 'STRAVA' | 'APPLE_HEALTH' | 'COROS' | 'POLAR' | 'GOOGLE_FIT';
   isActive: boolean;
   lastSyncAt: string | null;
   createdAt: string;
@@ -25,19 +41,19 @@ interface Integration {
 
 const PROVIDERS = [
   {
+    key: 'STRAVA' as const,
+    name: 'Strava',
+    icon: 'bicycle-outline' as const,
+    color: '#FC4C02',
+    description: `Recomendado. ${VIA_STRAVA_COPY}`,
+    isOAuth: true,
+  },
+  {
     key: 'GARMIN' as const,
     name: 'Garmin',
     icon: 'watch-outline' as const,
     color: '#007CC3',
     description: 'Sincronize treinos e atividades com seu relógio Garmin. Receba planilhas direto no relógio.',
-    isOAuth: true,
-  },
-  {
-    key: 'STRAVA' as const,
-    name: 'Strava',
-    icon: 'bicycle-outline' as const,
-    color: '#FC4C02',
-    description: 'Importe corridas do Strava automaticamente via webhook.',
     isOAuth: true,
   },
   {
@@ -74,11 +90,19 @@ export default function IntegrationsScreen() {
   const [connecting, setConnecting] = useState<string | null>(null);
   const [appleHealthGranted, setAppleHealthGranted] = useState(false);
   const [appleHealthSyncing, setAppleHealthSyncing] = useState(false);
+  const [providerInfo, setProviderInfo] = useState<ProviderInfo[] | null>(null);
 
   const fetchIntegrations = useCallback(async () => {
     try {
-      const res = await api.get('/integrations');
+      const [res, prov] = await Promise.all([
+        api.get('/integrations'),
+        api.get<ProviderInfo[]>('/integrations/providers').catch(() => null),
+      ]);
       setIntegrations(res.data);
+      // Sem a lista, oferece só a Strava (ponte oficial de relógios)
+      setProviderInfo(Array.isArray(prov?.data)
+        ? prov!.data
+        : [{ provider: 'STRAVA', available: true, primary: true, platforms: ['ios', 'android'] }]);
     } catch {
       // silently fail — user may be offline
     } finally {
@@ -99,21 +123,35 @@ export default function IntegrationsScreen() {
   const handleOAuthConnect = async (provider: string) => {
     setConnecting(provider);
     try {
-      const res = await api.post(`/integrations/${provider}/connect`);
-      if (res.data?.url) {
-        await Linking.openURL(res.data.url);
-        // After returning from browser, refresh the list
-        setTimeout(fetchIntegrations, 2000);
+      // client=mobile: a API devolve code+state para o app por deep link e só conclui
+      // quando ESTE usuário autenticado confirma (POST /complete) — anti login-CSRF.
+      const res = await api.post(`/integrations/${provider}/connect?client=mobile`);
+      const url: string | undefined = res.data?.url;
+      if (!url) return;
+
+      const result = await WebBrowser.openAuthSessionAsync(url, OAUTH_RETURN_URL);
+      if (result.type !== 'success' || !result.url) return; // usuário fechou o navegador
+
+      // expo-linking em vez de URL.searchParams (polyfill incompleto no React Native)
+      const q = ExpoLinking.parse(result.url).queryParams || {};
+      const param = (k: string) => (typeof q[k] === 'string' ? (q[k] as string) : null);
+      const error = param('error');
+      const code = param('code');
+      const state = param('state');
+      if (error || !code || !state) {
+        Alert.alert('Conexão cancelada', `Não foi possível conectar ${getProviderName(provider)}. Tente novamente.`);
+        return;
       }
+      const scope = param('scope');
+      await api.post(`/integrations/${provider}/complete`, { code, state, ...(scope ? { scope } : {}) });
+      Alert.alert('Conectado!', `${getProviderName(provider)} conectado. Suas corridas recentes estão sendo importadas.`);
+      fetchIntegrations();
     } catch (error: any) {
       const msg = error?.response?.data?.message || 'Falha ao conectar';
-      if (msg.includes('não configurada') || msg.includes('client_id')) {
-        Alert.alert(
-          'Integração Indisponível',
-          `A integração com ${getProviderName(provider)} ainda não foi configurada. Entre em contato com o suporte.`,
-        );
+      if (typeof msg === 'string' && (msg.includes('não configurad') || msg.includes('indisponível'))) {
+        Alert.alert('Integração Indisponível', VIA_STRAVA_COPY);
       } else {
-        Alert.alert('Erro', msg);
+        Alert.alert('Erro', Array.isArray(msg) ? msg.join('\n') : msg);
       }
     } finally {
       setConnecting(null);
@@ -147,10 +185,13 @@ export default function IntegrationsScreen() {
     try {
       const res = await api.post('/integrations/sync');
       const total = res.data?.synced?.reduce((acc: number, s: any) => acc + (s.synced || 0), 0) || 0;
-      Alert.alert('Sincronização', `${total} atividade(s) sincronizada(s)!`);
+      const rateLimited = res.data?.synced?.some((s: any) => s.error === 'rate_limited');
+      Alert.alert('Sincronização', rateLimited
+        ? 'A Strava pediu uma pausa. Tente novamente em alguns minutos.'
+        : `${total} atividade(s) nova(s) vinculada(s) aos treinos.`);
       fetchIntegrations();
-    } catch {
-      Alert.alert('Erro', 'Falha ao sincronizar');
+    } catch (error: any) {
+      Alert.alert('Erro', error?.response?.data?.message || 'Falha ao sincronizar');
     } finally {
       setSyncing(false);
     }
@@ -216,6 +257,15 @@ export default function IntegrationsScreen() {
     return `${Math.floor(diffHours / 24)} dia(s) atrás`;
   };
 
+  /** Mostra só o que o backend habilita para esta plataforma (conexões existentes ficam visíveis). */
+  const visibleProviders = PROVIDERS.filter((p) => {
+    if (p.key === 'APPLE_HEALTH') return Platform.OS === 'ios' && isHealthKitAvailable();
+    if (getConnectedIntegration(p.key)) return true;
+    const info = providerInfo?.find((x) => x.provider === p.key);
+    const platform = Platform.OS === 'ios' ? 'ios' : 'android';
+    return !!info && info.available && info.platforms.includes(platform);
+  });
+
   if (loading) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
@@ -249,7 +299,15 @@ export default function IntegrationsScreen() {
         contentContainerStyle={{ padding: 16, paddingBottom: 48 }}
         showsVerticalScrollIndicator={false}
       >
-        {PROVIDERS.map((provider) => {
+        {/* Strava é a ponte oficial para qualquer relógio */}
+        <GlassCard intensity="subtle" shadow="sm" style={{ marginBottom: 16 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Ionicons name="watch-outline" size={22} color="#FC4C02" />
+            <Text style={{ fontSize: 14, color: colors.textSecondary, flex: 1 }}>{VIA_STRAVA_COPY}</Text>
+          </View>
+        </GlassCard>
+
+        {visibleProviders.map((provider) => {
           const isAppleHealth = provider.key === 'APPLE_HEALTH';
           const connected = isAppleHealth
             ? appleHealthGranted
@@ -369,7 +427,7 @@ export default function IntegrationsScreen() {
 
           {[
             { icon: 'sync-outline' as const, text: 'Sincronização automática de treinos e atividades' },
-            { icon: 'watch-outline' as const, text: 'Treinos enviados direto para seu relógio Garmin' },
+            { icon: 'watch-outline' as const, text: 'Garmin, COROS, Polar e Apple Watch via Strava' },
             { icon: 'analytics-outline' as const, text: 'Métricas detalhadas: pace, FC, elevação e mais' },
             { icon: 'heart-outline' as const, text: 'Dados de saúde do Apple Watch sincronizados automaticamente' },
           ].map((item, idx) => (

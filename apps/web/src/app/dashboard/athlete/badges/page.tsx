@@ -65,21 +65,36 @@ export default function BadgesPage() {
 
   const fetchBadges = () => {
     api.get('/badges')
-      .then(({ data }) => setBadges(data))
+      .then(({ data }) => setBadges(Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : []))
       .catch(() => {})
       .finally(() => setLoading(false));
   };
 
+  // Verifica novas conquistas automaticamente ao abrir a página (no máx. 1x a cada 5 min)
   useEffect(() => {
-    fetchBadges();
+    let cancelled = false;
+    const KEY = 'rr_badges_checked_at';
+    let recent = false;
+    try { recent = Date.now() - Number(sessionStorage.getItem(KEY) || 0) < 5 * 60 * 1000; } catch {}
+    if (recent) {
+      fetchBadges();
+      return;
+    }
+    try { sessionStorage.setItem(KEY, String(Date.now())); } catch {}
+    api.post('/badges/check', {})
+      .then(({ data }) => { if (!cancelled && Array.isArray(data?.awarded)) setNewlyAwarded(data.awarded); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) fetchBadges(); });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCheck = async () => {
     setChecking(true);
     try {
-      const { data } = await api.post('/badges/check');
-      setNewlyAwarded(data.awarded);
-      if (data.awarded.length > 0) fetchBadges();
+      const { data } = await api.post('/badges/check', {});
+      setNewlyAwarded(Array.isArray(data?.awarded) ? data.awarded : []);
+      if (data?.awarded?.length > 0) fetchBadges();
     } catch {}
     finally { setChecking(false); }
   };

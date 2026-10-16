@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsArray, ValidateNested, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsArray, ValidateNested, IsEnum, MaxLength, ArrayMaxSize } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class MessageHistoryItem {
@@ -6,11 +6,13 @@ export class MessageHistoryItem {
   role: 'user' | 'assistant';
 
   @IsString()
+  @MaxLength(20000)
   content: string;
 }
 
 export class ChatMessageDto {
   @IsString()
+  @MaxLength(10000)
   message: string;
 
   @IsOptional()
@@ -19,6 +21,7 @@ export class ChatMessageDto {
 
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => MessageHistoryItem)
   history?: MessageHistoryItem[];

@@ -1,6 +1,7 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { randomBytes } from 'crypto';
+import { settleCreditReservations } from './referral-credit';
 
 const REFERRER_REWARD_CENTS = 5000; // R$50
 const REFEREE_REWARD_CENTS = 3000;  // R$30
@@ -39,7 +40,7 @@ export class ReferralsService {
         break;
       }
     }
-    if (!code) throw new Error('Falha ao gerar código de indicação único');
+    if (!code) throw new ServiceUnavailableException('Não foi possível gerar seu código de indicação agora. Tente novamente.');
 
     await this.prisma.user.update({
       where: { id: userId },
@@ -53,6 +54,8 @@ export class ReferralsService {
    */
   async getMyStats(userId: string) {
     const code = await this.ensureReferralCode(userId);
+    // devolve ao saldo o crédito preso em cobranças que falharam/expiraram antes de exibir
+    const pendingCredit = await settleCreditReservations(this.prisma, userId).catch(() => []);
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { referralCreditCents: true, name: true },
@@ -79,6 +82,8 @@ export class ReferralsService {
       referrerRewardCents: REFERRER_REWARD_CENTS,
       refereeRewardCents: REFEREE_REWARD_CENTS,
       currentCreditCents: user?.referralCreditCents ?? 0,
+      /** Crédito reservado em cobranças aguardando pagamento (volta ao saldo se não forem pagas). */
+      reservedCreditCents: pendingCredit.reduce((sum, r) => sum + r.cents, 0),
       totalEarnedCents,
       stats: {
         total: referrals.length,
@@ -158,30 +163,73 @@ export class ReferralsService {
   }
 
   /**
-   * Called when a referee makes their FIRST payment (subscription becomes ACTIVE).
-   * Marks referral as PAID and credits both users.
+   * Chamado no 1º pagamento confirmado do indicado (mensalidade ACTIVE — CheckoutService.markPaid,
+   * Mercado Pago legado). Marca a indicação como PAID e credita o indicador (R$50 em referralCreditCents).
+   * O indicado recebe R$30:
+   *  - como DESCONTO na 1ª mensalidade quando o checkout conseguiu aplicá-lo (`refereeDiscountApplied`);
+   *  - senão, como saldo em referralCreditCents (fallback, ex.: plano barato demais para o desconto).
+   * Idempotente e seguro sob concorrência: só a transição PENDING → PAID (updateMany condicional) credita.
+   * Aceita `tx` para rodar na MESMA transação do pagamento.
    */
-  async creditOnFirstPayment(refereeId: string) {
-    const referral = await this.prisma.referral.findUnique({
-      where: { refereeId },
-    });
-    if (!referral || referral.status !== 'PENDING') return null;
-
-    const updated = await this.prisma.$transaction([
-      this.prisma.referral.update({
-        where: { id: referral.id },
-        data: { status: 'PAID', paidAt: new Date() },
-      }),
-      this.prisma.user.update({
+  async creditOnFirstPayment(
+    refereeId: string,
+    opts: { tx?: any; refereeDiscountApplied?: boolean } = {},
+  ) {
+    if (!refereeId) return null;
+    const run = async (tx: any) => {
+      const referral = await tx.referral.findUnique({ where: { refereeId } });
+      if (!referral || referral.status !== 'PENDING') return null;
+      const now = new Date();
+      const upd = await tx.referral.updateMany({
+        where: { id: referral.id, status: 'PENDING' },
+        data: { status: 'PAID', paidAt: now },
+      });
+      if (upd.count !== 1) return null; // outro processo já creditou
+      await tx.user.update({
         where: { id: referral.referrerId },
         data: { referralCreditCents: { increment: referral.rewardCents } },
-      }),
-      this.prisma.user.update({
-        where: { id: refereeId },
-        data: { referralCreditCents: { increment: referral.refereeRewardCents } },
-      }),
-    ]);
-    this.logger.log(`Referral ${referral.id} PAID — referrer +${referral.rewardCents} cents, referee +${referral.refereeRewardCents} cents`);
-    return updated[0];
+      });
+      const refereeCredit = opts.refereeDiscountApplied ? 0 : referral.refereeRewardCents;
+      if (refereeCredit > 0) {
+        await tx.user.update({
+          where: { id: refereeId },
+          data: { referralCreditCents: { increment: refereeCredit } },
+        });
+      }
+      this.logger.log(
+        `Referral ${referral.id} PAID — indicador +${referral.rewardCents} centavos, indicado ` +
+          (opts.refereeDiscountApplied ? `desconto de ${referral.refereeRewardCents} na 1ª cobrança` : `+${refereeCredit} centavos de crédito`),
+      );
+      return { ...referral, status: 'PAID', paidAt: now };
+    };
+    if (opts.tx) return run(opts.tx);
+    return this.prisma.$transaction((tx) => run(tx));
   }
+
+  /**
+   * Desconto do indicado na 1ª mensalidade: indicação PENDING e nenhuma mensalidade paga antes.
+   * Mantém a cobrança ≥ R$5 (mínimo do Asaas). Retorna 0 quando não se aplica.
+   */
+  async firstMembershipDiscountCents(refereeId: string, priceInCents: number): Promise<number> {
+    return firstMembershipDiscountCents(this.prisma, refereeId, priceInCents);
+  }
+}
+
+/** Valor mínimo de uma cobrança no Asaas (centavos). */
+export const MIN_CHARGE_CENTS = 500;
+
+/** Versão sem DI (usada também pela MembershipsService). */
+export async function firstMembershipDiscountCents(prisma: any, refereeId: string, priceInCents: number): Promise<number> {
+  if (!refereeId || !(priceInCents > 0) || !prisma?.referral?.findUnique) return 0;
+  const referral = await prisma.referral.findUnique({
+    where: { refereeId },
+    select: { status: true, refereeRewardCents: true },
+  });
+  if (!referral || referral.status !== 'PENDING') return 0;
+  const paidBefore = await prisma.payment.count({
+    where: { userId: refereeId, purpose: 'MEMBERSHIP', status: { in: ['SUCCEEDED', 'REFUNDED'] } },
+  });
+  if (paidBefore > 0) return 0;
+  const discount = Math.min(referral.refereeRewardCents ?? REFEREE_REWARD_CENTS, priceInCents - MIN_CHARGE_CENTS);
+  return discount > 0 ? discount : 0;
 }

@@ -62,7 +62,7 @@ export default function ProfileScreen() {
             text: 'Câmera / Fotos',
             onPress: async () => {
               const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.All,
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
                 allowsEditing: false,
                 quality: 0.8,
               });
@@ -85,7 +85,11 @@ export default function ProfileScreen() {
           {
             text: 'Arquivo',
             onPress: async () => {
-              const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+              // Servidor aceita somente PDF e imagens (JPG/PNG/WEBP), até 15MB
+              const result = await DocumentPicker.getDocumentAsync({
+                type: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
+                copyToCacheDirectory: true,
+              });
               if (!result.canceled && result.assets[0]) {
                 const asset = result.assets[0];
                 const formData = new FormData();
@@ -117,7 +121,7 @@ export default function ProfileScreen() {
       title: 'TREINAMENTO',
       items: [
         { icon: 'document-text-outline' as const, label: 'Planilha de Treino', route: '/(athlete)/training-upload', color: colors.primary, desc: 'Upload e visualização' },
-        { icon: 'fitness-outline' as const, label: ptBR.integrations.title, route: '/(athlete)/integrations', color: '#007CC3', desc: 'Garmin, Strava' },
+        { icon: 'fitness-outline' as const, label: ptBR.integrations.title, route: '/(athlete)/integrations', color: '#007CC3', desc: 'Strava' },
       ],
     },
     {

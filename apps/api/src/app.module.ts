@@ -42,6 +42,9 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 import { TestimonialsModule } from './modules/testimonials/testimonials.module';
 import { ReferralsModule } from './modules/referrals/referrals.module';
 import { PartnersModule } from './modules/partners/partners.module';
+import { LegalModule } from './modules/legal/legal.module';
+import { TeamsModule } from './modules/teams/teams.module';
+import { MembershipsModule } from './modules/memberships/memberships.module';
 
 @Module({
   imports: [
@@ -64,6 +67,7 @@ import { PartnersModule } from './modules/partners/partners.module';
       skipIf: () => process.env.THROTTLE_DISABLED === 'true',
     }),
     PrismaModule,
+    LegalModule,
     CacheModule,
     AuthModule,
     UsersModule,
@@ -102,6 +106,8 @@ import { PartnersModule } from './modules/partners/partners.module';
     TestimonialsModule,
     ReferralsModule,
     PartnersModule,
+    TeamsModule,
+    MembershipsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: CustomThrottlerGuard },

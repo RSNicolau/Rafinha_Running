@@ -32,6 +32,28 @@ function formatBRL(cents: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100);
 }
 
+/**
+ * O link vem da API com domínio fixo; aqui ele é refeito com a origem atual do app
+ * (produção, homologação ou local) e com a equipe do atleta, quando conhecida.
+ */
+function localShareLink(data: { code?: string; shareLink: string }): string {
+  if (typeof window === 'undefined') return data.shareLink;
+  try {
+    const original = new URL(data.shareLink);
+    let path = original.pathname;
+    try {
+      const slug = JSON.parse(localStorage.getItem('rr_user') || 'null')?.team?.slug;
+      if (slug && /^[a-z0-9-]+$/i.test(slug)) path = `/onboarding/${slug}`;
+    } catch {}
+    const url = new URL(path, window.location.origin);
+    url.search = original.search;
+    if (data.code) url.searchParams.set('ref', data.code);
+    return url.toString();
+  } catch {
+    return data.shareLink;
+  }
+}
+
 export default function ReferralsPage() {
   const [data, setData] = useState<ReferralData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -39,7 +61,7 @@ export default function ReferralsPage() {
 
   useEffect(() => {
     api.get('/referrals/me')
-      .then(({ data }) => setData(data))
+      .then(({ data }) => setData(data ? { ...data, shareLink: localShareLink(data) } : null))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
   }, []);

@@ -8,6 +8,7 @@
  */
 
 import request from 'supertest';
+import { CONSENT, linkAthleteToCoach } from './helpers';
 
 const BASE = process.env.TEST_API_URL || 'http://localhost:3000';
 
@@ -21,7 +22,7 @@ describe('Auth E2E — /api/v1/auth', () => {
     it('should create a new athlete account', async () => {
       const res = await request(BASE)
         .post('/api/v1/auth/register')
-        .send({ email: testEmail, password: 'Test12345!', name: 'E2E User' })
+        .send({ ...CONSENT, email: testEmail, password: 'Test12345!', name: 'E2E User' })
         .expect(201);
 
       expect(res.body).toHaveProperty('accessToken');
@@ -35,7 +36,7 @@ describe('Auth E2E — /api/v1/auth', () => {
     it('should return 409 for duplicate email', async () => {
       await request(BASE)
         .post('/api/v1/auth/register')
-        .send({ email: testEmail, password: 'Test12345!', name: 'Duplicate' })
+        .send({ ...CONSENT, email: testEmail, password: 'Test12345!', name: 'Duplicate' })
         .expect(409);
     });
 

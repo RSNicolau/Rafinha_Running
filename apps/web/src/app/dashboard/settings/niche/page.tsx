@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { formatBRLFromCents } from '@/lib/coach-format';
 import { api } from '@/lib/api';
 import ZoneTable from './ZoneTable';
 
@@ -193,7 +194,7 @@ export default function NicheSettingsPage() {
                           color: isSelected ? niche.color : '#6B7280',
                         }}
                       >
-                        R${niche.monthlyPrice}/mês
+                        {formatBRLFromCents(niche.monthlyPrice)}/mês
                       </span>
                     </div>
                   </button>

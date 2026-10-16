@@ -1,33 +1,81 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/stores/auth.store';
-import { api } from '@/lib/api';
+import { api, friendlyError } from '@/lib/api';
+import { passwordPolicyError, PASSWORD_POLICY_HINT } from '@/lib/password-policy';
+import { registerConsentPayload } from '@/lib/legal';
+import { sanitizeReturnTo } from '@/lib/return-to';
+import { ConsentCheckboxes, EMPTY_CONSENT, isConsentComplete, type ConsentState } from '@/components/legal/ConsentCheckboxes';
+import { LegalFooterLinks } from '@/components/legal/LegalFooterLinks';
+import { CookieNotice } from '@/components/legal/CookieNotice';
 
 export default function AthleteRegisterPage() {
   const router = useRouter();
-  const { loadUser, isAuthenticated } = useAuthStore();
+  const { loadUser, isAuthenticated, setSession } = useAuthStore();
+  // true depois do cadastro: o próprio submit decide o destino (evita corrida com o efeito abaixo)
+  const registeringRef = useRef(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [consent, setConsent] = useState<ConsentState>(EMPTY_CONSENT);
+  const consentOk = isConsentComplete(consent, true);
 
   useEffect(() => { loadUser(); }, []);
-  useEffect(() => { if (isAuthenticated) router.replace('/athlete'); }, [isAuthenticated]);
+  useEffect(() => { if (isAuthenticated && !registeringRef.current) router.replace('/athlete'); }, [isAuthenticated]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    if (!name.trim()) { setError('Informe seu nome completo.'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setError('Informe um e-mail válido.'); return; }
+    const pwdError = passwordPolicyError(password);
+    if (pwdError) { setError(pwdError); return; }
+    if (!consentOk) {
+      setError('Marque os itens obrigatórios para criar sua conta.');
+      return;
+    }
     setLoading(true);
     try {
-      await api.post('/auth/register', { name, email, password, role: 'ATHLETE' });
-      router.replace('/athlete-login?registered=1');
+      const { data } = await api.post('/auth/register', {
+        name: name.trim(),
+        email: email.trim(),
+        password,
+        role: 'ATHLETE',
+        ...registerConsentPayload(consent.marketing),
+      });
+      // Consentimento específico para dados de saúde (LGPD art. 11, I) — registrado em separado.
+      // Se falhar, o modal de consentimento pedirá novamente no primeiro acesso.
+      if (data?.accessToken) {
+        await api
+          .post('/legal/health-data', { granted: consent.health }, { headers: { Authorization: `Bearer ${data.accessToken}` } })
+          .catch(() => undefined);
+      }
+      // Preserva o destino de retorno (ex.: inscrição em evento)
+      let returnTo: string | null = null;
+      try {
+        const qs = new URLSearchParams(window.location.search);
+        returnTo = sanitizeReturnTo(qs.get('redirect')) ?? sanitizeReturnTo(qs.get('next'));
+      } catch {
+        returnTo = null;
+      }
+      if (data?.accessToken && data?.user) {
+        // O cadastro já devolve a sessão: entra direto, sem pedir login de novo
+        registeringRef.current = true;
+        setSession(data);
+        toast.success(`Bem-vindo(a), ${String(data.user.name || name).split(' ')[0]}! Sua conta foi criada.`);
+        router.replace(returnTo ?? '/athlete');
+        return;
+      }
+      router.replace(`/athlete-login?registered=1${returnTo ? `&redirect=${encodeURIComponent(returnTo)}` : ''}`);
     } catch (err: any) {
-      setError(err?.response?.data?.message ?? 'Erro ao criar conta. Tente novamente.');
+      setError(friendlyError(err, 'Erro ao criar conta. Tente novamente.'));
     } finally {
       setLoading(false);
     }
@@ -61,18 +109,20 @@ export default function AthleteRegisterPage() {
           <p className="text-sm text-gray-500 mb-6">Comece a acompanhar seus treinos</p>
 
           {error && (
-            <div className="flex items-center gap-2 p-3.5 rounded-xl bg-red-50 mb-5">
-              <svg className="w-4 h-4 text-red-500 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <div role="alert" aria-live="assertive" className="flex items-center gap-2 p-3.5 rounded-xl bg-red-50 mb-5">
+              <svg aria-hidden="true" className="w-4 h-4 text-red-500 shrink-0" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
               </svg>
               <span className="text-sm font-medium text-red-600">{error}</span>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">Nome completo</label>
+              <label htmlFor="athlete-register-name" className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">Nome completo</label>
               <input
+                id="athlete-register-name"
+                autoComplete="name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -82,8 +132,10 @@ export default function AthleteRegisterPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">E-mail</label>
+              <label htmlFor="athlete-register-email" className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">E-mail</label>
               <input
+                id="athlete-register-email"
+                autoComplete="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -93,19 +145,27 @@ export default function AthleteRegisterPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">Senha</label>
+              <label htmlFor="athlete-register-password" className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">Senha</label>
               <div className="relative">
                 <input
+                  id="athlete-register-password"
+                  autoComplete="new-password"
+                  aria-describedby="athlete-register-password-hint"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Mínimo 6 caracteres"
+                  placeholder="Mínimo 8 caracteres"
                   className="w-full px-4 py-3 rounded-xl bg-gray-50/80 border border-gray-200/60 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400/20 focus:border-gray-400/40 transition pr-12"
                   required
-                  minLength={6}
                 />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                  aria-pressed={showPassword}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <svg aria-hidden="true" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     {showPassword ? (
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
                     ) : (
@@ -117,11 +177,21 @@ export default function AthleteRegisterPage() {
                   </svg>
                 </button>
               </div>
+              <p id="athlete-register-password-hint" className="mt-1 text-[11px] text-gray-400">{PASSWORD_POLICY_HINT}</p>
+            </div>
+
+            <div className="pt-1">
+              <ConsentCheckboxes
+                value={consent}
+                onChange={setConsent}
+                showHealth
+                idPrefix="athlete-register"
+              />
             </div>
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !consentOk}
               className="w-full py-3.5 rounded-xl bg-gray-800 hover:bg-gray-900 text-white text-sm font-medium tracking-wide transition disabled:opacity-50 disabled:cursor-not-allowed mt-2 cursor-pointer"
             >
               {loading ? 'Criando conta...' : 'Criar conta de atleta'}
@@ -135,8 +205,10 @@ export default function AthleteRegisterPage() {
             Entrar →
           </Link>
         </p>
+        <LegalFooterLinks className="mt-4" />
         <p className="text-center text-xs text-gray-400 mt-2">RR — Rafinha Running v1.0.0</p>
       </div>
+      <CookieNotice />
     </div>
   );
 }

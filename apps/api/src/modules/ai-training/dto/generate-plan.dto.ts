@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsInt, IsEnum, Min, Max } from 'class-validator';
+import { IsString, IsOptional, IsInt, IsEnum, Min, Max, IsUUID, IsDateString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum TrainingGoal {
@@ -14,7 +14,7 @@ export enum TrainingGoal {
 
 export class GeneratePlanDto {
   @ApiProperty({ description: 'ID do atleta' })
-  @IsString()
+  @IsUUID('all', { message: 'athleteId inválido' })
   athleteId: string;
 
   @ApiProperty({ description: 'Número de semanas do plano', minimum: 4, maximum: 52 })
@@ -28,12 +28,12 @@ export class GeneratePlanDto {
   goal: TrainingGoal;
 
   @ApiPropertyOptional({ description: 'Data de início (YYYY-MM-DD)' })
-  @IsString()
+  @IsDateString({}, { message: 'Data de início inválida' })
   @IsOptional()
   startDate?: string;
 
   @ApiPropertyOptional({ description: 'ID do plano de treino para preencher com treinos (opcional)' })
-  @IsString()
+  @IsUUID('all', { message: 'planId inválido' })
   @IsOptional()
   planId?: string;
 }

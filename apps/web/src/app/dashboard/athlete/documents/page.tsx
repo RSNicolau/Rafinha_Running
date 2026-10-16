@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { api } from '@/lib/api';
+import { api, friendlyError } from '@/lib/api';
 
 // Categorias
 const CATEGORIES = [
@@ -33,7 +33,31 @@ export default function AthleteDocumentsPage() {
   const [uploadSuccess, setUploadSuccess] = useState(false);
 
   const fetchDocs = () => {
-    api.get('/athlete-documents/my').then(r => setDocs(r.data)).catch(() => {});
+    api.get('/athlete-documents/my')
+      .then(r => setDocs(Array.isArray(r.data) ? r.data : Array.isArray(r.data?.data) ? r.data.data : []))
+      .catch(() => {});
+  };
+
+  const [downloading, setDownloading] = useState<string | null>(null);
+  /** Download autenticado (o arquivo não é público): baixa como blob e abre em nova aba. */
+  const handleDownload = async (doc: AthleteDoc) => {
+    setDownloading(doc.id);
+    const win = window.open('', '_blank');
+    try {
+      const r = await api.get(`/athlete-documents/${doc.id}/download`, { responseType: 'blob' });
+      const url = URL.createObjectURL(r.data);
+      if (win) win.location.href = url;
+      else {
+        const a = document.createElement('a');
+        a.href = url; a.download = doc.fileName; a.click();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      win?.close();
+      alert(friendlyError(e, 'Não foi possível baixar o arquivo.'));
+    } finally {
+      setDownloading(null);
+    }
   };
 
   useEffect(() => { fetchDocs(); }, []);
@@ -56,7 +80,7 @@ export default function AthleteDocumentsPage() {
       fetchDocs();
       setTimeout(() => setUploadSuccess(false), 4000);
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'Erro ao enviar documento');
+      alert(friendlyError(e, 'Não foi possível enviar o documento.'));
     } finally {
       setUploading(false);
     }
@@ -108,14 +132,14 @@ export default function AthleteDocumentsPage() {
               <div>
                 <p className="text-2xl mb-2">📎</p>
                 <p className="text-sm text-gray-600">Clique para selecionar arquivo</p>
-                <p className="text-xs text-gray-400 mt-1">PDF, imagem, Excel — até 20MB</p>
+                <p className="text-xs text-gray-400 mt-1">PDF ou imagem (JPG, PNG, WEBP) — até 15MB</p>
               </div>
             )}
             <input
               id="doc-file-input"
               type="file"
               className="hidden"
-              accept=".pdf,.jpg,.jpeg,.png,.webp,.xlsx,.xls,.csv"
+              accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
               onChange={e => setSelectedFile(e.target.files?.[0] || null)}
             />
           </div>
@@ -161,16 +185,22 @@ export default function AthleteDocumentsPage() {
                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
                       doc.aiStatus === 'DONE' ? 'bg-emerald-100 text-emerald-700' :
                       doc.aiStatus === 'PROCESSING' ? 'bg-blue-100 text-blue-700' :
-                      doc.aiStatus === 'FAILED' ? 'bg-red-100 text-red-600' :
+                      doc.aiStatus === 'FAILED' ? 'bg-gray-100 text-gray-600' :
                       'bg-gray-100 text-gray-500'
                     }`}>
                       {doc.aiStatus === 'DONE' ? 'Analisado' :
                        doc.aiStatus === 'PROCESSING' ? 'Analisando...' :
-                       doc.aiStatus === 'FAILED' ? 'Erro' : 'Aguardando'}
+                       doc.aiStatus === 'FAILED' ? 'Enviado · aguardando o coach' : 'Enviado'}
                     </span>
                   </div>
                   {doc.description && <p className="text-xs text-gray-400 mt-0.5">{doc.description}</p>}
-                  <p className="text-xs text-gray-300 mt-1">{new Date(doc.createdAt).toLocaleDateString('pt-BR')}</p>
+                  <div className="flex items-center gap-3 mt-1">
+                    <p className="text-xs text-gray-300">{new Date(doc.createdAt).toLocaleDateString('pt-BR')}</p>
+                    <button onClick={() => handleDownload(doc)} disabled={downloading === doc.id}
+                      className="text-xs font-semibold text-primary hover:underline disabled:opacity-50 cursor-pointer">
+                      {downloading === doc.id ? 'Abrindo...' : 'Baixar / ver arquivo'}
+                    </button>
+                  </div>
                   {doc.aiAnalysis && (
                     <div className="mt-3 p-3 rounded-xl bg-gradient-to-br from-red-50 to-orange-50 border border-red-100">
                       <p className="text-[10px] font-semibold text-primary uppercase tracking-wider mb-1">Análise do Coach IA</p>

@@ -1,38 +1,65 @@
-import { Controller, Get, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
-import { RankingsService, RankingEntry, RankingPeriod } from './rankings.service';
+import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RankingEntry, RankingPeriod, RankingsService } from './rankings.service';
 
+/**
+ * Rankings exigem login e são sempre escopados à equipe do chamador:
+ *  - atleta → a equipe dele (nomes dos colegas como "Nome I.");
+ *  - treinador/dono → a equipe ativa (header x-team-id ou padrão);
+ *  - ADMIN/SUPER_ADMIN → toda a plataforma ou ?teamId=.
+ */
 @ApiTags('Rankings')
+@ApiBearerAuth()
+@UseGuards(AuthGuard('jwt'))
 @Controller('rankings')
 export class RankingsController {
   constructor(private rankingsService: RankingsService) {}
 
   @Get('km')
-  @ApiOperation({ summary: 'Top atletas por total de km' })
-  @ApiQuery({ name: 'period', required: false, enum: ['week', 'month', 'year', 'all'], description: 'Periodo do ranking' })
-  @ApiQuery({ name: 'limit', required: false, description: 'Quantidade de resultados', example: 20 })
+  @ApiOperation({ summary: 'Top atletas da equipe por km' })
+  @ApiQuery({ name: 'period', required: false, enum: ['week', 'month', 'year', 'all'] })
+  @ApiQuery({ name: 'limit', required: false, example: 20 })
+  @ApiQuery({ name: 'teamId', required: false, description: 'Somente ADMIN/SUPER_ADMIN ou membros da equipe' })
   async getTopByKm(
-    @Query('period') period: RankingPeriod = 'all',
+    @CurrentUser() user: any,
+    @Req() req: any,
+    @Query('period') period?: RankingPeriod,
     @Query('limit') limit?: number,
+    @Query('teamId') teamId?: string,
   ): Promise<RankingEntry[]> {
-    return this.rankingsService.getTopByKm(period || 'all', limit || 20);
+    const scope = await this.rankingsService.resolveScope(user, req, teamId);
+    return this.rankingsService.getTopByKm(period || 'all', limit || 20, scope, this.rankingsService.viewerFor(user));
   }
 
   @Get('workouts')
-  @ApiOperation({ summary: 'Top atletas por total de treinos concluidos' })
-  @ApiQuery({ name: 'period', required: false, enum: ['week', 'month', 'year', 'all'], description: 'Periodo do ranking' })
-  @ApiQuery({ name: 'limit', required: false, description: 'Quantidade de resultados', example: 20 })
+  @ApiOperation({ summary: 'Top atletas da equipe por treinos concluídos' })
+  @ApiQuery({ name: 'period', required: false, enum: ['week', 'month', 'year', 'all'] })
+  @ApiQuery({ name: 'limit', required: false, example: 20 })
+  @ApiQuery({ name: 'teamId', required: false })
   async getTopByWorkouts(
-    @Query('period') period: RankingPeriod = 'all',
+    @CurrentUser() user: any,
+    @Req() req: any,
+    @Query('period') period?: RankingPeriod,
     @Query('limit') limit?: number,
+    @Query('teamId') teamId?: string,
   ): Promise<RankingEntry[]> {
-    return this.rankingsService.getTopByWorkouts(period || 'all', limit || 20);
+    const scope = await this.rankingsService.resolveScope(user, req, teamId);
+    return this.rankingsService.getTopByWorkouts(period || 'all', limit || 20, scope, this.rankingsService.viewerFor(user));
   }
 
   @Get('streak')
-  @ApiOperation({ summary: 'Top atletas por sequencia de treinos (dias consecutivos)' })
-  @ApiQuery({ name: 'limit', required: false, description: 'Quantidade de resultados', example: 20 })
-  async getTopByStreak(@Query('limit') limit?: number): Promise<RankingEntry[]> {
-    return this.rankingsService.getTopByStreak(limit || 20);
+  @ApiOperation({ summary: 'Top atletas da equipe por sequência de dias com treino' })
+  @ApiQuery({ name: 'limit', required: false, example: 20 })
+  @ApiQuery({ name: 'teamId', required: false })
+  async getTopByStreak(
+    @CurrentUser() user: any,
+    @Req() req: any,
+    @Query('limit') limit?: number,
+    @Query('teamId') teamId?: string,
+  ): Promise<RankingEntry[]> {
+    const scope = await this.rankingsService.resolveScope(user, req, teamId);
+    return this.rankingsService.getTopByStreak(limit || 20, scope, this.rankingsService.viewerFor(user));
   }
 }

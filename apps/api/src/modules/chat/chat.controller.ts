@@ -1,18 +1,23 @@
-import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, UseGuards, Optional } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { ChatService } from './chat.service';
+import { ChatGateway } from './chat.gateway';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { BroadcastDto, CreateConversationDto, MessagesQueryDto, SendMessageDto } from './dto/chat.dto';
 
 @ApiTags('Chat')
 @ApiBearerAuth()
 @UseGuards(AuthGuard('jwt'))
 @Controller('conversations')
 export class ChatController {
-  constructor(private chatService: ChatService) {}
+  constructor(
+    private chatService: ChatService,
+    @Optional() private chatGateway?: ChatGateway,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Listar conversas' })
@@ -24,49 +29,47 @@ export class ChatController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Obter ou criar conversa entre atleta e coach' })
-  async getOrCreate(
-    @Body('athleteId') athleteId: string,
-    @Body('coachId') coachId: string,
-  ) {
-    return this.chatService.getOrCreateConversation(athleteId, coachId);
+  @ApiOperation({ summary: 'Obter ou criar conversa (o lado do chamador vem do token)' })
+  async getOrCreate(@CurrentUser() user: any, @Body() dto: CreateConversationDto) {
+    return this.chatService.getOrCreateForUser(user, dto);
   }
 
   @Post('broadcast')
   @ApiOperation({ summary: 'Enviar mensagem para grupo de atletas' })
   @UseGuards(RolesGuard)
   @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  async broadcast(
-    @CurrentUser('id') coachId: string,
-    @Body('message') message: string,
-    @Body('targetGroup') targetGroup?: 'ALL' | 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' | 'ELITE',
-  ) {
-    return this.chatService.broadcastMessage(coachId, message, targetGroup ?? 'ALL');
+  async broadcast(@CurrentUser('id') coachId: string, @Body() dto: BroadcastDto) {
+    return this.chatService.broadcastMessage(coachId, dto.message, dto.targetGroup ?? 'ALL');
   }
 
   @Get(':id/messages')
   @ApiOperation({ summary: 'Mensagens da conversa' })
   async getMessages(
     @Param('id') id: string,
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
+    @CurrentUser() user: any,
+    @Query() query: MessagesQueryDto,
   ) {
-    return this.chatService.getMessages(id, page, limit);
+    await this.chatService.assertParticipant(id, user);
+    return this.chatService.getMessages(id, query.page ?? 1, query.limit ?? 50);
   }
 
   @Post(':id/messages')
   @ApiOperation({ summary: 'Enviar mensagem' })
   async sendMessage(
     @Param('id') id: string,
-    @CurrentUser('id') senderId: string,
-    @Body('content') content: string,
+    @CurrentUser() user: any,
+    @Body() dto: SendMessageDto,
   ) {
-    return this.chatService.sendMessage(id, senderId, content);
+    const conv = await this.chatService.assertParticipant(id, user);
+    const message = await this.chatService.sendMessage(id, user.id, dto.content);
+    this.chatGateway?.notifyMessage(conv, message);
+    return message;
   }
 
   @Post(':id/read')
   @ApiOperation({ summary: 'Marcar como lida' })
-  async markAsRead(@Param('id') id: string, @CurrentUser('id') userId: string) {
-    return this.chatService.markAsRead(id, userId);
+  async markAsRead(@Param('id') id: string, @CurrentUser() user: any) {
+    await this.chatService.assertParticipant(id, user);
+    return this.chatService.markAsRead(id, user.id);
   }
 }

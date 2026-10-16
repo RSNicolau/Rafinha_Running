@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
-import { api } from './api';
+import axios from 'axios';
+import { api, API_URL } from './api';
 
 // Web fallback for SecureStore (uses localStorage)
 const storage = {
@@ -36,6 +37,11 @@ export interface RegisterRequest {
   password: string;
   name: string;
   role?: string;
+  // LGPD — obrigatórios na API (RegisterDto); use registerConsentPayload() de components/legal/legal
+  acceptTerms: true;
+  termsVersion: string;
+  privacyVersion: string;
+  marketingOptIn?: boolean;
 }
 
 export interface AuthResponse {
@@ -75,7 +81,18 @@ export const authService = {
     return response.data;
   },
 
-  async logout(): Promise<void> {
+  /**
+   * Encerra a sessão no servidor (POST /auth/logout revoga o refresh token desta sessão) e limpa o
+   * armazenamento local. Melhor esforço: sem rede/erro da API o logout local acontece mesmo assim.
+   * Usa axios "cru" (sem o interceptor de refresh) para não entrar em loop quando chamado após falha de refresh.
+   */
+  async logout(opts: { allDevices?: boolean } = {}): Promise<void> {
+    const refreshToken = await storage.getItem('refreshToken').catch(() => null);
+    if (refreshToken) {
+      await axios
+        .post(`${API_URL}/auth/logout`, { refreshToken, ...(opts.allDevices ? { allDevices: true } : {}) }, { timeout: 5000 })
+        .catch(() => undefined);
+    }
     await storage.deleteItem('accessToken');
     await storage.deleteItem('refreshToken');
     await storage.deleteItem('user');

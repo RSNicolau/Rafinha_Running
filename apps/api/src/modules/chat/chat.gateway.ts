@@ -39,7 +39,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      const payload = this.jwtService.verify(token, { secret: process.env.JWT_SECRET! });
+      const payload: any = this.jwtService.verify(token, { secret: process.env.JWT_SECRET! });
+      if (!payload?.sub || payload.purpose) {
+        client.disconnect();
+        return;
+      }
+      // Mesmas regras do JwtStrategy: usuário ativo e tokenVersion (`tv`) atual
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: { id: true, isActive: true, deletedAt: true, tokenVersion: true },
+      });
+      if (!user || !user.isActive || user.deletedAt || payload.tv !== (user.tokenVersion ?? 0)) {
+        client.disconnect();
+        return;
+      }
       this.connectedUsers.set(client.id, payload.sub);
       client.join(`user:${payload.sub}`);
       this.logger.log(`Usuário ${payload.sub} conectado ao chat`);
@@ -65,7 +78,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!userId) return;
 
     // Validate max message length
-    if (!data.content || data.content.length > 5000) {
+    if (!data || typeof data.content !== 'string' || typeof data.conversationId !== 'string' || !data.content || data.content.length > 5000) {
       return { error: 'Mensagem inválida ou muito longa' };
     }
 
@@ -85,6 +98,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     );
 
     this.server.to(`conversation:${data.conversationId}`).emit('message:received', message);
+    this.server
+      .to(`user:${conv.athleteId}`)
+      .to(`user:${conv.coachId}`)
+      .emit('conversation:updated', { conversationId: conv.id, message });
     return message;
   }
 
@@ -94,7 +111,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { conversationId: string },
   ) {
     const userId = this.connectedUsers.get(client.id);
-    if (!userId) return;
+    if (!userId || typeof data?.conversationId !== 'string') return;
 
     // Verify user is a participant before joining the room
     const conv = await this.prisma.conversation.findFirst({
@@ -114,6 +131,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { conversationId: string },
   ) {
     const userId = this.connectedUsers.get(client.id);
+    if (!userId || !this.inRoom(client, data?.conversationId)) return;
     client.to(`conversation:${data.conversationId}`).emit('typing:start', { userId });
   }
 
@@ -123,6 +141,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { conversationId: string },
   ) {
     const userId = this.connectedUsers.get(client.id);
+    if (!userId || !this.inRoom(client, data?.conversationId)) return;
     client.to(`conversation:${data.conversationId}`).emit('typing:stop', { userId });
   }
 
@@ -132,9 +151,38 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { conversationId: string },
   ) {
     const userId = this.connectedUsers.get(client.id);
-    if (!userId) return;
+    if (!userId || typeof data?.conversationId !== 'string') return;
+
+    // Só marca como lida conversas das quais o usuário participa
+    const conv = await this.prisma.conversation.findFirst({
+      where: { id: data.conversationId, OR: [{ athleteId: userId }, { coachId: userId }] },
+      select: { id: true },
+    });
+    if (!conv) return { error: 'Acesso negado' };
 
     await this.chatService.markAsRead(data.conversationId, userId);
     client.to(`conversation:${data.conversationId}`).emit('message:read', { userId });
+  }
+
+  /**
+   * Notifica em tempo real uma mensagem enviada via REST: sala da conversa + sala pessoal dos
+   * participantes (para quem ainda não abriu a conversa atualizar a lista).
+   */
+  notifyMessage(conversation: { id: string; athleteId: string; coachId: string }, message: any) {
+    if (!this.server) return;
+    try {
+      this.server.to(`conversation:${conversation.id}`).emit('message:received', message);
+      this.server
+        .to(`user:${conversation.athleteId}`)
+        .to(`user:${conversation.coachId}`)
+        .emit('conversation:updated', { conversationId: conversation.id, message });
+    } catch (e) {
+      this.logger.warn(`Falha ao notificar mensagem: ${e}`);
+    }
+  }
+
+  /** Só sockets que entraram na sala (após checagem de participação) podem emitir para ela. */
+  private inRoom(client: Socket, conversationId: unknown): boolean {
+    return typeof conversationId === 'string' && client.rooms.has(`conversation:${conversationId}`);
   }
 }

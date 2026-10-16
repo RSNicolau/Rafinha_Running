@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { api } from '@/lib/api';
+import { api, friendlyError } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
 
 const QUESTION_TYPE_LABELS: Record<string, string> = {
@@ -74,13 +74,14 @@ export default function OnboardingFormEditorPage() {
 
   const handleAddQuestion = async () => {
     if (!newQ.question.trim()) { toast.error('Informe o texto da pergunta'); return; }
+    const opts = newQ.type === 'SELECT' || newQ.type === 'MULTISELECT'
+      ? String(newQ.options ?? '').split('\n').map(o => o.trim()).filter(Boolean)
+      : undefined;
+    if (opts && opts.length < 2) { toast.error('Informe ao menos 2 opções (uma por linha)'); return; }
     setSaving(true);
     try {
-      const opts = newQ.type === 'SELECT' || newQ.type === 'MULTISELECT'
-        ? newQ.options.split('\n').map(o => o.trim()).filter(Boolean)
-        : undefined;
       const { data } = await api.post('/onboarding/form/questions', {
-        question: newQ.question,
+        question: newQ.question.trim(),
         type: newQ.type,
         options: opts,
         required: newQ.required,
@@ -90,8 +91,8 @@ export default function OnboardingFormEditorPage() {
       setNewQ({ ...BLANK_Q });
       setShowAddModal(false);
       toast.success('Pergunta adicionada');
-    } catch {
-      toast.error('Erro ao adicionar pergunta');
+    } catch (e) {
+      toast.error(friendlyError(e, 'Erro ao adicionar pergunta'));
     } finally {
       setSaving(false);
     }
@@ -99,15 +100,17 @@ export default function OnboardingFormEditorPage() {
 
   const handleUpdateQuestion = async () => {
     if (!editingQ) return;
+    if (!editingQ.question.trim()) { toast.error('Informe o texto da pergunta'); return; }
+    const opts = editingQ.type === 'SELECT' || editingQ.type === 'MULTISELECT'
+      ? (typeof editingQ.options === 'string'
+        ? (editingQ.options as unknown as string).split('\n').map(o => o.trim()).filter(Boolean)
+        : (editingQ.options ?? []))
+      : undefined;
+    if (opts && opts.length < 2) { toast.error('Informe ao menos 2 opções (uma por linha)'); return; }
     setSaving(true);
     try {
-      const opts = editingQ.type === 'SELECT' || editingQ.type === 'MULTISELECT'
-        ? (typeof editingQ.options === 'string'
-          ? (editingQ.options as unknown as string).split('\n').map(o => o.trim()).filter(Boolean)
-          : editingQ.options)
-        : undefined;
       const { data } = await api.put(`/onboarding/form/questions/${editingQ.id}`, {
-        question: editingQ.question,
+        question: editingQ.question.trim(),
         type: editingQ.type,
         options: opts,
         required: editingQ.required,
@@ -116,10 +119,47 @@ export default function OnboardingFormEditorPage() {
       setForm(prev => prev ? { ...prev, questions: prev.questions.map(q => q.id === data.id ? data : q) } : prev);
       setEditingQ(null);
       toast.success('Pergunta atualizada');
-    } catch {
-      toast.error('Erro ao atualizar pergunta');
+    } catch (e) {
+      toast.error(friendlyError(e, 'Erro ao atualizar pergunta'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Reordenar: troca a posição com a vizinha e grava a ordem de todas as perguntas ativas
+  const handleMove = async (q: Question, dir: -1 | 1) => {
+    if (!form) return;
+    const list = form.questions.filter(x => x.isActive).sort((a, b) => a.order - b.order);
+    const idx = list.findIndex(x => x.id === q.id);
+    const target = idx + dir;
+    if (idx < 0 || target < 0 || target >= list.length) return;
+    const reordered = [...list];
+    [reordered[idx], reordered[target]] = [reordered[target], reordered[idx]];
+    const orders = reordered.map((x, i) => ({ id: x.id, order: i + 1 }));
+    const prev = form;
+    setForm({ ...form, questions: form.questions.map(x => { const o = orders.find(oo => oo.id === x.id); return o ? { ...x, order: o.order } : x; }) });
+    try {
+      await api.put('/onboarding/form/questions/reorder', { orders });
+    } catch (e) {
+      setForm(prev);
+      toast.error(friendlyError(e, 'Erro ao reordenar'));
+    }
+  };
+
+  const handleDeleteQuestion = async (q: Question) => {
+    if (!window.confirm(`Excluir a pergunta "${q.question}"?`)) return;
+    try {
+      const { data } = await api.delete(`/onboarding/form/questions/${q.id}`);
+      if (data?.removed) {
+        setForm(prev => prev ? { ...prev, questions: prev.questions.filter(x => x.id !== q.id) } : prev);
+        toast.success('Pergunta excluída');
+      } else {
+        // Já respondida por algum atleta: é desativada para preservar o histórico das respostas
+        setForm(prev => prev ? { ...prev, questions: prev.questions.map(x => x.id === q.id ? { ...x, isActive: false } : x) } : prev);
+        toast.success('Pergunta já respondida — foi desativada para preservar as respostas');
+      }
+    } catch (e) {
+      toast.error(friendlyError(e, 'Erro ao excluir pergunta'));
     }
   };
 
@@ -127,8 +167,8 @@ export default function OnboardingFormEditorPage() {
     try {
       await api.put(`/onboarding/form/questions/${q.id}`, { isActive: !q.isActive });
       setForm(prev => prev ? { ...prev, questions: prev.questions.map(qq => qq.id === q.id ? { ...qq, isActive: !q.isActive } : qq) } : prev);
-    } catch {
-      toast.error('Erro ao atualizar pergunta');
+    } catch (e) {
+      toast.error(friendlyError(e, 'Erro ao atualizar pergunta'));
     }
   };
 
@@ -148,7 +188,7 @@ export default function OnboardingFormEditorPage() {
   return (
     <div className="max-w-3xl mx-auto">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-3 mb-6">
         <Link href="/dashboard/settings" className="text-gray-400 hover:text-gray-600 transition cursor-pointer">
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
@@ -169,11 +209,11 @@ export default function OnboardingFormEditorPage() {
       {/* Share link */}
       <div className="glass-card p-4 mb-6 border border-dashed border-primary/30">
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Link do Formulário</p>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <input
             readOnly
             value={formUrl}
-            className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 bg-gray-50 focus:outline-none"
+            className="flex-1 min-w-0 basis-full sm:basis-auto px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 bg-gray-50 focus:outline-none"
           />
           <button
             onClick={copyLink}
@@ -221,7 +261,21 @@ export default function OnboardingFormEditorPage() {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => handleMove(q, -1)}
+                    disabled={idx === 0}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-30 transition cursor-pointer"
+                    title="Mover para cima"
+                    aria-label="Mover para cima"
+                  >↑</button>
+                  <button
+                    onClick={() => handleMove(q, 1)}
+                    disabled={idx === activeQ.length - 1}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-30 transition cursor-pointer"
+                    title="Mover para baixo"
+                    aria-label="Mover para baixo"
+                  >↓</button>
                   <button
                     onClick={() => setEditingQ({ ...q, options: q.options ?? null })}
                     className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition cursor-pointer"
@@ -235,9 +289,20 @@ export default function OnboardingFormEditorPage() {
                     onClick={() => handleToggleQuestion(q)}
                     className="p-1.5 rounded-lg text-gray-400 hover:text-amber-500 hover:bg-amber-50 transition cursor-pointer"
                     title="Desativar"
+                    aria-label="Desativar"
                   >
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => handleDeleteQuestion(q)}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                    title="Excluir"
+                    aria-label="Excluir"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                     </svg>
                   </button>
                 </div>
@@ -255,13 +320,19 @@ export default function OnboardingFormEditorPage() {
           </h2>
           <div className="space-y-2">
             {inactiveQ.map(q => (
-              <div key={q.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 opacity-50 group">
-                <p className="text-sm text-gray-500 flex-1">{q.question}</p>
+              <div key={q.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 group">
+                <p className="text-sm text-gray-400 flex-1">{q.question}</p>
                 <button
                   onClick={() => handleToggleQuestion(q)}
                   className="text-xs text-primary font-medium hover:underline cursor-pointer"
                 >
                   Ativar
+                </button>
+                <button
+                  onClick={() => handleDeleteQuestion(q)}
+                  className="text-xs text-red-500 font-medium hover:underline cursor-pointer"
+                >
+                  Excluir
                 </button>
               </div>
             ))}
@@ -274,7 +345,7 @@ export default function OnboardingFormEditorPage() {
         <QuestionModal
           title="Nova Pergunta"
           q={newQ}
-          setQ={setNewQ as any}
+          setQ={(u: Partial<typeof BLANK_Q>) => setNewQ(prev => ({ ...prev, ...u }))}
           onSave={handleAddQuestion}
           onClose={() => { setShowAddModal(false); setNewQ({ ...BLANK_Q }); }}
           saving={saving}
@@ -288,7 +359,7 @@ export default function OnboardingFormEditorPage() {
           q={{
             question: editingQ.question,
             type: editingQ.type,
-            options: Array.isArray(editingQ.options) ? editingQ.options.join('\n') : '',
+            options: Array.isArray(editingQ.options) ? editingQ.options.join('\n') : String(editingQ.options ?? ''),
             required: editingQ.required,
             placeholder: editingQ.placeholder || '',
           }}

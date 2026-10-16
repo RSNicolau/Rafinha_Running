@@ -4,7 +4,10 @@ import { memoryStorage } from 'multer';
 import { AuthGuard } from '@nestjs/passport';
 import { BrandingService } from './branding.service';
 import { UpdateBrandingDto } from './dto/branding.dto';
+import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 
 @Controller('config/branding')
 export class BrandingController {
@@ -18,22 +21,33 @@ export class BrandingController {
 
   // Coach — get own branding
   @Get()
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.COACH)
   getBranding(@CurrentUser('id') coachId: string) {
     return this.brandingService.getBranding(coachId);
   }
 
   // Coach — update own branding
   @Put()
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.COACH)
   updateBranding(@CurrentUser('id') coachId: string, @Body() dto: UpdateBrandingDto) {
     return this.brandingService.updateBranding(coachId, dto);
   }
 
+  // Coach — confere o registro TXT _rr-verify.<domínio> e ativa o domínio
+  @Post('domain/verify')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.COACH)
+  verifyDomain(@CurrentUser('id') coachId: string) {
+    return this.brandingService.verifyDomain(coachId);
+  }
+
   // Coach — upload logo or banner to Supabase Storage
   @Post('upload')
-  @UseGuards(AuthGuard('jwt'))
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 5_000_000 } }))
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.COACH)
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }))
   async uploadFile(
     @CurrentUser('id') coachId: string,
     @UploadedFile() file: Express.Multer.File,

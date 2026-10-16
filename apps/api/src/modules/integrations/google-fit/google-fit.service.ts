@@ -11,10 +11,10 @@
  */
 
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { randomBytes } from 'crypto';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { FitnessIntegration, IntegrationProvider, WorkoutSource, WorkoutStatus } from '@prisma/client';
 import { encrypt, decrypt } from '../../../common/utils/encryption';
+import { consumeOAuthState, createOAuthState, OAuthClient } from '../oauth-state';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -52,21 +52,14 @@ export class GoogleFitService {
   // OAuth Flow
   // ──────────────────────────────────────
 
-  async getAuthUrl(userId: string) {
+  async getAuthUrl(userId: string, client: OAuthClient = 'web') {
     if (!this.clientId || !this.clientSecret) {
       throw new BadRequestException(
         'Integração com Google Fit ainda não configurada. Configure GOOGLE_FIT_CLIENT_ID e GOOGLE_FIT_CLIENT_SECRET.',
       );
     }
 
-    const state = randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-
-    await this.prisma.appConfig.upsert({
-      where: { key: `oauth_state:google_fit:${state}` },
-      create: { key: `oauth_state:google_fit:${state}`, value: { userId, expiresAt } },
-      update: { value: { userId, expiresAt } },
-    });
+    const state = await createOAuthState(this.prisma, IntegrationProvider.GOOGLE_FIT, userId, client);
 
     const params = new URLSearchParams({
       client_id: this.clientId,
@@ -81,21 +74,12 @@ export class GoogleFitService {
     return {
       url: `${GOOGLE_AUTH_URL}?${params.toString()}`,
       provider: IntegrationProvider.GOOGLE_FIT,
+      state,
     };
   }
 
-  async handleCallback(code: string, state: string) {
-    const stateRecord = await this.prisma.appConfig.findUnique({
-      where: { key: `oauth_state:google_fit:${state}` },
-    });
-    if (!stateRecord) throw new BadRequestException('Estado OAuth inválido ou expirado');
-
-    const { userId, expiresAt } = stateRecord.value as any;
-    if (new Date() > new Date(expiresAt)) {
-      await this.prisma.appConfig.delete({ where: { key: `oauth_state:google_fit:${state}` } });
-      throw new BadRequestException('Estado OAuth expirado. Tente novamente.');
-    }
-    await this.prisma.appConfig.delete({ where: { key: `oauth_state:google_fit:${state}` } });
+  async handleCallback(code: string, state: string, opts: { expectedUserId?: string } = {}) {
+    const { userId } = await consumeOAuthState(this.prisma, IntegrationProvider.GOOGLE_FIT, state, opts.expectedUserId);
 
     const tokenData = await this.exchangeCodeForToken(code);
 

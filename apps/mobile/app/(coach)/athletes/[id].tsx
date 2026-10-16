@@ -71,7 +71,7 @@ export default function AthleteDetailScreen() {
   const feedbackMutation = useMutation({
     mutationFn: async (message: string) => {
       const { data } = await api.post('/conversations', {
-        participantId: id,
+        athleteId: id,
         message,
       });
       return data;

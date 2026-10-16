@@ -57,9 +57,22 @@ export class LiveTrackingGateway implements OnGatewayConnection, OnGatewayDiscon
         return;
       }
 
-      const payload = this.jwtService.verify(token, { secret: process.env.JWT_SECRET! });
-      this.connectedUsers.set(client.id, { userId: payload.sub, role: payload.role });
-      this.logger.log(`User ${payload.sub} (${payload.role}) connected to live tracking`);
+      const payload: any = this.jwtService.verify(token, { secret: process.env.JWT_SECRET! });
+      if (!payload?.sub || payload.purpose) {
+        client.disconnect();
+        return;
+      }
+      // Papel e validade vêm do banco (não do token): usuário ativo + tokenVersion (`tv`) atual
+      const dbUser = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: { id: true, role: true, isActive: true, deletedAt: true, tokenVersion: true },
+      });
+      if (!dbUser || !dbUser.isActive || dbUser.deletedAt || payload.tv !== (dbUser.tokenVersion ?? 0)) {
+        client.disconnect();
+        return;
+      }
+      this.connectedUsers.set(client.id, { userId: dbUser.id, role: dbUser.role });
+      this.logger.log(`User ${dbUser.id} (${dbUser.role}) connected to live tracking`);
     } catch {
       client.disconnect();
     }
@@ -82,9 +95,11 @@ export class LiveTrackingGateway implements OnGatewayConnection, OnGatewayDiscon
     const user = this.connectedUsers.get(client.id);
     if (!user) return { error: 'Não autenticado' };
 
-    if (user.role === 'ATHLETE' && user.userId !== data.athleteId) {
+    // Somente o próprio atleta publica a própria posição
+    if (!data || data.athleteId !== user.userId) {
       return { error: 'Não autorizado' };
     }
+    if (data.workoutId !== undefined && typeof data.workoutId !== 'string') return { error: 'Dados inválidos' };
 
     this.logger.log(`Athlete ${data.athleteId} started tracking`);
     await this.liveTrackingService.startSession(client.id, data.athleteId, data.workoutId);
@@ -106,10 +121,29 @@ export class LiveTrackingGateway implements OnGatewayConnection, OnGatewayDiscon
     const user = this.connectedUsers.get(client.id);
     if (!user) return;
 
-    if (user.role === 'ATHLETE' && user.userId !== data.athleteId) return;
+    // Somente o próprio atleta, a partir do socket que abriu a sessão
+    if (!data || data.athleteId !== user.userId) return;
+    if (!(await this.liveTrackingService.isSessionOwner(user.userId, client.id))) return;
 
-    await this.liveTrackingService.updateLocation(data);
-    this.server.to(`coach:${data.athleteId}`).emit('athlete-update', data);
+    const num = (v: unknown, min: number, max: number) =>
+      typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+    if (!num(data.latitude, -90, 90) || !num(data.longitude, -180, 180) || !num(data.distance, 0, 1e7)
+      || !num(data.elapsed, 0, 1e7) || !num(data.pace, 0, 1e4) || !num(data.timestamp, 0, 1e14)) return;
+    const clean: LiveTrackingData = {
+      athleteId: user.userId,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      pace: data.pace,
+      distance: data.distance,
+      elapsed: data.elapsed,
+      timestamp: data.timestamp,
+      ...(num(data.heartRate, 0, 300) ? { heartRate: data.heartRate } : {}),
+      ...(num(data.altitude, -1000, 10000) ? { altitude: data.altitude } : {}),
+      ...(num(data.cadence, 0, 400) ? { cadence: data.cadence } : {}),
+    };
+
+    await this.liveTrackingService.updateLocation(clean);
+    this.server.to(`coach:${user.userId}`).emit('athlete-update', clean);
   }
 
   @SubscribeMessage('stop-tracking')
@@ -120,7 +154,7 @@ export class LiveTrackingGateway implements OnGatewayConnection, OnGatewayDiscon
     const user = this.connectedUsers.get(client.id);
     if (!user) return { error: 'Não autenticado' };
 
-    if (user.role === 'ATHLETE' && user.userId !== data.athleteId) {
+    if (!data || data.athleteId !== user.userId) {
       return { error: 'Não autorizado' };
     }
 
@@ -144,7 +178,8 @@ export class LiveTrackingGateway implements OnGatewayConnection, OnGatewayDiscon
     const user = this.connectedUsers.get(client.id);
     if (!user) return { error: 'Não autenticado' };
 
-    if (user.role === 'ATHLETE') return { error: 'Acesso negado' };
+    if (typeof data?.athleteId !== 'string') return { error: 'Dados inválidos' };
+    if (user.role !== 'COACH' && user.role !== 'ADMIN' && user.role !== 'SUPER_ADMIN') return { error: 'Acesso negado' };
 
     if (user.role === 'COACH') {
       const profile = await this.prisma.athleteProfile.findFirst({
@@ -167,14 +202,16 @@ export class LiveTrackingGateway implements OnGatewayConnection, OnGatewayDiscon
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { athleteId: string },
   ) {
-    client.leave(`coach:${data.athleteId}`);
+    if (typeof data?.athleteId === 'string') client.leave(`coach:${data.athleteId}`);
     return { status: 'unwatched' };
   }
 
   @SubscribeMessage('get-live-athletes')
   async handleGetLiveAthletes(@ConnectedSocket() client: Socket) {
     const user = this.connectedUsers.get(client.id);
-    if (!user || user.role === 'ATHLETE') return [];
-    return this.liveTrackingService.getLiveAthletes();
+    if (!user) return [];
+    if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') return this.liveTrackingService.getLiveAthletes();
+    if (user.role !== 'COACH') return [];
+    return this.liveTrackingService.getLiveAthletesForCoach(this.prisma, user.userId);
   }
 }

@@ -1,37 +1,132 @@
+# ═════════════════════════════════════════════════════════════════════════════
+#  RR — Rafinha Running · stack completa (mesma no Mac da rede local e na VPS)
+#
+#   Internet / Wi-Fi ──► caddy (80/443) ──► web  (Next.js :3000) ──► api (NestJS :3000)
+#                                     └──► api  (WebSockets, webhooks, arquivos, /health)
+#                                                         api ──► postgres (:5432) e redis (:6379)
+#
+#  Uso:   ./scripts/gerar-env.sh        (uma vez: cria o .env com segredos)
+#         docker compose up -d --build  (sobe/atualiza tudo)
+#  Docs:  docs/RODAR-LOCAL.md  e  docs/DEPLOY-VPS.md
+#
+#  Só o Caddy publica portas. Para depurar (abrir 5432/3000/3001 no Mac) copie
+#  docker-compose.override.example.yml para docker-compose.override.yml.
+# ═════════════════════════════════════════════════════════════════════════════
+
+name: rr
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
-    image: postgres:16-alpine
-    container_name: rr-postgres
+    image: postgres:16
     restart: unless-stopped
-    ports:
-      - "5432:5432"
     environment:
-      POSTGRES_USER: rr_user
-      POSTGRES_PASSWORD: rr_dev_password
-      POSTGRES_DB: rr_rafinha_running
+      POSTGRES_USER: ${POSTGRES_USER:-rr_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no .env (rode ./scripts/gerar-env.sh)}
+      POSTGRES_DB: ${POSTGRES_DB:-rr_rafinha_running}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rr_user -d rr_rafinha_running"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+    logging: *default-logging
 
   redis:
-    image: redis:7-alpine
-    container_name: rr-redis
+    image: redis:7
     restart: unless-stopped
-    ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
-      - redis_data:/data
+      - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+    logging: *default-logging
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: rr-api:latest
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: true
+    # Os valores abaixo têm prioridade sobre o .env (são da "fiação" interna do Docker).
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: "3000"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-rr_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rr_rafinha_running}?schema=public}
+      DIRECT_URL: ${DIRECT_URL:-postgresql://${POSTGRES_USER:-rr_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-rr_rafinha_running}?schema=public}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      UPLOADS_DIR: /data/uploads
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      # API_URL é do web (destino dos rewrites). Na API ele viraria base de URL de arquivo → manter vazio.
+      API_URL: ""
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging: *default-logging
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      # Estes valores são "congelados" no build do Next. Mudou? docker compose up -d --build web
+      args:
+        API_URL: http://api:3000
+        NEXT_PUBLIC_API_URL: /api/v1
+        NEXT_PUBLIC_BASE_URL: ${APP_URL:-http://localhost}
+        NEXT_PUBLIC_DEFAULT_COACH_ID: ${NEXT_PUBLIC_DEFAULT_COACH_ID:-rafinha}
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
+        NEXT_PUBLIC_PAGARME_EK: ${NEXT_PUBLIC_PAGARME_EK:-}
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+    image: rr-web:latest
+    restart: unless-stopped
+    # O web NÃO recebe o .env inteiro (não precisa dos segredos da API) — só o necessário:
+    environment:
+      NODE_ENV: production
+      PROXY_SHARED_SECRET: ${PROXY_SHARED_SECRET:-}
+      SENTRY_DSN: ${WEB_SENTRY_DSN:-}
+    depends_on:
+      - api
+    logging: *default-logging
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      SITE_TLS: ${SITE_TLS:-}
+      CADDY_GLOBAL_OPTIONS: ${CADDY_GLOBAL_OPTIONS:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - api
+    logging: *default-logging
 
 volumes:
-  postgres_data:
-  redis_data:
+  pgdata:
+  redisdata:
+  uploads:
+  caddy_data:
+  caddy_config:

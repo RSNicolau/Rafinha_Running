@@ -3,41 +3,44 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { useProviderAvailable } from '@/lib/integration-providers';
+import { formatCalendarDate, todayInSaoPaulo } from '@/lib/coach-format';
 
 interface Plan {
   id: string;
   name: string;
   description: string | null;
-  status: 'DRAFT' | 'ACTIVE' | 'COMPLETED' | 'ARCHIVED';
+  status: 'DRAFT' | 'ACTIVE' | 'COMPLETED' | 'PAUSED';
   startDate: string;
   endDate: string;
   weeklyFrequency: number;
   athlete: { id: string; name: string; avatarUrl: string | null };
   _count: { workouts: number };
+  completedWorkouts?: number;
+  coach?: { id: string; name: string } | null;
 }
 
 const STATUS_LABELS: Record<Plan['status'], string> = {
   DRAFT: 'Rascunho',
-  ACTIVE: 'Ativo',
-  COMPLETED: 'Concluído',
-  ARCHIVED: 'Arquivado',
+  ACTIVE: 'Ativa',
+  PAUSED: 'Pausada',
+  COMPLETED: 'Concluída',
 };
 
 const STATUS_CLASSES: Record<Plan['status'], string> = {
   DRAFT: 'bg-gray-100 text-gray-600',
   ACTIVE: 'bg-emerald-50 text-emerald-700',
+  PAUSED: 'bg-amber-50 text-amber-700',
   COMPLETED: 'bg-blue-50 text-blue-700',
-  ARCHIVED: 'bg-gray-50 text-gray-400',
 };
 
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
-}
+const formatDate = (iso: string) => formatCalendarDate(iso);
 
 function daysLeft(endDate: string) {
-  const diff = new Date(endDate).getTime() - Date.now();
-  const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+  // Compara dias de calendário (São Paulo) — sem deslocamento de fuso
+  const end = Date.parse(`${endDate.slice(0, 10)}T12:00:00Z`);
+  const today = Date.parse(`${todayInSaoPaulo()}T12:00:00Z`);
+  const days = Math.round((end - today) / (1000 * 60 * 60 * 24));
   if (days < 0) return 'Encerrado';
   if (days === 0) return 'Encerra hoje';
   return `${days}d restantes`;
@@ -51,6 +54,8 @@ export default function PlansPage() {
   const [statusFilter, setStatusFilter] = useState<Plan['status'] | 'ALL'>('ALL');
   const [garminPushing, setGarminPushing] = useState<Record<string, boolean>>({});
   const [garminResult, setGarminResult] = useState<Record<string, 'ok' | 'err'>>({});
+  // Sincronização direta com Garmin desativada no lançamento (Strava é a ponte) — só exibe se a API liberar
+  const garminAvailable = useProviderAvailable('GARMIN');
 
   const pushToGarmin = async (planId: string) => {
     setGarminPushing((p) => ({ ...p, [planId]: true }));
@@ -65,16 +70,23 @@ export default function PlansPage() {
     }
   };
 
-  const load = () => {
+  // Carrega todas as páginas (100 por vez) — a API pagina e o filtro/contagens são feitos aqui
+  const load = async () => {
     setLoadError(false);
-    api.get('/training-plans')
-      .then(({ data }) => {
-        // API might return { data: [...], pagination } OR just an array
-        const list = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
-        setPlans(list);
-      })
-      .catch(() => setLoadError(true))
-      .finally(() => setLoading(false));
+    try {
+      const all: Plan[] = [];
+      for (let page = 1; page <= 20; page++) {
+        const { data } = await api.get('/training-plans', { params: { page, limit: 100 } });
+        const list: Plan[] = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+        all.push(...list);
+        if (Array.isArray(data) || page >= (data?.totalPages ?? 1)) break;
+      }
+      setPlans(all);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { load(); }, []);
@@ -92,7 +104,7 @@ export default function PlansPage() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-8">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Planilhas de Treino</h1>
           <p className="text-sm text-gray-500 mt-1">
@@ -125,7 +137,7 @@ export default function PlansPage() {
 
       {/* Stats row */}
       {!loading && plans.length > 0 && (
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
           {[
             { label: 'Total', value: plans.length, color: 'text-gray-900' },
             { label: 'Ativas', value: activePlans, color: 'text-emerald-600' },
@@ -141,8 +153,8 @@ export default function PlansPage() {
       )}
 
       {/* Filters */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-wrap items-center gap-3 mb-6">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
           </svg>
@@ -155,8 +167,8 @@ export default function PlansPage() {
           />
         </div>
 
-        <div className="flex gap-2">
-          {(['ALL', 'ACTIVE', 'DRAFT', 'COMPLETED', 'ARCHIVED'] as const).map((s) => (
+        <div className="flex flex-wrap gap-2">
+          {(['ALL', 'ACTIVE', 'DRAFT', 'PAUSED', 'COMPLETED'] as const).map((s) => (
             <button
               key={s}
               onClick={() => setStatusFilter(s)}
@@ -210,10 +222,10 @@ export default function PlansPage() {
           {filtered.map((plan) => (
             <div key={plan.id} className="glass-card p-0 overflow-hidden hover:shadow-md transition-shadow">
               {/* Status accent */}
-              <div className={`h-1 ${plan.status === 'ACTIVE' ? 'bg-emerald-500' : plan.status === 'DRAFT' ? 'bg-gray-300' : plan.status === 'COMPLETED' ? 'bg-blue-400' : 'bg-gray-200'}`} />
+              <div className={`h-1 ${plan.status === 'ACTIVE' ? 'bg-emerald-500' : plan.status === 'DRAFT' ? 'bg-gray-300' : plan.status === 'COMPLETED' ? 'bg-blue-400' : 'bg-amber-300'}`} />
 
               <div className="p-5">
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3 mb-2">
                       <h3 className="text-base font-bold text-gray-900 truncate">{plan.name}</h3>
@@ -226,7 +238,7 @@ export default function PlansPage() {
                       <p className="text-sm text-gray-500 mb-3 line-clamp-1">{plan.description}</p>
                     )}
 
-                    <div className="flex items-center gap-5 text-xs text-gray-400">
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-gray-400">
                       {/* Athlete */}
                       <div className="flex items-center gap-1.5">
                         <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
@@ -258,12 +270,15 @@ export default function PlansPage() {
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
                         </svg>
-                        {plan._count?.workouts ?? 0} treinos
+                        {plan.completedWorkouts ?? 0}/{plan._count?.workouts ?? 0} treinos realizados
                       </div>
+                      {plan.coach?.name && (
+                        <div className="flex items-center gap-1">por {plan.coach.name}</div>
+                      )}
                     </div>
                   </div>
 
-                  <div className="flex flex-col items-end gap-3 flex-shrink-0">
+                  <div className="flex flex-col items-start sm:items-end gap-3 flex-shrink-0">
                     {plan.status === 'ACTIVE' && (
                       <span className="text-xs text-emerald-600 font-medium">
                         {daysLeft(plan.endDate)}
@@ -271,6 +286,7 @@ export default function PlansPage() {
                     )}
                     <div className="flex items-center gap-2">
                       {/* Garmin push button */}
+                      {garminAvailable && (
                       <button
                         onClick={() => pushToGarmin(plan.id)}
                         disabled={garminPushing[plan.id]}
@@ -300,6 +316,7 @@ export default function PlansPage() {
                         )}
                         {garminResult[plan.id] === 'ok' ? 'Enviado!' : garminResult[plan.id] === 'err' ? 'Erro' : 'Garmin'}
                       </button>
+                      )}
                       <Link
                         href={`/dashboard/plans/${plan.id}`}
                         className="px-4 py-2 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-700 text-xs font-medium transition border border-gray-200/60"

@@ -11,6 +11,7 @@
  */
 
 import request from 'supertest';
+import { CONSENT, linkAthleteToCoach } from './helpers';
 
 const BASE = process.env.TEST_API_URL || 'http://localhost:3000';
 const ts = Date.now();
@@ -23,13 +24,13 @@ beforeAll(async () => {
   // Register coach
   const coachRes = await request(BASE)
     .post('/api/v1/auth/register')
-    .send({ email: `coach_rbac_${ts}@test.com`, password: 'Test12345!', name: 'Coach RBAC', role: 'COACH' });
+    .send({ ...CONSENT, email: `coach_rbac_${ts}@test.com`, password: 'Test12345!', name: 'Coach RBAC', role: 'COACH' });
   coachToken = coachRes.body.accessToken;
 
   // Register athlete
   const athleteRes = await request(BASE)
     .post('/api/v1/auth/register')
-    .send({ email: `athlete_rbac_${ts}@test.com`, password: 'Test12345!', name: 'Athlete RBAC' });
+    .send({ ...CONSENT, email: `athlete_rbac_${ts}@test.com`, password: 'Test12345!', name: 'Athlete RBAC' });
   athleteToken = athleteRes.body.accessToken;
 
   // Login as admin (if credentials are provided via env)

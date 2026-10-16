@@ -1,10 +1,11 @@
 /**
- * E2E tests for Pagar.me webhook security.
+ * E2E tests for Pagar.me webhook security (hits a RUNNING API).
  *
- * These tests verify that the webhook endpoint correctly rejects
- * unauthorized requests and processes valid ones.
+ * Contract (fail-closed):
+ *  - server without PAGARME_WEBHOOK_SECRET → 503 for every request
+ *  - secret configured: missing/invalid signature → 401; valid HMAC over the raw body → 200
  *
- * Run: npm run test:e2e
+ * Run (the API must have the SAME secret): PAGARME_WEBHOOK_SECRET=xyz TEST_API_URL=http://localhost:3000 npm run test:e2e
  */
 
 import request from 'supertest';
@@ -32,7 +33,7 @@ describe('Pagar.me Webhook Security — /api/v1/payments/webhook/pagarme', () =>
         .set('Content-Type', 'application/json')
         .send(validOrderPaidPayload)
         .expect((res) => {
-          expect([400, 401, 403]).toContain(res.status);
+          expect([400, 401, 403, 503]).toContain(res.status);
         });
     });
 
@@ -43,7 +44,7 @@ describe('Pagar.me Webhook Security — /api/v1/payments/webhook/pagarme', () =>
         .set('x-hub-signature', 'sha256=invalidsignature000000000000000000000000000000000000000000000000')
         .send(validOrderPaidPayload)
         .expect((res) => {
-          expect([400, 401, 403]).toContain(res.status);
+          expect([400, 401, 403, 503]).toContain(res.status);
         });
     });
 
@@ -55,18 +56,14 @@ describe('Pagar.me Webhook Security — /api/v1/payments/webhook/pagarme', () =>
         .set('x-hub-signature', wrongSignature)
         .send(validOrderPaidPayload)
         .expect((res) => {
-          expect([400, 401, 403]).toContain(res.status);
+          expect([400, 401, 403, 503]).toContain(res.status);
         });
     });
 
-    // SKIPPED — known bug deferred to the payment-gateway phase: the controller reads
-    // `req.rawBody`, but with NestFactory `rawBody:true` + a manual `app.use(express.raw(...))`
-    // in main.ts, `req.rawBody` is undefined, so the HMAC branch never runs (valid signatures
-    // get 401 "assinatura ausente"). Also the controller checks PAGARME_WEBHOOK_SECRET while the
-    // env configures MERCADOPAGO_WEBHOOK_SECRET. Re-enable once webhook signature verification is fixed.
-    it.skip('should return 200 for valid signature with known secret', async () => {
-      // This test only passes if PAGARME_WEBHOOK_SECRET matches the server config
-      // The order ID doesn't need to exist — we just test that the signature is accepted
+    // Fixed: the controller now reads the HMAC over req.rawBody OR the Buffer left in req.body by
+    // express.raw (main.ts). Requires the server to run with the same PAGARME_WEBHOOK_SECRET.
+    it('should return 200 for valid signature with known secret', async () => {
+      // The order ID doesn't need to exist — an unknown order is handled gracefully
       const signature = signPayload(validOrderPaidPayload, WEBHOOK_SECRET);
       const res = await request(BASE)
         .post(ENDPOINT)
@@ -74,15 +71,12 @@ describe('Pagar.me Webhook Security — /api/v1/payments/webhook/pagarme', () =>
         .set('x-hub-signature', signature)
         .send(validOrderPaidPayload);
 
-      // If secret matches: 200 (event processed, order not found is handled gracefully)
-      // If server doesn't have secret configured: will fail signature check → 400
-      expect([200, 400]).toContain(res.status);
+      expect(res.status).toBe(200);
     });
   });
 
   describe('Payload handling', () => {
-    // SKIPPED — same webhook rawBody bug as above (payment-gateway phase).
-    it.skip('should handle unknown event types gracefully (no crash)', async () => {
+    it('should handle unknown event types gracefully (no crash)', async () => {
       const payload = JSON.stringify({ type: 'unknown.event.type', data: {} });
       const signature = signPayload(payload, WEBHOOK_SECRET);
 
@@ -92,12 +86,10 @@ describe('Pagar.me Webhook Security — /api/v1/payments/webhook/pagarme', () =>
         .set('x-hub-signature', signature)
         .send(payload);
 
-      // Should not crash — either 200 (ignored gracefully) or 400 (signature mismatch)
-      expect([200, 400]).toContain(res.status);
+      expect(res.status).toBe(200);
     });
 
-    // SKIPPED — same webhook rawBody bug as above (payment-gateway phase).
-    it.skip('should handle order.payment_failed event', async () => {
+    it('should handle order.payment_failed event', async () => {
       const payload = JSON.stringify({
         type: 'order.payment_failed',
         data: { id: 'or_test_failed_456' },
@@ -110,7 +102,7 @@ describe('Pagar.me Webhook Security — /api/v1/payments/webhook/pagarme', () =>
         .set('x-hub-signature', signature)
         .send(payload);
 
-      expect([200, 400]).toContain(res.status);
+      expect(res.status).toBe(200);
     });
   });
 });

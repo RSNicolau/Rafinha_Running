@@ -1,140 +1,117 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
-import { api } from '@/lib/api';
+import BuyerFields from '../checkout/_components/BuyerFields';
+import { CheckoutBuyer, fmtBRL, validateBuyer } from '../checkout/_lib/checkout';
+import {
+  BillingType,
+  INTERVAL_LABEL,
+  INTERVAL_PERIOD,
+  MyMembership,
+  TeamPlan,
+  changeMyPlan,
+  fmtDate,
+  getMyMembership,
+  subscribeMembership,
+} from './_lib/memberships';
 
-interface Plan {
-  type: string;
-  name: string;
-  price: string;
-  period: string;
-  amount: number;
-  features: string[];
-  badge?: string;
-}
-
-const FALLBACK_PLANS: Plan[] = [
-  {
-    type: 'MONTHLY',
-    name: 'Mensal',
-    price: 'R$ 174',
-    period: '/mês',
-    amount: 17400,
-    features: ['Planilhas personalizadas', 'Treino na Concha Acústica (terças)', 'Treinos alternados aos sábados', 'Assessoria em provas', 'Acesso ao App da equipe'],
-  },
-  {
-    type: 'QUARTERLY',
-    name: 'Trimestral',
-    price: 'R$ 495',
-    period: 'parcela única',
-    amount: 49500,
-    badge: 'Economize 5%',
-    features: ['Planilhas personalizadas', 'Treino na Concha Acústica (terças)', 'Treinos alternados aos sábados', 'Assessoria em provas', 'Acesso ao App da equipe'],
-  },
-  {
-    type: 'SEMIANNUAL',
-    name: 'Semestral',
-    price: 'R$ 960',
-    period: 'parcela única',
-    amount: 96000,
-    badge: 'Mais popular',
-    features: ['Planilhas personalizadas', 'Treino na Concha Acústica (terças)', 'Treinos alternados aos sábados', 'Assessoria em provas', 'Acesso ao App da equipe'],
-  },
-];
-
-interface PixData {
-  paymentId: string;
-  pixQrCode: string;
-  pixQrCodeUrl: string;
-  amount: number;
-}
-
-export default function AthleteSubscribePage() {
+/**
+ * Assinatura da mensalidade com a EQUIPE do atleta: os planos vêm de GET /memberships/me
+ * (planos da equipe), o pagamento reaproveita a tela /pedido/[paymentId].
+ * ?trocar=1 → troca de plano para quem já tem mensalidade ativa (vale a partir do próximo ciclo).
+ */
+function SubscribeScreen() {
   const router = useRouter();
+  const params = useSearchParams();
+  const changeMode = params.get('trocar') === '1';
   const { user, logout, loadUser, isAuthenticated, isLoading: authLoading } = useAuthStore();
+  const [data, setData] = useState<MyMembership | null>(null);
   const [loading, setLoading] = useState(true);
-  const [plans, setPlans] = useState<Plan[]>(FALLBACK_PLANS);
-  const [selectedPlan, setSelectedPlan] = useState<Plan>(FALLBACK_PLANS[2]); // Semestral default
-  const [pixLoading, setPixLoading] = useState(false);
-  const [pixData, setPixData] = useState<PixData | null>(null);
-  const [pixStatus, setPixStatus] = useState<'pending' | 'paid' | null>(null);
-  const [pixCopied, setPixCopied] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [error, setError] = useState('');
+  const [selected, setSelected] = useState<TeamPlan | null>(null);
+  const [buyer, setBuyer] = useState<CheckoutBuyer>({ name: '', email: '', cpf: '', phone: '' });
+  const [billing, setBilling] = useState<BillingType>('PIX');
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState('');
 
-  useEffect(() => { loadUser(); }, []);
+  useEffect(() => {
+    loadUser();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (user) setBuyer((b) => ({ ...b, name: b.name || user.name || '', email: b.email || user.email || '' }));
+  }, [user]);
 
   useEffect(() => {
     if (authLoading) return;
-    if (!isAuthenticated) { router.replace('/athlete-login'); return; }
-    Promise.all([
-      api.get('/admin/config/plans').catch(() => null),
-      api.get('/subscriptions/current').catch(() => null),
-    ]).then(([plansRes, subRes]) => {
-      const athletePlans = plansRes?.data?.athlete;
-      if (athletePlans?.length) {
-        const mapped: Plan[] = athletePlans.map((p: any, i: number) => ({
-          type: p.id,
-          name: p.name,
-          price: `R$ ${Math.round(p.price / 100).toLocaleString('pt-BR')}`,
-          period: p.id === 'MONTHLY' ? '/mês' : 'parcela única',
-          amount: p.price,
-          badge: i === athletePlans.length - 1 ? 'Mais popular' : i === 1 ? 'Economize 5%' : undefined,
-          features: p.features,
-        }));
-        setPlans(mapped);
-        setSelectedPlan(mapped[mapped.length - 1]);
-      }
-      if (subRes?.data?.status === 'ACTIVE' || subRes?.data?.status === 'TRIALING') {
-        router.replace('/athlete');
-      }
-    }).finally(() => setLoading(false));
-  }, [isAuthenticated, authLoading]);
-
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
-
-  const startPolling = useCallback((paymentId: string) => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const { data } = await api.get(`/payments/order/${paymentId}`);
-        if (data.status === 'paid' || data.dbStatus === 'SUCCEEDED') {
-          setPixStatus('paid');
-          clearInterval(pollRef.current!);
-          setTimeout(() => router.replace('/athlete'), 3000);
-        }
-      } catch {}
-    }, 5000);
-  }, [router]);
-
-  const handlePix = async () => {
-    setPixLoading(true);
-    setPixData(null);
-    setPixStatus(null);
-    if (pollRef.current) clearInterval(pollRef.current);
-    try {
-      const { data } = await api.post('/payments/pix', {
-        amount: selectedPlan.amount,
-        description: `${selectedPlan.name} - Rafinha Running`,
-        planId: selectedPlan.type,
-      });
-      setPixData(data);
-      setPixStatus('pending');
-      startPolling(data.paymentId);
-    } catch (e: any) {
-      alert(e?.response?.data?.message ?? 'Erro ao gerar PIX.');
-    } finally {
-      setPixLoading(false);
+    if (!isAuthenticated) {
+      router.replace('/athlete-login');
+      return;
     }
-  };
+    getMyMembership()
+      .then((d) => {
+        setData(d);
+        const current = d.membership?.plan.id;
+        // Troca de plano: começa no plano ATUAL (o atleta escolhe o novo); senão o atual ou o primeiro
+        const preferred = d.plans.find((p) => p.id === current) ?? d.plans[0] ?? null;
+        setSelected(preferred);
+        // assinatura legada (Mercado Pago) ativa e sem mensalidade nova: segue para os treinos
+        if (!d.membership && d.legacySubscription && d.access.active && !changeMode) router.replace('/athlete');
+        // mensalidade em dia (o login ainda consulta só a assinatura legada): segue para os treinos
+        if (d.membership?.status === 'ACTIVE' && !d.membership.openInvoice && !changeMode) router.replace('/athlete');
+      })
+      .catch((e) => setError(e?.message || 'Não foi possível carregar seus planos.'))
+      .finally(() => setLoading(false));
+  }, [isAuthenticated, authLoading, changeMode, router]);
 
-  const handleCopy = () => {
-    if (!pixData?.pixQrCode) return;
-    navigator.clipboard.writeText(pixData.pixQrCode).then(() => {
-      setPixCopied(true);
-      setTimeout(() => setPixCopied(false), 2000);
-    });
+  const m = data?.membership ?? null;
+  const isActive = m?.status === 'ACTIVE';
+  const billingOptions = useMemo(() => {
+    const md = data?.methods;
+    const list: Array<{ id: BillingType; label: string; hint: string }> = [];
+    if (md?.pix) list.push({ id: 'PIX', label: 'Pix', hint: 'Aprovação na hora' });
+    if (md?.creditCard || md?.boleto) list.push({ id: 'UNDEFINED', label: 'Cartão de crédito ou boleto', hint: 'Você escolhe na fatura segura' });
+    return list;
+  }, [data]);
+
+  useEffect(() => {
+    if (billingOptions.length && !billingOptions.some((o) => o.id === billing)) setBilling(billingOptions[0].id);
+  }, [billingOptions, billing]);
+
+  const submit = async () => {
+    if (!selected) return;
+    setError('');
+    if (changeMode && isActive) {
+      setSubmitting(true);
+      try {
+        await changeMyPlan(selected.id);
+        setDone(`Plano alterado para ${selected.name}. O novo valor vale a partir do próximo vencimento.`);
+      } catch (e: any) {
+        setError(e?.message || 'Não foi possível trocar o plano.');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+    const problem = validateBuyer(buyer);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const r = await subscribeMembership(selected.id, buyer, billing);
+      if (r.payPath) router.push(r.payPath);
+      else setDone('Assinatura criada! A fatura será gerada em instantes — acompanhe em “Minha mensalidade”.');
+    } catch (e: any) {
+      setError(e?.message || 'Não foi possível concluir a assinatura.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (loading) {
@@ -146,168 +123,197 @@ export default function AthleteSubscribePage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-5 py-10" style={{ background: 'linear-gradient(to bottom, #FEE2E2 0%, #F2F2F7 55%)' }}>
-      {/* SVG color matrix: maps logo red → #DC2626, white stays white */}
-      <svg width="0" height="0" style={{ position: 'absolute' }}>
-        <defs>
-          <filter id="logo-red-fix" colorInterpolationFilters="sRGB">
-            <feColorMatrix type="matrix" values="1.062 0 0 0 -0.062  0 1.107 0 0 -0.107  0 0 1.038 0 -0.038  0 0 0 1 0" />
-          </filter>
-        </defs>
-      </svg>
-
+    <div className="min-h-screen flex flex-col items-center px-5 py-10" style={{ background: 'linear-gradient(to bottom, #FEE2E2 0%, #F2F2F7 55%)' }}>
       <div className="w-full max-w-lg">
-        {/* Logo + header */}
         <div className="text-center mb-8">
-          <div className="w-36 sm:w-44 mx-auto mb-5 rounded-2xl overflow-hidden shadow-lg">
-            <img
-              src="/logo.png"
-              alt="Rafinha Running"
-              className="w-full block"
-              style={{ filter: 'url(#logo-red-fix)' }}
-            />
-          </div>
-          <h1 className="text-2xl font-black text-gray-900 mb-1 tracking-tight">Ative sua conta</h1>
+          {data?.team?.logoUrl ? (
+            <img src={data.team.logoUrl} alt={data.team.name} className="w-24 h-24 mx-auto mb-4 rounded-2xl object-cover shadow-lg" />
+          ) : (
+            <div className="w-36 sm:w-44 mx-auto mb-5 rounded-2xl overflow-hidden shadow-lg">
+              <img src="/logo.png" alt="Logo" className="w-full block" />
+            </div>
+          )}
+          <h1 className="text-2xl font-black text-gray-900 mb-1 tracking-tight">
+            {changeMode && isActive ? 'Trocar de plano' : 'Minha mensalidade'}
+          </h1>
           <p className="text-sm text-gray-500">
-            Olá, <strong className="text-gray-700">{user?.name}</strong>. Escolha seu plano para acessar os treinos.
+            Olá, <strong className="text-gray-700">{user?.name}</strong>
+            {data?.team ? <> · {data.team.name}</> : null}
           </p>
         </div>
 
-        {!pixData ? (
+        {!data?.team ? (
+          <div className="glass-card p-7 text-center">
+            <p className="text-3xl mb-2">🏃</p>
+            <p className="font-bold text-gray-900">Você ainda não faz parte de uma equipe</p>
+            <p className="text-sm text-gray-500 mt-1">Peça o convite ao seu treinador para liberar os planos da assessoria.</p>
+          </div>
+        ) : done ? (
+          <div className="glass-card p-8 text-center">
+            <p className="text-4xl mb-2">✅</p>
+            <p className="font-bold text-gray-900">{done}</p>
+            <Link href="/athlete" className="inline-block mt-5 text-sm font-semibold text-red-700 underline">Voltar aos treinos</Link>
+          </div>
+        ) : isActive && !changeMode ? (
+          <div className="glass-card p-7 text-center">
+            <p className="text-4xl mb-2">🎉</p>
+            <p className="font-bold text-gray-900">Sua mensalidade está ativa</p>
+            <p className="text-sm text-gray-500 mt-1">
+              {m!.plan.name} · próximo vencimento {fmtDate(m!.nextDueDate)}
+            </p>
+            <div className="flex flex-col gap-2 mt-5">
+              <Link href="/athlete" className="py-3 rounded-xl bg-[#DC2626] text-white text-sm font-semibold">Ir para os treinos</Link>
+              {data.plans.length > 1 && (
+                <Link href="/athlete-subscribe?trocar=1" className="text-xs text-gray-500 underline">Trocar de plano</Link>
+              )}
+            </div>
+          </div>
+        ) : data.plans.length === 0 ? (
+          <div className="glass-card p-7 text-center">
+            <p className="font-bold text-gray-900">Sua equipe ainda não publicou planos de mensalidade</p>
+            <p className="text-sm text-gray-500 mt-1">Assim que a assessoria cadastrar os planos, eles aparecem aqui.</p>
+          </div>
+        ) : (
           <div className="space-y-4">
-            {/* Plan selector */}
-            <div className="grid grid-cols-3 gap-3">
-              {plans.map((p) => {
-                const isSelected = selectedPlan.type === p.type;
+            {m?.openInvoice && !changeMode && (
+              <div className={`rounded-2xl p-4 border ${m.status === 'PAST_DUE' ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'}`}>
+                <p className={`text-sm font-bold ${m.status === 'PAST_DUE' ? 'text-red-800' : 'text-amber-900'}`}>
+                  {m.status === 'PAST_DUE' ? 'Mensalidade em atraso' : 'Você tem uma fatura em aberto'}
+                </p>
+                <p className="text-xs text-gray-700 mt-0.5">
+                  {m.plan.name} · {fmtBRL(m.openInvoice.amountInCents)} · vencimento {fmtDate(m.openInvoice.dueDate)}
+                </p>
+                <Link href={m.openInvoice.payPath} className="inline-block mt-2 text-xs font-bold underline text-gray-900">Pagar agora →</Link>
+              </div>
+            )}
+
+            {changeMode && isActive && (
+              <p className="text-xs text-gray-500 text-center">Seu plano atual está marcado. Escolha o novo plano abaixo.</p>
+            )}
+            <div className={`grid gap-3 pt-2 grid-cols-1 ${data.plans.length >= 3 ? 'sm:grid-cols-3' : data.plans.length === 2 ? 'sm:grid-cols-2' : ''}`}>
+              {data.plans.map((p) => {
+                const isSel = selected?.id === p.id;
+                const isCurrent = m?.plan.id === p.id && isActive;
                 return (
                   <button
-                    key={p.type}
-                    onClick={() => setSelectedPlan(p)}
-                    className={`relative rounded-2xl border-2 p-4 text-left transition cursor-pointer ${
-                      isSelected
-                        ? 'border-[#DC2626] bg-white shadow-[0_4px_20px_rgba(220,38,38,0.15)]'
-                        : 'border-gray-200 bg-white/70 hover:border-gray-300'
+                    key={p.id}
+                    onClick={() => setSelected(p)}
+                    disabled={isCurrent}
+                    className={`relative min-w-0 rounded-2xl border-2 p-4 text-left transition cursor-pointer disabled:cursor-default disabled:opacity-80 ${
+                      isSel ? 'border-[#DC2626] bg-white shadow-[0_4px_20px_rgba(220,38,38,0.15)]' : 'border-gray-200 bg-white/70 hover:border-gray-300'
                     }`}
                   >
-                    {p.badge && (
+                    {p.interval !== 'MONTHLY' && (
                       <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-[#DC2626] text-white text-[10px] font-bold whitespace-nowrap">
-                        {p.badge}
+                        {fmtBRL(p.monthlyEquivalentInCents)}/mês
                       </span>
                     )}
-                    <p className={`text-xs font-semibold mb-1 ${isSelected ? 'text-[#DC2626]' : 'text-gray-400'}`}>{p.name}</p>
-                    <p className={`text-xl font-black leading-tight ${isSelected ? 'text-gray-900' : 'text-gray-700'}`}>{p.price}</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">{p.period}</p>
-                    {isSelected && (
-                      <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-[#DC2626] flex items-center justify-center">
-                        <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                        </svg>
-                      </div>
-                    )}
+                    <div className="flex items-baseline justify-between gap-2 sm:block">
+                      <p className={`text-xs font-semibold mb-1 truncate ${isSel ? 'text-[#DC2626]' : 'text-gray-400'}`}>{p.name}</p>
+                      <p className={`text-lg sm:text-base lg:text-lg font-black leading-tight whitespace-nowrap ${isSel ? 'text-gray-900' : 'text-gray-700'}`}>{fmtBRL(p.priceInCents)}</p>
+                    </div>
+                    <p className={`text-[10px] mt-0.5 ${isCurrent ? 'font-bold text-emerald-700' : 'text-gray-400'}`}>{isCurrent ? '✓ plano atual' : INTERVAL_PERIOD[p.interval] ?? INTERVAL_LABEL[p.interval]}</p>
                   </button>
                 );
               })}
             </div>
 
-            {/* Selected plan details */}
-            <div className="glass-card p-6">
-              <div className="flex items-start justify-between mb-5 pb-4 border-b border-gray-100">
-                <div>
-                  <p className="text-xs text-[#DC2626] font-semibold uppercase tracking-wider mb-1">Plano selecionado</p>
-                  <h2 className="font-bold text-gray-900 text-xl">{selectedPlan.name}</h2>
+            {selected && (
+              <div className="glass-card p-6">
+                <div className="flex items-start justify-between gap-3 mb-4 pb-4 border-b border-gray-100">
+                  <div className="min-w-0">
+                    <p className="text-xs text-[#DC2626] font-semibold uppercase tracking-wider mb-1">Plano selecionado</p>
+                    <h2 className="font-bold text-gray-900 text-xl">{selected.name}</h2>
+                    <p className="text-xs text-gray-400">{INTERVAL_LABEL[selected.interval]} · renovação automática</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="text-xl sm:text-2xl font-black text-gray-900 whitespace-nowrap">{fmtBRL(selected.priceInCents)}</span>
+                    <p className="text-xs text-gray-400">{INTERVAL_PERIOD[selected.interval]}</p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <span className="text-3xl font-black text-gray-900">{selectedPlan.price}</span>
-                  <span className="text-sm text-gray-400 ml-1">{selectedPlan.period}</span>
-                </div>
-              </div>
 
-              <ul className="space-y-2.5 mb-6">
-                {selectedPlan.features.map((f) => (
-                  <li key={f} className="flex items-center gap-3 text-sm text-gray-600">
-                    <span className="w-5 h-5 rounded-full bg-[#DC2626]/10 flex items-center justify-center flex-shrink-0">
-                      <svg className="w-2.5 h-2.5 text-[#DC2626]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                      </svg>
-                    </span>
-                    {f}
-                  </li>
-                ))}
-              </ul>
+                {selected.description && <p className="text-sm text-gray-600 mb-3">{selected.description}</p>}
+                {selected.benefits?.length > 0 && (
+                  <ul className="space-y-2 mb-5">
+                    {selected.benefits.map((f) => (
+                      <li key={f} className="flex items-center gap-3 text-sm text-gray-600">
+                        <span className="w-5 h-5 rounded-full bg-[#DC2626]/10 flex items-center justify-center flex-shrink-0 text-[#DC2626] text-xs">✓</span>
+                        {f}
+                      </li>
+                    ))}
+                  </ul>
+                )}
 
-              <button
-                onClick={handlePix}
-                disabled={pixLoading}
-                className="w-full py-3.5 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-sm transition disabled:opacity-50 cursor-pointer shadow-[0_4px_16px_rgba(220,38,38,0.3)]"
-              >
-                {pixLoading ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                    Gerando PIX...
-                  </span>
-                ) : `Pagar ${selectedPlan.price} com PIX →`}
-              </button>
-              <p className="text-xs text-gray-400 text-center mt-3">Pagamento instantâneo · Confirmação automática</p>
-            </div>
-          </div>
-        ) : pixStatus === 'pending' ? (
-          <div className="glass-card p-7 text-center">
-            <div className="w-10 h-10 rounded-2xl bg-[#DC2626]/10 flex items-center justify-center mx-auto mb-4">
-              <svg className="w-5 h-5 text-[#DC2626]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5z" />
-              </svg>
-            </div>
-            <h3 className="font-bold text-gray-900 mb-1">QR Code PIX gerado</h3>
-            <p className="text-xs text-gray-500 mb-1">Escaneie com seu banco ou copie o código abaixo</p>
-            <p className="text-xs text-gray-400 font-medium mb-5">{selectedPlan.name} · {selectedPlan.price}</p>
-            {pixData.pixQrCodeUrl && (
-              <div className="inline-block p-3 rounded-2xl bg-white shadow-sm border border-gray-100 mb-5">
-                <img src={pixData.pixQrCodeUrl} alt="QR Code PIX" className="w-36 sm:w-44 h-36 sm:h-44 block" />
+                {changeMode && isActive ? (
+                  <p className="text-xs text-gray-500 mb-4">
+                    O novo valor passa a valer no próximo vencimento ({fmtDate(m?.nextDueDate)}). Nada é cobrado agora.
+                  </p>
+                ) : (
+                  <div className="space-y-4 mb-5">
+                    <BuyerFields value={buyer} onChange={setBuyer} />
+                    {billingOptions.length > 1 && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {billingOptions.map((o) => (
+                          <button
+                            key={o.id}
+                            onClick={() => setBilling(o.id)}
+                            className={`rounded-xl border-2 p-3 text-left ${billing === o.id ? 'border-[#DC2626] bg-red-50/40' : 'border-gray-200 bg-white'}`}
+                          >
+                            <p className="text-sm font-bold text-gray-900">{o.label}</p>
+                            <p className="text-[11px] text-gray-500">{o.hint}</p>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {data.methods.fake && (
+                      <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                        Ambiente de testes: o pagamento é simulado na próxima tela.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+
+                <button
+                  onClick={submit}
+                  disabled={submitting || (m?.plan.id === selected.id && isActive)}
+                  className="w-full py-3.5 rounded-xl bg-[#DC2626] hover:bg-[#B91C1C] text-white font-semibold text-sm transition disabled:opacity-50 cursor-pointer shadow-[0_4px_16px_rgba(220,38,38,0.3)]"
+                >
+                  {submitting
+                    ? 'Processando…'
+                    : changeMode && isActive
+                      ? `Trocar para ${selected.name}`
+                      : `Assinar e pagar ${fmtBRL(selected.priceInCents)} →`}
+                </button>
+                {!(changeMode && isActive) && (
+                  <p className="text-xs text-gray-400 text-center mt-3">A 1ª cobrança é hoje; as próximas são geradas automaticamente. Cancele quando quiser.</p>
+                )}
               </div>
             )}
-            <button
-              onClick={handleCopy}
-              className="w-full py-3 rounded-xl bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium transition cursor-pointer mb-4"
-            >
-              {pixCopied ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                  Copiado!
-                </span>
-              ) : 'Copiar código PIX'}
-            </button>
-            <button
-              onClick={() => { setPixData(null); setPixStatus(null); }}
-              className="text-xs text-gray-400 hover:text-gray-600 transition underline cursor-pointer"
-            >
-              Trocar plano
-            </button>
-            <div className="flex items-center gap-2 justify-center text-xs text-gray-400 mt-4">
-              <div className="w-3 h-3 border border-gray-300 border-t-gray-500 rounded-full animate-spin" />
-              Aguardando pagamento...
-            </div>
-          </div>
-        ) : (
-          <div className="glass-card p-8 text-center">
-            <div className="w-16 h-16 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center mx-auto mb-5">
-              <svg className="w-8 h-8 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-1">Pagamento confirmado!</h3>
-            <p className="text-sm text-gray-500">Redirecionando para seus treinos...</p>
           </div>
         )}
 
-        <button
-          onClick={() => { logout(); router.replace('/athlete-login'); }}
-          className="block text-center text-xs text-gray-400 hover:text-gray-600 transition mt-5 w-full"
-        >
-          Sair
-        </button>
+        {error && !selected && <p className="text-center text-sm text-red-600 mt-4">{error}</p>}
+
+        <div className="flex justify-center gap-6 mt-6">
+          <Link href="/athlete" className="text-xs text-gray-400 hover:text-gray-600">Voltar</Link>
+          <button
+            onClick={() => { void logout({ redirectTo: '/athlete-login' }); }}
+            className="text-xs text-gray-400 hover:text-gray-600 transition"
+          >
+            Sair
+          </button>
+        </div>
       </div>
     </div>
+  );
+}
+
+export default function AthleteSubscribePage() {
+  return (
+    <Suspense fallback={null}>
+      <SubscribeScreen />
+    </Suspense>
   );
 }

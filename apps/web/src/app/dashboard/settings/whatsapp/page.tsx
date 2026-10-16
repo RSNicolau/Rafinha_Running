@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/lib/api';
 
 type WhatsAppProvider = 'zapi' | 'twilio' | 'evolution';
@@ -12,7 +11,11 @@ interface WhatsAppConfig {
   provider: WhatsAppProvider;
   instanceId: string;
   hasToken: boolean;
-  webhookUrl: string;
+  apiTokenMasked?: string;
+  hasWebhookSecret?: boolean;
+  /** URL completa com o segredo do coach (?secret=...). null até a 1ª gravação. */
+  webhookUrl: string | null;
+  webhookSecretHeader?: string;
   welcomeMessage: string;
 }
 
@@ -25,8 +28,6 @@ const PROVIDERS: { value: WhatsAppProvider; label: string }[] = [
 ];
 
 export default function WhatsAppSettingsPage() {
-  const user = useAuthStore((s) => s.user);
-
   const [config, setConfig] = useState<WhatsAppConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [endpointAvailable, setEndpointAvailable] = useState(true);
@@ -61,9 +62,38 @@ export default function WhatsAppSettingsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const webhookUrl =
-    config?.webhookUrl ??
-    `${process.env.NEXT_PUBLIC_API_URL ?? 'https://rrapi.up.railway.app'}/api/v1/webhooks/whatsapp/${user?.id ?? 'COACH_ID'}`;
+  // Só exibimos a URL que a API gerou (contém o segredo). Sem segredo, o webhook recusa tudo.
+  const webhookUrl = config?.webhookUrl ?? '';
+  const [showWebhook, setShowWebhook] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const maskedWebhookUrl = webhookUrl.replace(/(secret=)[a-f0-9]+/i, (_m, p1) => `${p1}${'•'.repeat(12)}`);
+
+  const handleCopy = async () => {
+    if (!webhookUrl) return;
+    try {
+      await navigator.clipboard.writeText(webhookUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setShowWebhook(true);
+    }
+  };
+
+  const handleRotate = async () => {
+    if (!window.confirm('Gerar um novo segredo? A URL atual para de funcionar e você precisará colar a nova no Z-API.')) return;
+    setRotating(true);
+    try {
+      const { data } = await api.post<WhatsAppConfig>('/settings/whatsapp/rotate-secret');
+      setConfig(data);
+      setFeedback({ type: 'success', message: 'Novo segredo gerado. Atualize a URL do webhook no painel Z-API.' });
+    } catch {
+      setFeedback({ type: 'error', message: 'Não foi possível gerar um novo segredo.' });
+    } finally {
+      setRotating(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!endpointAvailable) {
@@ -199,7 +229,7 @@ export default function WhatsAppSettingsPage() {
                     type={showToken ? 'text' : 'password'}
                     value={apiToken}
                     onChange={e => setApiToken(e.target.value)}
-                    placeholder={config?.hasToken ? '••••• (salvo — cole para atualizar)' : 'Cole seu token aqui'}
+                    placeholder={config?.hasToken ? `${config.apiTokenMasked || '•••••'} (salvo — cole para atualizar)` : 'Cole seu token aqui'}
                     className="w-full px-3.5 py-2.5 pr-10 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/40 transition font-mono"
                   />
                   <button
@@ -237,28 +267,55 @@ export default function WhatsAppSettingsPage() {
                 </div>
               )}
 
-              {/* Webhook URL (readonly) */}
+              {/* Webhook URL (readonly, contém o segredo do coach) */}
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1.5">
-                  Webhook URL <span className="text-gray-300">(gerado automaticamente)</span>
+                  Webhook URL <span className="text-gray-300">(gerada automaticamente — contém seu segredo)</span>
                 </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={webhookUrl}
-                    readOnly
-                    className="flex-1 px-3.5 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl text-gray-500 font-mono cursor-text"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => navigator.clipboard.writeText(webhookUrl)}
-                    className="px-3 py-2.5 text-xs font-medium bg-gray-100 hover:bg-gray-200 rounded-xl transition shrink-0"
-                    title="Copiar URL"
-                  >
-                    Copiar
-                  </button>
-                </div>
-                <p className="text-xs text-gray-400 mt-1">Cole esta URL no painel do seu provedor</p>
+                {webhookUrl ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={showWebhook ? webhookUrl : maskedWebhookUrl}
+                        readOnly
+                        onFocus={(e) => e.currentTarget.select()}
+                        className="flex-1 min-w-0 px-3.5 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl text-gray-500 font-mono cursor-text"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowWebhook((v) => !v)}
+                        className="px-3 py-2.5 text-xs font-medium bg-gray-100 hover:bg-gray-200 rounded-xl transition shrink-0"
+                      >
+                        {showWebhook ? 'Ocultar' : 'Mostrar'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCopy}
+                        className="px-3 py-2.5 text-xs font-medium bg-gray-100 hover:bg-gray-200 rounded-xl transition shrink-0"
+                        title="Copiar URL"
+                      >
+                        {copied ? 'Copiado!' : 'Copiar'}
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Cole esta URL completa no campo &ldquo;Ao receber&rdquo; (webhook) da sua instância Z-API. Não compartilhe:
+                      quem tiver essa URL pode enviar mensagens ao seu bot.{' '}
+                      <button
+                        type="button"
+                        onClick={handleRotate}
+                        disabled={rotating}
+                        className="text-indigo-600 hover:text-indigo-700 font-medium disabled:opacity-50"
+                      >
+                        {rotating ? 'Gerando…' : 'Gerar novo segredo'}
+                      </button>
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                    Salve a configuração para gerar sua URL de webhook segura.
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -311,7 +368,7 @@ export default function WhatsAppSettingsPage() {
             </li>
             <li className="flex gap-3">
               <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 text-xs font-bold flex items-center justify-center shrink-0">3</span>
-              <span>Cole a <strong>Webhook URL</strong> acima no campo &ldquo;Webhook&rdquo; da sua instância Z-API</span>
+              <span>Clique em <strong>Salvar Configuração</strong> e cole a <strong>Webhook URL</strong> (completa, com o segredo) no campo &ldquo;Ao receber&rdquo; da sua instância Z-API</span>
             </li>
             <li className="flex gap-3">
               <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 text-xs font-bold flex items-center justify-center shrink-0">4</span>

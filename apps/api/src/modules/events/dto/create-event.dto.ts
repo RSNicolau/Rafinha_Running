@@ -13,12 +13,12 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { EventStatus } from '@prisma/client';
 
 export class CreateEventDto {
-  @ApiProperty({ description: 'Titulo do evento', example: 'Corrida Noturna SP' })
+  @ApiProperty({ description: 'Título do evento', example: 'Corrida Noturna SP' })
   @IsString()
   @MaxLength(200)
   title: string;
 
-  @ApiPropertyOptional({ description: 'Descricao do evento' })
+  @ApiPropertyOptional({ description: 'Descrição do evento' })
   @IsString()
   @IsOptional()
   description?: string;
@@ -29,11 +29,11 @@ export class CreateEventDto {
   coverImageUrl?: string;
 
   @ApiProperty({ description: 'Data e hora do evento', example: '2026-06-15T07:00:00Z' })
-  @IsDateString({}, { message: 'Data do evento invalida' })
+  @IsDateString({}, { message: 'Data do evento inválida' })
   eventDate: string;
 
   @ApiPropertyOptional({ description: 'Data de encerramento do evento', example: '2026-06-15T12:00:00Z' })
-  @IsDateString({}, { message: 'Data de encerramento invalida' })
+  @IsDateString({}, { message: 'Data de encerramento inválida' })
   @IsOptional()
   eventEndDate?: string;
 
@@ -57,20 +57,20 @@ export class CreateEventDto {
   @IsOptional()
   modality?: string;
 
-  @ApiPropertyOptional({ description: 'Numero maximo de participantes', example: 500 })
+  @ApiPropertyOptional({ description: 'Número máximo de participantes', example: 500 })
   @IsInt()
   @Min(1)
   @IsOptional()
   maxParticipants?: number;
 
-  @ApiPropertyOptional({ description: 'Preco em centavos BRL (0 = gratuito)', example: 15000, default: 0 })
+  @ApiPropertyOptional({ description: 'Preço em centavos BRL (0 = gratuito)', example: 15000, default: 0 })
   @IsInt()
   @Min(0)
   @IsOptional()
   price?: number;
 
   @ApiPropertyOptional({ description: 'Status do evento', enum: EventStatus, default: EventStatus.DRAFT })
-  @IsEnum(EventStatus, { message: 'Status de evento invalido' })
+  @IsEnum(EventStatus, { message: 'Status de evento inválido' })
   @IsOptional()
   status?: EventStatus;
 
@@ -85,18 +85,18 @@ export class CreateEventDto {
   @IsOptional()
   rules?: string;
 
-  @ApiPropertyOptional({ description: 'Descricao do kit' })
+  @ApiPropertyOptional({ description: 'Descrição do kit' })
   @IsString()
   @IsOptional()
   kitDescription?: string;
 
-  @ApiPropertyOptional({ description: 'Preco do Kit Completo em centavos (0 = incluso na inscricao)', example: 0 })
+  @ApiPropertyOptional({ description: 'Preço do Kit Completo em centavos (0 = incluso na inscrição)', example: 0 })
   @IsInt()
   @Min(0)
   @IsOptional()
   kitCompletePrice?: number;
 
-  @ApiPropertyOptional({ description: 'Preco do Kit Premium em centavos', example: 4500 })
+  @ApiPropertyOptional({ description: 'Preço do Kit Premium em centavos', example: 4500 })
   @IsInt()
   @Min(0)
   @IsOptional()

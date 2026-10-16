@@ -633,7 +633,7 @@ export default function TrainingUploadScreen() {
               {[
                 { num: '1', color: colors.primary, title: 'Envie sua planilha', desc: 'Faca upload do arquivo Excel, PDF ou compartilhe o link do Google Sheets' },
                 { num: '2', color: colors.info, title: 'Treinador analisa', desc: 'Seu treinador revisa e adapta o plano para suas necessidades' },
-                { num: '3', color: colors.success, title: 'Treinos no relogio', desc: 'Os treinos sao enviados direto para o Garmin Connect do seu relogio' },
+                { num: '3', color: colors.success, title: 'Treinos no app', desc: 'Os treinos aparecem no app e suas corridas sincronizam pela Strava' },
               ].map((step, idx) => (
                 <View key={idx}>
                   {idx > 0 && (

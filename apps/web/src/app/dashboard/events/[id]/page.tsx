@@ -8,6 +8,12 @@ import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth.store';
 import CouponManager from './CouponManager';
 import DistanceManager from './DistanceManager';
+import EventStats from './EventStats';
+import RegistrationsPanel from './RegistrationsPanel';
+import CheckinPanel from './CheckinPanel';
+import KitSessionsPanel from './KitSessionsPanel';
+import EventEditForm from './EventEditForm';
+import { errMsg } from './shared';
 
 const EventMap = dynamic(() => import('@/components/maps/EventMap'), { ssr: false });
 
@@ -34,8 +40,19 @@ interface EventDetail {
   meetingPointLat?: number;
   meetingPointLng?: number;
   createdById?: string;
+  canManage?: boolean;
+  eventEndDate?: string | null;
+  rules?: string | null;
+  kitDescription?: string | null;
+  kitCompletePrice?: number | null;
+  kitPremiumPrice?: number | null;
+  kitPickupLocation?: string | null;
+  kitPickupDate?: string | null;
+  routeMapUrl?: string | null;
   _count?: { registrations: number };
 }
+
+type Tab = 'geral' | 'inscritos' | 'diaprova' | 'cupons' | 'editar';
 
 interface EventDistance {
   id: string;
@@ -50,15 +67,6 @@ interface EventDistance {
   _count?: { registrations: number };
 }
 
-interface Registration {
-  id: string;
-  status: string;
-  paymentStatus?: string;
-  bibNumber?: string;
-  distanceId?: string | null;
-  registeredAt: string;
-  user: { id: string; name: string; email: string; avatarUrl?: string; phone?: string };
-}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -74,18 +82,6 @@ const STATUS_COLORS: Record<string, string> = {
   CANCELED: 'bg-red-50 text-red-500',
 };
 
-const REG_STATUS_COLORS: Record<string, string> = {
-  CONFIRMED: 'bg-emerald-50 text-emerald-700',
-  PENDING: 'bg-amber-50 text-amber-700',
-  CHECKED_IN: 'bg-blue-50 text-blue-700',
-  WAITLIST: 'bg-gray-100 text-gray-500',
-  CANCELED: 'bg-red-50 text-red-400',
-  ABSENT: 'bg-red-50 text-red-500',
-};
-const REG_STATUS_LABELS: Record<string, string> = {
-  CONFIRMED: 'Confirmado', PENDING: 'Pendente', CHECKED_IN: 'Presente',
-  WAITLIST: 'Lista de Espera', CANCELED: 'Cancelado', ABSENT: 'Ausente',
-};
 
 function formatPrice(cents: number) {
   if (cents === 0) return 'Gratuito';
@@ -103,10 +99,6 @@ export default function EventDetailPage() {
   const [loading, setLoading] = useState(true);
   const [distances, setDistances] = useState<EventDistance[]>([]);
 
-  // Registrations
-  const [registrations, setRegistrations] = useState<Registration[]>([]);
-  const [regsLoading, setRegsLoading] = useState(false);
-  const [showRegs, setShowRegs] = useState(false);
 
   // Cover upload
   const coverInputRef = useRef<HTMLInputElement>(null);
@@ -118,7 +110,34 @@ export default function EventDetailPage() {
   const [notifySending, setNotifySending] = useState(false);
 
   const isCoach = user?.role === 'COACH' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
-  const isCreator = isCoach && event?.createdById === user?.id;
+  const isCreator = isCoach && (event?.canManage ?? event?.createdById === user?.id);
+  // M10: COACH cria rascunho; OWNER/ADMIN publica (validado também no servidor)
+  const canPublish = !user?.team?.role || ['OWNER', 'ADMIN'].includes(user.team.role) || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+  const [tab, setTab] = useState<Tab>('geral');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const bump = () => setRefreshKey((k) => k + 1);
+
+  const changeStatus = async (status: 'PUBLISHED' | 'DRAFT' | 'COMPLETED' | 'CANCELED') => {
+    if (!event) return;
+    const confirms: Record<string, string> = {
+      PUBLISHED: 'Publicar o evento? Ele ficará visível e aberto para inscrições.',
+      DRAFT: 'Voltar para rascunho? O evento deixa de aparecer para os atletas.',
+      COMPLETED: 'Encerrar o evento? As inscrições serão fechadas.',
+      CANCELED: 'Cancelar o evento? Inscrições aguardando pagamento serão canceladas. Inscrições pagas continuam na lista para você estornar.',
+    };
+    if (!window.confirm(confirms[status])) return;
+    setStatusBusy(true);
+    try {
+      await api.put(`/events/${event.id}`, { status });
+      loadEvent();
+      bump();
+    } catch (e) {
+      alert(errMsg(e, 'Não foi possível alterar o status'));
+    } finally {
+      setStatusBusy(false);
+    }
+  };
 
   const loadEvent = () => {
     api.get(`/events/${id}`)
@@ -144,21 +163,6 @@ export default function EventDetailPage() {
       .catch(() => router.push('/dashboard/events'))
       .finally(() => setLoading(false));
   }, [id, router]);
-
-  // Load registrations (coach only)
-  const openRegistrations = async () => {
-    setShowRegs(true);
-    if (registrations.length > 0) return;
-    setRegsLoading(true);
-    try {
-      const { data } = await api.get(`/events/${id}/registrations`);
-      setRegistrations(data.data || data || []);
-    } catch {
-      alert('Erro ao carregar inscritos');
-    } finally {
-      setRegsLoading(false);
-    }
-  };
 
   // Cover image upload
   const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -206,20 +210,8 @@ export default function EventDetailPage() {
   const locationStr = [event.location, event.city, event.state].filter(Boolean).join(', ');
   const regCount = event._count?.registrations ?? 0;
 
-  // Group registrations by distance
-  const regsByDistance: Record<string, Registration[]> = {};
-  const noDistanceRegs: Registration[] = [];
-  for (const reg of registrations) {
-    if (reg.distanceId) {
-      if (!regsByDistance[reg.distanceId]) regsByDistance[reg.distanceId] = [];
-      regsByDistance[reg.distanceId].push(reg);
-    } else {
-      noDistanceRegs.push(reg);
-    }
-  }
-
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8">
+    <div className="max-w-4xl mx-auto px-4 py-8">
       {/* Back + actions */}
       <div className="flex items-center justify-between mb-6">
         <Link href="/dashboard/events" className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700">
@@ -336,6 +328,66 @@ export default function EventDetailPage() {
         </div>
       </div>
 
+      {/* ── Ações do organizador + abas ───────────────────────────────────────── */}
+      {isCreator && (
+        <div className="glass-card p-3 mb-4 flex flex-wrap items-center gap-2">
+          {event.status === 'DRAFT' && canPublish && (
+            <button disabled={statusBusy} onClick={() => changeStatus('PUBLISHED')} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold disabled:opacity-50">Publicar evento</button>
+          )}
+          {event.status === 'DRAFT' && !canPublish && (
+            <span className="text-xs text-amber-700">Rascunho — o dono ou um gestor da equipe publica o evento.</span>
+          )}
+          {(event.status === 'PUBLISHED' || event.status === 'SOLD_OUT') && (
+            <>
+              <button disabled={statusBusy} onClick={() => changeStatus('DRAFT')} className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 disabled:opacity-50">Despublicar</button>
+              <button disabled={statusBusy} onClick={() => changeStatus('COMPLETED')} className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-700 disabled:opacity-50">Encerrar</button>
+            </>
+          )}
+          {event.status !== 'CANCELED' && event.status !== 'COMPLETED' && (
+            <button disabled={statusBusy} onClick={() => changeStatus('CANCELED')} className="px-3 py-1.5 rounded-lg border border-red-200 text-xs font-semibold text-red-600 disabled:opacity-50">Cancelar evento</button>
+          )}
+          <a href={`/eventos/${event.id}`} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs font-semibold text-primary underline">Página de inscrição →</a>
+        </div>
+      )}
+
+      {isCreator && (
+        <div className="flex gap-1 border-b border-gray-200 mb-4 overflow-x-auto">
+          {([
+            ['geral', 'Visão geral'],
+            ['inscritos', 'Inscritos'],
+            ['diaprova', 'Kit & check-in'],
+            ['cupons', 'Cupons'],
+            ['editar', 'Editar'],
+          ] as Array<[Tab, string]>).map(([id, l]) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={`px-3 py-2 text-sm font-semibold border-b-2 -mb-px whitespace-nowrap ${tab === id ? 'border-primary text-primary' : 'border-transparent text-gray-500'}`}>
+              {l}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {isCreator && tab === 'inscritos' && (
+        <RegistrationsPanel eventId={event.id} eventTitle={event.title} distances={distances} onChanged={() => { bump(); loadEvent(); }} />
+      )}
+
+      {isCreator && tab === 'diaprova' && (
+        <div className="space-y-4">
+          <EventStats eventId={event.id} refreshKey={refreshKey} />
+          <CheckinPanel eventId={event.id} onChanged={bump} />
+          <KitSessionsPanel eventId={event.id} />
+        </div>
+      )}
+
+      {isCreator && tab === 'cupons' && <CouponManager eventId={event.id} eventPrice={event.price} />}
+
+      {isCreator && tab === 'editar' && (
+        <EventEditForm event={event} onSaved={() => { loadEvent(); bump(); }} />
+      )}
+
+      {(!isCreator || tab === 'geral') && (<>
+      {isCreator && <div className="mb-4"><EventStats eventId={event.id} refreshKey={refreshKey} /></div>}
+
       {/* ── DISTANCES — prominent section ──────────────────────────────────────── */}
       <div className="mb-4">
         <div className="flex items-center justify-between mb-3">
@@ -414,78 +466,7 @@ export default function EventDetailPage() {
       </div>
 
       {/* Distance Manager (add/edit/delete) */}
-      <DistanceManager eventId={event.id} eventPrice={event.price} onDistancesChange={loadDistances} />
-
-      {/* Registrations by distance (coach) */}
-      {isCoach && (
-        <div className="glass-card p-5 mt-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-gray-700">Lista de Inscritos</h2>
-            <button
-              onClick={openRegistrations}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition cursor-pointer"
-            >
-              {showRegs ? 'Recolher' : `Ver Inscritos (${regCount})`}
-            </button>
-          </div>
-
-          {showRegs && (
-            regsLoading ? (
-              <div className="space-y-2">
-                {[1, 2, 3].map((i) => <div key={i} className="h-12 rounded-xl bg-gray-100 animate-pulse" />)}
-              </div>
-            ) : registrations.length === 0 ? (
-              <p className="text-xs text-gray-400 text-center py-6">Nenhum inscrito ainda</p>
-            ) : (
-              <div className="space-y-4">
-                {/* By distance */}
-                {distances.map((d) => {
-                  const regs = regsByDistance[d.id] || [];
-                  if (regs.length === 0) return null;
-                  return (
-                    <div key={d.id}>
-                      <div className="flex items-center gap-2 mb-2">
-                        <p className="text-xs font-semibold text-gray-600">{d.name}</p>
-                        {d.distanceKm != null && (
-                          <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full">
-                            {d.distanceKm}km
-                          </span>
-                        )}
-                        {d.ageGroup && (
-                          <span className="text-xs bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded-full">
-                            {d.ageGroup}
-                          </span>
-                        )}
-                        <span className="text-xs text-gray-400 ml-auto">{regs.length} inscrito{regs.length !== 1 ? 's' : ''}</span>
-                      </div>
-                      <div className="space-y-1.5">
-                        {regs.map((reg) => (
-                          <RegistrationRow key={reg.id} reg={reg} />
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {/* Without distance */}
-                {noDistanceRegs.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <p className="text-xs font-semibold text-gray-600">Sem percurso definido</p>
-                      <span className="text-xs text-gray-400 ml-auto">{noDistanceRegs.length}</span>
-                    </div>
-                    <div className="space-y-1.5">
-                      {noDistanceRegs.map((reg) => (
-                        <RegistrationRow key={reg.id} reg={reg} />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          )}
-        </div>
-      )}
+      {isCreator && <DistanceManager eventId={event.id} eventPrice={event.price} onDistancesChange={() => { loadDistances(); bump(); }} />}
 
       {/* Map */}
       {locationStr && (
@@ -529,10 +510,8 @@ export default function EventDetailPage() {
         </div>
       )}
 
-      {/* Coupon Manager */}
-      <div className="mt-4">
-        <CouponManager eventId={event.id} eventPrice={event.price} />
-      </div>
+
+      </>)}
 
       {/* ── Notify modal ────────────────────────────────────────────────────── */}
       {showNotify && (
@@ -586,34 +565,6 @@ export default function EventDetailPage() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function RegistrationRow({ reg }: { reg: Registration }) {
-  return (
-    <div className="flex items-center gap-3 p-2.5 rounded-xl bg-gray-50 border border-gray-100">
-      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
-        {reg.user.avatarUrl ? (
-          <img src={reg.user.avatarUrl} alt={reg.user.name} className="w-full h-full object-cover" />
-        ) : (
-          <span className="text-xs font-semibold text-primary">{reg.user.name.charAt(0)}</span>
-        )}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium text-gray-900 truncate">{reg.user.name}</p>
-        <p className="text-xs text-gray-400 truncate">{reg.user.email}</p>
-      </div>
-      <div className="flex items-center gap-1.5 shrink-0">
-        {reg.bibNumber && (
-          <span className="text-xs font-mono bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">
-            #{reg.bibNumber}
-          </span>
-        )}
-        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${REG_STATUS_COLORS[reg.status] ?? 'bg-gray-100 text-gray-500'}`}>
-          {REG_STATUS_LABELS[reg.status] ?? reg.status}
-        </span>
-      </div>
     </div>
   );
 }

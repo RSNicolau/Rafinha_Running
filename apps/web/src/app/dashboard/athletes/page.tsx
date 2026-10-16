@@ -1,8 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { levelLabel } from '@/lib/coach-format';
+
+const PAGE_SIZE = 25;
 
 interface Athlete {
   id: string;
@@ -21,31 +24,49 @@ interface Invite {
 
 export default function AthletesPage() {
   const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
+  const reqId = useRef(0);
   const [showModal, setShowModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteError, setInviteError] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
   const [sentInviteLink, setSentInviteLink] = useState('');
   const [pendingInvites, setPendingInvites] = useState<Invite[]>([]);
-  const [copied, setCopied] = useState('');
   const [cancellingInviteId, setCancellingInviteId] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState('');
   const [cancelSuccess, setCancelSuccess] = useState('');
   const [pendingOnboardingCount, setPendingOnboardingCount] = useState(0);
 
-  const loadAthletes = () => {
+  // Busca e paginação no servidor (antes: só os 20 primeiros eram carregados)
+  const loadAthletes = useCallback((nextPage = 1, q = query) => {
+    const id = ++reqId.current;
     setLoadError(false);
-    api.get('/users/athletes')
+    if (nextPage === 1) setLoading(true); else setLoadingMore(true);
+    api.get('/users/athletes', { params: { page: nextPage, limit: PAGE_SIZE, ...(q ? { q } : {}) } })
       .then(({ data }) => {
-        const list = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
-        setAthletes(list);
+        if (id !== reqId.current) return;
+        const list: Athlete[] = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+        setAthletes((prev) => (nextPage === 1 ? list : [...prev, ...list]));
+        setTotal(typeof data?.total === 'number' ? data.total : list.length);
+        setTotalPages(typeof data?.totalPages === 'number' ? data.totalPages : 1);
+        setPage(nextPage);
       })
-      .catch(() => setLoadError(true))
-      .finally(() => setLoading(false));
-  };
+      .catch(() => { if (id === reqId.current) setLoadError(true); })
+      .finally(() => { if (id === reqId.current) { setLoading(false); setLoadingMore(false); } });
+  }, [query]);
+
+  // debounce da busca
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const loadInvites = () => {
     api.get('/invites')
@@ -54,17 +75,17 @@ export default function AthletesPage() {
   };
 
   useEffect(() => {
-    loadAthletes();
+    loadAthletes(1, query);
+  }, [query, loadAthletes]);
+
+  useEffect(() => {
     loadInvites();
     api.get('/onboarding/pending').then(res => {
       setPendingOnboardingCount(Array.isArray(res.data) ? res.data.length : 0);
     }).catch(() => {});
   }, []);
 
-  const filtered = athletes.filter((a) =>
-    (a?.user?.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (a?.user?.email ?? '').toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = athletes;
 
   const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,9 +98,9 @@ export default function AthletesPage() {
     setInviteError('');
     setInviteLoading(true);
     try {
-      const { data } = await api.post('/invites', { email: inviteEmail.trim() });
-      const link = `${window.location.origin}/join?token=${data.token}`;
-      setSentInviteLink(link);
+      // O link do convite é enviado somente por e-mail ao atleta (o token não é exposto ao treinador)
+      await api.post('/invites', { email: inviteEmail.trim() });
+      setSentInviteLink(inviteEmail.trim());
       loadInvites();
     } catch (err: any) {
       setInviteError(err.response?.data?.message || 'Erro ao enviar convite');
@@ -105,12 +126,6 @@ export default function AthletesPage() {
     }
   };
 
-  const copyLink = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(key);
-    setTimeout(() => setCopied(''), 2000);
-  };
-
   return (
     <div>
       <div className="flex items-center justify-between mb-8">
@@ -127,7 +142,11 @@ export default function AthletesPage() {
               </Link>
             )}
           </div>
-          <p className="text-sm text-gray-500 mt-1">{athletes.length} atletas cadastrados</p>
+          <p className="text-sm text-gray-500 mt-1">
+            {query
+              ? `${total} ${total === 1 ? 'atleta encontrado' : 'atletas encontrados'}`
+              : `${total} ${total === 1 ? 'atleta cadastrado' : 'atletas cadastrados'}`}
+          </p>
         </div>
         <button
           onClick={() => { setShowModal(true); setInviteError(''); setInviteEmail(''); }}
@@ -144,7 +163,7 @@ export default function AthletesPage() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
           </svg>
           <span className="text-sm text-amber-800 flex-1">Erro ao carregar atletas. Verifique sua conexão.</span>
-          <button onClick={loadAthletes} className="text-xs font-medium text-amber-700 hover:text-amber-900 underline">
+          <button onClick={() => loadAthletes(1, query)} className="text-xs font-medium text-amber-700 hover:text-amber-900 underline">
             Tentar novamente
           </button>
         </div>
@@ -156,14 +175,15 @@ export default function AthletesPage() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar atleta..."
+          placeholder="Buscar por nome ou e-mail..."
+          aria-label="Buscar atleta"
           className="w-full max-w-sm px-4 py-2.5 rounded-xl bg-white border border-gray-200/60 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40"
         />
       </div>
 
       {/* Table */}
-      <div className="glass-card p-0 overflow-hidden">
-        <table className="w-full">
+      <div className="glass-card p-0 overflow-x-auto">
+        <table className="w-full min-w-[560px]">
           <thead>
             <tr className="border-b border-gray-100">
               <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-5 py-3">Atleta</th>
@@ -182,7 +202,7 @@ export default function AthletesPage() {
             ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={4} className="text-center py-12 text-sm text-gray-400">
-                  Nenhum atleta encontrado
+                  {query ? 'Nenhum atleta encontrado para esta busca' : 'Nenhum atleta ainda — convide o primeiro em “+ Novo Atleta”'}
                 </td>
               </tr>
             ) : (
@@ -203,7 +223,7 @@ export default function AthletesPage() {
                   <td className="px-5 py-4 text-sm text-gray-500">{athlete?.user?.email ?? '—'}</td>
                   <td className="px-5 py-4">
                     <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-primary/8 text-primary">
-                      {athlete.level}
+                      {levelLabel(athlete.level)}
                     </span>
                   </td>
                   <td className="px-5 py-4 text-sm text-gray-500">
@@ -215,6 +235,21 @@ export default function AthletesPage() {
           </tbody>
         </table>
       </div>
+
+      {!loading && athletes.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-4 text-sm text-gray-500">
+          <span>Mostrando {athletes.length} de {total}</span>
+          {page < totalPages && (
+            <button
+              onClick={() => loadAthletes(page + 1, query)}
+              disabled={loadingMore}
+              className="px-4 py-2 rounded-xl border border-gray-200 hover:bg-gray-50 text-gray-700 font-medium disabled:opacity-60 cursor-pointer"
+            >
+              {loadingMore ? 'Carregando…' : 'Carregar mais'}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Pending Invites */}
       {pendingInvites.length > 0 && (
@@ -252,12 +287,6 @@ export default function AthletesPage() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <button
-                      onClick={() => copyLink(`${window.location.origin}/join?token=${inv.id}`, inv.id)}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-primary/8 text-primary font-medium hover:bg-primary/15 transition"
-                    >
-                      {copied === inv.id ? 'Copiado!' : 'Copiar link'}
-                    </button>
-                    <button
                       onClick={() => handleCancelInvite(inv.id)}
                       disabled={isCancelling}
                       className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-1.5"
@@ -287,20 +316,11 @@ export default function AthletesPage() {
             {sentInviteLink ? (
               <div className="space-y-4">
                 <div className="bg-green-50 rounded-xl p-4">
-                  <p className="text-sm font-medium text-green-800 mb-2">Convite criado! Envie este link ao atleta:</p>
-                  <div className="flex items-center gap-2">
-                    <input
-                      readOnly
-                      value={sentInviteLink}
-                      className="flex-1 text-xs bg-white border border-green-200 rounded-lg px-3 py-2 text-gray-700 min-w-0"
-                    />
-                    <button
-                      onClick={() => copyLink(sentInviteLink, 'modal')}
-                      className="shrink-0 px-3 py-2 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary-dark transition"
-                    >
-                      {copied === 'modal' ? 'Copiado!' : 'Copiar'}
-                    </button>
-                  </div>
+                  <p className="text-sm font-medium text-green-800 mb-1">Convite enviado!</p>
+                  <p className="text-xs text-green-700">
+                    Enviamos o link de convite para <span className="font-semibold">{sentInviteLink}</span>.
+                    O atleta entra na sua equipe assim que aceitar o convite.
+                  </p>
                 </div>
                 <button
                   onClick={() => { setShowModal(false); setSentInviteLink(''); setInviteEmail(''); }}

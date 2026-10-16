@@ -1,12 +1,21 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, BadRequestException } from '@nestjs/common';
+import { NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { UsersService } from '../users.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CacheService } from '../../cache/cache.service';
+import { InvitesService } from '../../invites/invites.service';
+import { TERMS_VERSION, PRIVACY_VERSION } from '../../legal/legal.constants';
+
+process.env.API_KEY_ENCRYPTION_SECRET = process.env.API_KEY_ENCRYPTION_SECRET || 'test-secret-with-at-least-32-characters!!';
 
 const mockCache = {
   get: jest.fn().mockResolvedValue(null),
   set: jest.fn().mockResolvedValue(undefined),
+  del: jest.fn().mockResolvedValue(undefined),
+};
+
+const mockInvites = {
+  createInvite: jest.fn(),
 };
 
 jest.mock('bcrypt', () => ({
@@ -17,6 +26,7 @@ jest.mock('bcrypt', () => ({
 const mockPrisma = {
   user: {
     findUnique: jest.fn(),
+    findFirst:  jest.fn(),
     update:     jest.fn(),
   },
   athleteProfile: {
@@ -30,6 +40,9 @@ const mockPrisma = {
     findMany: jest.fn(),
     count:    jest.fn(),
   },
+  conversation: { findFirst: jest.fn() },
+  teamMember:   { findMany: jest.fn() },
+  team:         { findMany: jest.fn() },
 };
 
 const mockUser = {
@@ -55,6 +68,7 @@ describe('UsersService', () => {
         UsersService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: CacheService, useValue: mockCache },
+        { provide: InvitesService, useValue: mockInvites },
       ],
     }).compile();
 
@@ -69,6 +83,13 @@ describe('UsersService', () => {
       const result = await service.findById('user-1');
       expect(result.id).toBe('user-1');
       expect(result.email).toBe('coach@test.com');
+      expect(result.needsConsent).toBe(true);
+    });
+
+    it('needsConsent=false quando versões vigentes foram aceitas', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ ...mockUser, termsVersion: TERMS_VERSION, privacyVersion: PRIVACY_VERSION });
+      const result = await service.findById('user-1');
+      expect(result.needsConsent).toBe(false);
     });
 
     it('deve lançar NotFoundException quando usuário não existe', async () => {
@@ -78,20 +99,92 @@ describe('UsersService', () => {
     });
   });
 
-  describe('findPublicById', () => {
-    it('deve retornar apenas campos públicos', async () => {
-      const publicUser = { id: 'user-1', name: 'Coach Test', avatarUrl: null, role: 'COACH' };
-      mockPrisma.user.findUnique.mockResolvedValue(publicUser);
+  describe('findPublicById (escopo — B11)', () => {
+    const publicUser = { id: 'target', name: 'Alvo', avatarUrl: null, role: 'ATHLETE' };
+    const noRelation = () => {
+      mockPrisma.conversation.findFirst.mockResolvedValue(null);
+      mockPrisma.athleteProfile.findUnique.mockResolvedValue(null);
+      mockPrisma.teamMember.findMany.mockResolvedValue([]);
+      mockPrisma.team.findMany.mockResolvedValue([]);
+    };
 
-      const result = await service.findPublicById('user-1');
+    it('o próprio usuário vê só campos públicos (sem e-mail)', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({ ...publicUser, id: 'me' });
+      const result = await service.findPublicById('me', { id: 'me', role: 'ATHLETE' });
       expect(result).not.toHaveProperty('email');
-      expect(result.name).toBe('Coach Test');
+      expect(mockPrisma.user.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ select: { id: true, name: true, avatarUrl: true, role: true } }),
+      );
     });
 
-    it('deve lançar NotFoundException quando usuário não existe', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(null);
+    it('admin da plataforma vê qualquer usuário', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(publicUser);
+      await expect(service.findPublicById('target', { id: 'adm', role: 'SUPER_ADMIN' })).resolves.toEqual(publicUser);
+      expect(mockPrisma.conversation.findFirst).not.toHaveBeenCalled();
+    });
 
-      await expect(service.findPublicById('nao-existe')).rejects.toThrow(NotFoundException);
+    it('usuário sem relação (outra equipe) → 404', async () => {
+      noRelation();
+      mockPrisma.user.findFirst.mockResolvedValue(publicUser);
+      await expect(service.findPublicById('target', { id: 'stranger', role: 'COACH' })).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.user.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('sem chamador → 404', async () => {
+      await expect(service.findPublicById('target', null)).rejects.toThrow(NotFoundException);
+    });
+
+    it('treinador responsável vê o atleta', async () => {
+      noRelation();
+      mockPrisma.athleteProfile.findUnique.mockImplementation(({ where }: any) =>
+        Promise.resolve(where.userId === 'target' ? { coachId: 'coach-1', teamId: null } : null),
+      );
+      mockPrisma.user.findFirst.mockResolvedValue(publicUser);
+      await expect(service.findPublicById('target', { id: 'coach-1', role: 'COACH' })).resolves.toEqual(publicUser);
+    });
+
+    it('atleta vê o próprio treinador', async () => {
+      noRelation();
+      mockPrisma.athleteProfile.findUnique.mockImplementation(({ where }: any) =>
+        Promise.resolve(where.userId === 'ath' ? { coachId: 'target', teamId: null } : null),
+      );
+      mockPrisma.user.findFirst.mockResolvedValue({ ...publicUser, role: 'COACH' });
+      await expect(service.findPublicById('target', { id: 'ath', role: 'ATHLETE' })).resolves.toBeTruthy();
+    });
+
+    it('equipe técnica vê atleta da equipe; atleta de outra equipe não', async () => {
+      noRelation();
+      mockPrisma.teamMember.findMany.mockImplementation(({ where }: any) =>
+        Promise.resolve(where.userId === 'staff' ? [{ teamId: 'team-A' }] : []),
+      );
+      mockPrisma.athleteProfile.findUnique.mockImplementation(({ where }: any) =>
+        Promise.resolve(where.userId === 'target' ? { coachId: 'other', teamId: 'team-A' } : null),
+      );
+      mockPrisma.user.findFirst.mockResolvedValue(publicUser);
+      await expect(service.findPublicById('target', { id: 'staff', role: 'COACH' })).resolves.toEqual(publicUser);
+
+      mockPrisma.athleteProfile.findUnique.mockImplementation(({ where }: any) =>
+        Promise.resolve(where.userId === 'target' ? { coachId: 'other', teamId: 'team-B' } : null),
+      );
+      await expect(service.findPublicById('target', { id: 'staff', role: 'COACH' })).rejects.toThrow(NotFoundException);
+    });
+
+    it('atletas da mesma equipe não se veem (sem relação direta)', async () => {
+      noRelation();
+      mockPrisma.athleteProfile.findUnique.mockResolvedValue({ coachId: 'c', teamId: 'team-A' });
+      await expect(service.findPublicById('target', { id: 'ath2', role: 'ATHLETE' })).rejects.toThrow(NotFoundException);
+    });
+
+    it('conversa existente libera o par', async () => {
+      noRelation();
+      mockPrisma.conversation.findFirst.mockResolvedValue({ id: 'conv' });
+      mockPrisma.user.findFirst.mockResolvedValue(publicUser);
+      await expect(service.findPublicById('target', { id: 'x', role: 'COACH' })).resolves.toEqual(publicUser);
+    });
+
+    it('usuário excluído/inexistente → 404', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      await expect(service.findPublicById('me', { id: 'me', role: 'ATHLETE' })).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -110,6 +203,29 @@ describe('UsersService', () => {
         expect.objectContaining({ where: { id: 'user-1' } }),
       );
       expect(result.name).toBe('Coach Atualizado');
+    });
+
+    it('nunca repassa coachId/niche do corpo para o athleteProfile (C2c)', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ role: 'ATHLETE' });
+      mockPrisma.user.update.mockResolvedValue({});
+      await service.updateProfile('ath-1', {
+        athleteProfile: { weight: 70, coachId: 'evil-coach', niche: 'CYCLING' } as any,
+      });
+      const data = mockPrisma.user.update.mock.calls[0][0].data;
+      expect(data.athleteProfile.upsert.update).toEqual({ weight: 70 });
+      expect(JSON.stringify(data)).not.toContain('evil-coach');
+    });
+  });
+
+  describe('updateAiSettings', () => {
+    it('criptografa a chave BYOK antes de gravar', async () => {
+      mockPrisma.user.update.mockResolvedValue({ id: 'c1', aiProvider: 'openai', aiModel: null, aiByok: true, aiApiKey: 'x' });
+      const res: any = await service.updateAiSettings('c1', { aiProvider: 'openai', aiByok: true, aiApiKey: 'sk-plain-123' });
+      const stored = mockPrisma.user.update.mock.calls[0][0].data.aiApiKey;
+      expect(stored).not.toContain('sk-plain-123');
+      expect(stored).toMatch(/^[a-f0-9]{32}:[a-f0-9]+$/);
+      expect(res.aiApiKey).toBeUndefined();
+      expect(res.hasApiKey).toBe(true);
     });
   });
 
@@ -153,31 +269,34 @@ describe('UsersService', () => {
   });
 
   describe('addAthleteByEmail', () => {
-    it('deve vincular atleta ao coach pelo email', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({
-        id: 'athlete-99', name: 'New Athlete', email: 'new@test.com',
-        role: 'ATHLETE', athleteProfile: null,
+    it('NÃO rouba atleta de outro coach: cria convite pendente em vez de alterar coachId (C2a)', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({
+        id: 'athlete-99', role: 'ATHLETE', athleteProfile: { coachId: 'other-coach' },
       });
-      mockPrisma.athleteProfile.upsert.mockResolvedValue({ userId: 'athlete-99', coachId: 'coach-1' });
+      mockInvites.createInvite.mockResolvedValue({ id: 'inv-1', email: 'new@test.com', status: 'PENDING', expiresAt: new Date() });
 
-      const result = await service.addAthleteByEmail('coach-1', 'new@test.com');
-      expect(result.success).toBe(true);
-      expect(result.athlete.email).toBe('new@test.com');
-      expect(mockPrisma.athleteProfile.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ update: { coachId: 'coach-1' } }),
-      );
+      const result = await service.addAthleteByEmail('coach-1', 'New@test.com');
+      expect(result.invited).toBe(true);
+      expect(mockInvites.createInvite).toHaveBeenCalledWith('coach-1', { email: 'new@test.com' });
+      expect(mockPrisma.athleteProfile.upsert).not.toHaveBeenCalled();
+      expect(mockPrisma.athleteProfile.update).not.toHaveBeenCalled();
     });
 
-    it('lança NotFoundException se email não existe', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(null);
-      await expect(service.addAthleteByEmail('coach-1', 'ghost@test.com')).rejects.toThrow(NotFoundException);
+    it('e-mail sem conta → convite', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(null);
+      mockInvites.createInvite.mockResolvedValue({ id: 'inv-2', email: 'ghost@test.com', status: 'PENDING', expiresAt: new Date() });
+      const result = await service.addAthleteByEmail('coach-1', 'ghost@test.com');
+      expect(result.invite.id).toBe('inv-2');
     });
 
-    it('lança Error se usuário não é ATHLETE', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({
-        id: 'u-99', name: 'Coach', email: 'coach2@test.com', role: 'COACH', athleteProfile: null,
-      });
-      await expect(service.addAthleteByEmail('coach-1', 'coach2@test.com')).rejects.toThrow('não é um atleta');
+    it('rejeita conta que não é ATHLETE', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({ id: 'u-99', role: 'COACH', athleteProfile: null });
+      await expect(service.addAthleteByEmail('coach-1', 'coach2@test.com')).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejeita atleta já vinculado ao mesmo coach', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue({ id: 'a', role: 'ATHLETE', athleteProfile: { coachId: 'coach-1' } });
+      await expect(service.addAthleteByEmail('coach-1', 'a@test.com')).rejects.toThrow(ConflictException);
     });
   });
 
@@ -213,9 +332,14 @@ describe('UsersService', () => {
 
       const result = await service.changePassword('user-1', 'currentPass', 'newPass123456');
       expect(mockPrisma.user.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { passwordHash: '$2b$12$hashed' } }),
+        expect.objectContaining({ data: { passwordHash: '$2b$12$hashed', tokenVersion: { increment: 1 } } }),
       );
       expect(result.message).toContain('sucesso');
+    });
+
+    it('rejeita nova senha com menos de 8 caracteres', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({ ...mockUser, passwordHash: '$2b$12$current' });
+      await expect(service.changePassword('user-1', 'currentPass', 'short')).rejects.toThrow(BadRequestException);
     });
 
     it('lança BadRequestException quando senha atual incorreta', async () => {

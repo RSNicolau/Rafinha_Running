@@ -1,4 +1,5 @@
-import { IsString, IsOptional, IsInt, IsDateString, IsEnum, IsUUID, IsNumber, IsArray, Min, Max, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsInt, IsDateString, IsEnum, IsUUID, IsNumber, IsArray, Min, Max, MaxLength, ArrayMaxSize, ValidateNested, IsIn } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { WorkoutType, HeartRateZone, WorkoutSource } from '@prisma/client';
 
@@ -74,4 +75,59 @@ export class SubmitFeedbackDto {
   @ApiPropertyOptional({ example: 'Perna pesada, mas consegui completar' })
   @IsString() @MaxLength(500) @IsOptional()
   athleteFeedback?: string;
+}
+
+export class HealthSplitDto {
+  @IsNumber() @Min(0) @Max(1000)
+  km: number;
+
+  @IsNumber() @Min(0) @Max(1000)
+  paceMinPerKm: number;
+}
+
+/** Treino vindo do Apple Health / HealthKit (sync/health). */
+export class HealthWorkoutDto {
+  @IsString() @MaxLength(200)
+  id: string;
+
+  @IsString() @MaxLength(100)
+  type: string;
+
+  @IsDateString()
+  startDate: string;
+
+  @IsDateString()
+  endDate: string;
+
+  @IsNumber() @Min(0) @Max(100000)
+  durationMinutes: number;
+
+  @IsNumber() @Min(0) @Max(10000)
+  distanceKm: number;
+
+  @IsNumber() @Min(0) @Max(100000)
+  calories: number;
+
+  @IsOptional() @IsNumber() @Min(0) @Max(300)
+  averageHeartRate?: number;
+
+  @IsOptional() @IsNumber() @Min(0) @Max(300)
+  maxHeartRate?: number;
+
+  @IsOptional() @IsNumber() @Min(0) @Max(1000)
+  averagePaceMinPerKm?: number;
+
+  @IsOptional() @IsNumber() @Min(-10000) @Max(100000)
+  elevationGain?: number;
+
+  @IsOptional() @IsArray() @ArrayMaxSize(500) @ValidateNested({ each: true }) @Type(() => HealthSplitDto)
+  splits?: HealthSplitDto[];
+
+  @IsIn(['APPLE_HEALTH'])
+  source: 'APPLE_HEALTH';
+}
+
+export class ChangeWorkoutTypeDto {
+  @IsEnum(WorkoutType, { message: 'Tipo de treino inválido' })
+  type: WorkoutType;
 }

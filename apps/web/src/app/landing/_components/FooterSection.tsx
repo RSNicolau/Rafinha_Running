@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { CookieNotice } from '@/components/legal/CookieNotice';
 
 export function FooterSection() {
   return (
@@ -22,7 +23,7 @@ export function FooterSection() {
           <div>
             <div className="flex items-center gap-2 mb-4">
               <div className="w-8 h-8 rounded-lg overflow-hidden">
-                <img src="/logo.png" alt="RR" className="w-full h-full object-cover" />
+                <img src="/logo.png" alt="Rafinha Running" className="w-full h-full object-cover" />
               </div>
               <span className="font-bold text-gray-200 text-sm">Rafinha Running</span>
             </div>
@@ -46,8 +47,9 @@ export function FooterSection() {
           <div>
             <p className="font-semibold text-gray-300 text-sm mb-4">Legal</p>
             <ul className="space-y-2 text-xs">
-              <li><a href="#" className="hover:text-gray-200 transition-colors">Privacidade</a></li>
-              <li><a href="#" className="hover:text-gray-200 transition-colors">Termos de Uso</a></li>
+              <li><Link href="/privacidade" className="hover:text-gray-200 transition-colors">Política de Privacidade</Link></li>
+              <li><Link href="/termos" className="hover:text-gray-200 transition-colors">Termos de Uso</Link></li>
+              <li><Link href="/privacidade/meus-dados" className="hover:text-gray-200 transition-colors">Meus dados (LGPD)</Link></li>
             </ul>
           </div>
         </div>
@@ -57,6 +59,8 @@ export function FooterSection() {
           <p className="text-xs text-gray-600">Feito com tecnologia para coaches apaixonados por corrida.</p>
         </div>
       </div>
+      {/* Aviso de cookies essenciais (LGPD) — montado aqui para cobrir a landing */}
+      <CookieNotice />
     </footer>
   );
 }

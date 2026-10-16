@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, friendlyError } from '@/lib/api';
 
 interface Testimonial {
   id: string;
@@ -101,7 +101,7 @@ export default function TestimonialPage() {
       setEditing(false);
       setFeedback({ type: 'success', message: existing ? 'Depoimento atualizado com sucesso!' : 'Depoimento enviado com sucesso!' });
     } catch (err: any) {
-      setFeedback({ type: 'error', message: err.response?.data?.message || 'Erro ao enviar depoimento.' });
+      setFeedback({ type: 'error', message: friendlyError(err, 'Não foi possível enviar o depoimento.') });
     } finally {
       setSaving(false);
     }

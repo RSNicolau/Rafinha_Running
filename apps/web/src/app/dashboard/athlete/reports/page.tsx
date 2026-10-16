@@ -1,18 +1,19 @@
 'use client';
 
 import { useState } from 'react';
-import { api } from '@/lib/api';
+import { api, friendlyError } from '@/lib/api';
 
-const MONTHS = Array.from({ length: 12 }, (_, i) => {
-  const d = new Date();
-  d.setMonth(d.getMonth() - i - 1);
+// Mês corrente (parcial) + 12 meses anteriores
+const MONTHS = Array.from({ length: 13 }, (_, i) => {
+  const now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
   const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  const label = d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  const label = d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) + (i === 0 ? ' (até hoje)' : '');
   return { value, label };
 });
 
 export default function AthleteReportsPage() {
-  const [month, setMonth] = useState(MONTHS[0].value);
+  const [month, setMonth] = useState(MONTHS[1].value);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -20,26 +21,32 @@ export default function AthleteReportsPage() {
     setLoading(true);
     setError('');
     try {
-      const token = localStorage.getItem('rr_access_token') || localStorage.getItem('accessToken');
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/reports/monthly/me?month=${month}`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || 'Erro ao gerar relatório');
+      // Mesmo cliente HTTP do app (token, refresh e proxy /api) — evita URL absoluta e erros técnicos
+      const res = await api.get('/reports/monthly/me', { params: { month }, responseType: 'blob' });
+      const blob: Blob = res.data;
+      if (blob.type && blob.type.includes('json')) {
+        const data = JSON.parse(await blob.text().catch(() => '{}'));
+        throw new Error(typeof data?.message === 'string' ? data.message : 'Não foi possível gerar o relatório.');
       }
-
-      const blob = await res.blob();
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
       a.href     = url;
       a.download = `relatorio-${month}.pdf`;
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
     } catch (err: any) {
-      setError(err.message ?? 'Erro desconhecido');
+      let message = friendlyError(err, 'Não foi possível gerar o relatório. Tente novamente.');
+      // Erro da API em blob: tenta extrair a mensagem em português
+      const data = err?.response?.data;
+      if (data instanceof Blob) {
+        try {
+          const parsed = JSON.parse(await data.text());
+          if (typeof parsed?.message === 'string') message = parsed.message;
+        } catch {}
+      } else if (!err?.response && err instanceof Error && err.message && !/fetch|network/i.test(err.message)) {
+        message = err.message;
+      }
+      setError(message);
     } finally {
       setLoading(false);
     }

@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'next/navigation';
-import { api } from '@/lib/api';
+import { api, friendlyError } from '@/lib/api';
+import { formatCalendarDate, levelLabel as levelLabelPt, todayInSaoPaulo, WORKOUT_TYPE_LABELS, formatKm, formatMetersAsKm } from '@/lib/coach-format';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -62,7 +63,7 @@ interface TrainingLoadPoint {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function fmtDistance(m: number) {
-  return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${m} m`;
+  return formatMetersAsKm(m, 1, true);
 }
 
 function fmtDuration(s: number) {
@@ -79,23 +80,29 @@ function fmtTime(s: number) {
 }
 
 function fmtDate(d: string) {
-  return new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  return formatCalendarDate(d, { day: '2-digit', month: '2-digit' });
 }
 
 function fmtDateFull(d: string) {
-  return new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+  return formatCalendarDate(d, { day: '2-digit', month: 'long', year: 'numeric' });
 }
 
 function levelLabel(l?: string) {
-  return ({ beginner: 'Iniciante', intermediate: 'Intermediário', advanced: 'Avançado', elite: 'Elite' })[l?.toLowerCase() ?? ''] ?? l ?? '—';
+  return levelLabelPt(l);
 }
 
 function typeLabel(t: string) {
-  return ({
-    EASY_RUN: 'Fácil', TEMPO: 'Tempo', INTERVAL: 'Intervalado',
-    LONG_RUN: 'Longo', RECOVERY: 'Recuperação', RACE: 'Prova',
-    CROSS_TRAINING: 'Cross', REST: 'Descanso',
-  })[t] ?? t;
+  return WORKOUT_TYPE_LABELS[t] ?? t;
+}
+
+/** Mês corrente em São Paulo: { ym: 'YYYY-MM', from, to, label } */
+function currentMonth() {
+  const today = todayInSaoPaulo();
+  const [y, m] = today.split('-').map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const ym = `${y}-${String(m).padStart(2, '0')}`;
+  const label = new Date(Date.UTC(y, m - 1, 15)).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  return { ym, from: `${ym}-01`, to: `${ym}-${String(last).padStart(2, '0')}`, label };
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -107,42 +114,74 @@ export default function AthleteReportPage() {
   const [assessment, setAssessment] = useState<Assessment | null>(null);
   const [trainingLoad, setTrainingLoad] = useState<TrainingLoadPoint | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [downloading, setDownloading] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
 
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  const monthLabel = now.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  const month = currentMonth();
+  const monthLabel = month.label;
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([
-      api.get(`/users/${id}/profile`).catch(() => api.get(`/users/athletes`).then(r => ({ data: r.data.find((a: any) => a.id === id) }))),
-      api.get(`/workouts/history?athleteId=${id}&limit=100`).catch(() => ({ data: { workouts: [] } })),
-      api.get(`/physical-assessments/athlete/${id}`).catch(() => ({ data: [] })),
-      api.get(`/workouts/training-load/${id}?days=7`).catch(() => ({ data: [] })),
-    ]).then(([athleteRes, workoutsRes, assessmentsRes, tlRes]) => {
-      setAthlete(athleteRes.data);
-      // Filter workouts to current month
-      const monthWorkouts = (workoutsRes.data?.workouts ?? workoutsRes.data ?? []).filter((w: Workout) => {
-        const d = new Date(w.scheduledDate);
-        return d >= monthStart && d <= monthEnd;
-      });
-      setWorkouts(monthWorkouts);
-      const assessments: Assessment[] = assessmentsRes.data ?? [];
-      setAssessment(assessments[0] ?? null);
-      const tl: TrainingLoadPoint[] = tlRes.data ?? [];
-      setTrainingLoad(tl[tl.length - 1] ?? null);
-    }).catch(() => {}).finally(() => setLoading(false));
+    (async () => {
+      // Perfil pelo endpoint do treinador; sem acesso → mensagem clara (não um relatório vazio)
+      try {
+        const { data } = await api.get(`/users/athletes/${id}`);
+        setAthlete(data);
+      } catch (e) {
+        const status = (e as any)?.response?.status;
+        setError(status === 404 || status === 403 ? 'Atleta não encontrado ou sem acesso.' : friendlyError(e, 'Atleta não encontrado ou sem acesso.'));
+        setLoading(false);
+        return;
+      }
+      const [wRes, aRes, tlRes] = await Promise.allSettled([
+        api.get(`/workouts/athlete/${id}`, { params: { status: 'ALL', from: month.from, to: month.to, limit: 100 } }),
+        api.get(`/physical-assessments/athlete/${id}`),
+        api.get(`/workouts/training-load/${id}`, { params: { days: 7 } }),
+      ]);
+      if (wRes.status === 'fulfilled') {
+        const d: any = wRes.value.data;
+        const list: Workout[] = Array.isArray(d) ? d : d?.data ?? [];
+        setWorkouts([...list].sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate)));
+      }
+      if (aRes.status === 'fulfilled') {
+        const list: Assessment[] = Array.isArray(aRes.value.data) ? aRes.value.data : [];
+        setAssessment(list[0] ?? null);
+      }
+      if (tlRes.status === 'fulfilled') {
+        const tl: TrainingLoadPoint[] = Array.isArray(tlRes.value.data) ? tlRes.value.data : [];
+        setTrainingLoad(tl[tl.length - 1] ?? null);
+      }
+      setLoading(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  const downloadPdf = async () => {
+    setDownloading(true);
+    try {
+      const res = await api.get(`/reports/monthly/${id}`, { params: { month: month.ym }, responseType: 'blob' });
+      const url = URL.createObjectURL(res.data as Blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `relatorio-${(athlete?.name ?? 'atleta').replace(/\s+/g, '-').toLowerCase()}-${month.ym}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e) {
+      alert(friendlyError(e, 'Não foi possível gerar o PDF.'));
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const completedWorkouts = workouts.filter(w => w.status === 'COMPLETED');
   const totalDistanceM = completedWorkouts.reduce((s, w) => s + (w.result?.distanceMeters ?? 0), 0);
   const totalDurationS = completedWorkouts.reduce((s, w) => s + (w.result?.durationSeconds ?? 0), 0);
   const totalCalories = completedWorkouts.reduce((s, w) => s + (w.result?.calories ?? 0), 0);
-  const adherence = workouts.length > 0
-    ? Math.round((completedWorkouts.length / workouts.filter(w => w.type !== 'REST').length) * 100)
-    : 0;
+  const programmed = workouts.filter(w => w.type !== 'REST').length;
+  const adherence = programmed > 0 ? Math.min(100, Math.round((completedWorkouts.length / programmed) * 100)) : 0;
 
   const avgPaces = completedWorkouts
     .filter(w => w.result?.avgPace)
@@ -166,10 +205,25 @@ export default function AthleteReportPage() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <p className="text-gray-500">{error}</p>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Print button — hidden on print */}
       <div className="print:hidden fixed top-4 right-4 z-50 flex gap-2">
+        <button
+          onClick={downloadPdf}
+          disabled={downloading}
+          className="px-5 py-2.5 bg-gray-900 text-white text-sm font-semibold rounded-xl shadow-lg hover:bg-gray-800 transition disabled:opacity-60"
+        >
+          {downloading ? 'Gerando PDF…' : '⬇️ Baixar PDF'}
+        </button>
         <button
           onClick={() => window.print()}
           className="px-5 py-2.5 bg-primary text-white text-sm font-semibold rounded-xl shadow-lg hover:bg-primary/90 transition"
@@ -207,12 +261,12 @@ export default function AthleteReportPage() {
           <div className="text-right">
             <p className="text-lg font-bold text-gray-900">{athlete?.name ?? '—'}</p>
             <p className="text-sm text-gray-500">{levelLabel(athlete?.athleteProfile?.level)}</p>
-            <p className="text-xs text-gray-400 mt-1">Gerado em {fmtDateFull(new Date().toISOString())}</p>
+            <p className="text-xs text-gray-400 mt-1">Gerado em {fmtDateFull(todayInSaoPaulo())}</p>
           </div>
         </div>
 
         {/* Stats summary */}
-        <div className="grid grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           {[
             { label: 'Treinos realizados', value: completedWorkouts.length.toString(), sub: `de ${workouts.filter(w => w.type !== 'REST').length} programados` },
             { label: 'Distância total', value: fmtDistance(totalDistanceM), sub: 'no mês' },
@@ -228,7 +282,7 @@ export default function AthleteReportPage() {
         </div>
 
         {/* Two columns: Athlete profile + Training Load */}
-        <div className="grid grid-cols-2 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           {/* Athlete profile */}
           <div className="border border-gray-200 rounded-xl p-5">
             <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-4">Perfil do Atleta</h2>
@@ -239,7 +293,7 @@ export default function AthleteReportPage() {
                 ['VO2max', athlete?.athleteProfile?.vo2max ? `${athlete.athleteProfile.vo2max} mL/kg/min` : '—'],
                 ['FC Repouso', athlete?.athleteProfile?.restingHR ? `${athlete.athleteProfile.restingHR} bpm` : '—'],
                 ['FC Máxima', athlete?.athleteProfile?.maxHR ? `${athlete.athleteProfile.maxHR} bpm` : '—'],
-                ['Meta semanal', athlete?.athleteProfile?.weeklyGoalKm ? `${athlete.athleteProfile.weeklyGoalKm} km` : '—'],
+                ['Meta semanal', athlete?.athleteProfile?.weeklyGoalKm ? formatKm(athlete.athleteProfile.weeklyGoalKm) : '—'],
               ].map(([l, v]) => (
                 <div key={l} className="flex justify-between">
                   <span className="text-gray-500">{l}</span>
@@ -326,7 +380,7 @@ export default function AthleteReportPage() {
           {workouts.length === 0 ? (
             <p className="text-sm text-gray-400">Nenhum treino programado neste mês.</p>
           ) : (
-            <table className="w-full text-sm border-collapse">
+            <div className="overflow-x-auto"><table className="w-full text-sm border-collapse min-w-[600px]">
               <thead>
                 <tr className="border-b-2 border-gray-200">
                   {['Data', 'Tipo', 'Título', 'Distância', 'Duração', 'Pace', 'Status'].map(h => (
@@ -356,7 +410,7 @@ export default function AthleteReportPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
 

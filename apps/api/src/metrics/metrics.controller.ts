@@ -1,4 +1,5 @@
-import { Controller, Get, Res } from '@nestjs/common';
+import { Controller, Get, Res, UseGuards } from '@nestjs/common';
+import { MetricsAccessGuard } from '../common/guards/metrics-access.guard';
 import { ApiTags, ApiOperation, ApiExcludeEndpoint } from '@nestjs/swagger';
 import { Response } from 'express';
 import { Registry, collectDefaultMetrics, Counter, Histogram, Gauge } from 'prom-client';
@@ -31,6 +32,7 @@ export const activeConnections = new Gauge({
 
 @ApiTags('Metrics')
 @Controller('metrics')
+@UseGuards(MetricsAccessGuard) // x-metrics-token (METRICS_TOKEN) ou JWT de SUPER_ADMIN
 export class MetricsController {
   @Get()
   @ApiExcludeEndpoint()

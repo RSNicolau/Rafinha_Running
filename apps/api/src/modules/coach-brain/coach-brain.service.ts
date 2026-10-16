@@ -1,46 +1,35 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Response } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
-import * as crypto from 'crypto';
+import { encryptApiKey, decryptApiKey } from './byok-crypto';
+import { assertCoachOwnsAthlete, AuthUserLike } from '../../common/utils/ownership';
+import {
+  AIProvider as CommonAIProvider,
+  PROVIDER_DEFAULTS as COMMON_PROVIDER_DEFAULTS,
+  AiNotConfiguredException,
+  aiComplete,
+  friendlyAiErrorMessage,
+  mapAiError,
+  platformKey,
+  requireAiCredentials,
+  resolveFromCoach,
+} from '../../common/ai/ai-provider';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type BrainMessage = { role: 'user' | 'assistant'; content: string | any[] };
 
-export type AIProvider = 'anthropic' | 'openai' | 'gemini' | 'grok';
-
-export const PROVIDER_DEFAULTS: Record<AIProvider, { model: string; label: string }> = {
-  anthropic: { model: 'claude-opus-4-6',      label: 'Claude (Anthropic)' },
-  openai:    { model: 'gpt-4o',               label: 'GPT-4o (OpenAI)' },
-  gemini:    { model: 'gemini-2.0-flash-exp', label: 'Gemini (Google)' },
-  grok:      { model: 'grok-3',               label: 'Grok (xAI)' },
-};
+// Provedores/modelos: fonte única em common/ai/ai-provider (re-exportados por compatibilidade)
+export type AIProvider = CommonAIProvider;
+export const PROVIDER_DEFAULTS = COMMON_PROVIDER_DEFAULTS;
 
 // ─── Encryption helpers (for BYOK API keys) ───────────────────────────────────
-
-const ENCRYPTION_KEY = process.env.API_KEY_ENCRYPTION_SECRET || 'fallback-32-char-key-for-dev-only';
-if (!process.env.API_KEY_ENCRYPTION_SECRET) {
-  console.error('[CoachBrainService] WARNING: API_KEY_ENCRYPTION_SECRET not set. BYOK API keys are NOT securely encrypted. Set this env var in production.');
-}
-
-function encryptKey(plaintext: string): string {
-  const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-  return `${iv.toString('hex')}:${encrypted.toString('hex')}`;
-}
-
-function decryptKey(ciphertext: string): string {
-  const [ivHex, encHex] = ciphertext.split(':');
-  const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
-  const decipher = crypto.createDecipheriv('aes-256-cbc', key, Buffer.from(ivHex, 'hex'));
-  const decrypted = Buffer.concat([decipher.update(Buffer.from(encHex, 'hex')), decipher.final()]);
-  return decrypted.toString('utf8');
-}
+// Sem chave de fallback: ver ./byok-crypto.ts (lança se API_KEY_ENCRYPTION_SECRET ausente).
+const encryptKey = encryptApiKey;
+const decryptKey = decryptApiKey;
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
@@ -120,27 +109,17 @@ ${pendingOnboardings.map(o => `- ${o.athlete.name}`).join('\n')}
 
   // ─── Resolve API key ──────────────────────────────────────────────────────
 
+  /** Lança AiNotConfiguredException (503) se não houver chave BYOK nem chave da plataforma para o provedor. */
   private resolveApiKey(provider: AIProvider, coach: { aiByok: boolean; aiApiKey: string | null }): string {
     if (coach.aiByok && coach.aiApiKey) {
       try {
         return decryptKey(coach.aiApiKey);
       } catch {
-        throw new Error('Chave API inválida. Reconfigure nas configurações.');
+        throw new BadRequestException('Chave de IA inválida. Reconfigure em Configurações > IA.');
       }
     }
-
-    // Platform keys (from Railway env vars)
-    const platformKeys: Record<AIProvider, string | undefined> = {
-      anthropic: process.env.ANTHROPIC_API_KEY,
-      openai:    process.env.OPENAI_API_KEY,
-      gemini:    process.env.GEMINI_API_KEY,
-      grok:      process.env.GROK_API_KEY,
-    };
-
-    const key = platformKeys[provider];
-    if (!key) {
-      throw new Error(`Provedor ${provider} não está configurado na plataforma. Use sua própria chave (BYOK) ou contate o suporte.`);
-    }
+    const key = platformKey(provider);
+    if (!key) throw new AiNotConfiguredException();
     return key;
   }
 
@@ -262,7 +241,7 @@ ${pendingOnboardings.map(o => `- ${o.athlete.name}`).join('\n')}
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.flushHeaders();
-      res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: friendlyAiErrorMessage(err) })}\n\n`);
       res.end();
       return;
     }
@@ -354,7 +333,7 @@ Quando gerar planilhas de treino, use formato estruturado (dia, tipo, distância
       res.write(`data: ${JSON.stringify({ done: true, sessionId: session.id, provider, model })}\n\n`);
     } catch (err: any) {
       this.logger.error(`CoachBrain [${provider}] stream error: ${err.message}`);
-      res.write(`data: ${JSON.stringify({ error: `Erro ao processar resposta (${providerInfo.label}): ${err.message?.slice(0, 120)}` })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: friendlyAiErrorMessage(err) })}\n\n`);
     } finally {
       res.end();
     }
@@ -457,7 +436,7 @@ Quando gerar planilhas de treino, use formato estruturado (dia, tipo, distância
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.flushHeaders();
-      res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: friendlyAiErrorMessage(err) })}\n\n`);
       res.end();
       return;
     }
@@ -598,7 +577,7 @@ Quando gerar planilhas de treino, use formato estruturado (dia, tipo, distância
       res.write(`data: ${JSON.stringify({ done: true, sessionId: session.id, provider, model })}\n\n`);
     } catch (err: any) {
       this.logger.error(`CoachBrain multimodal [${provider}] error: ${err.message}`);
-      res.write(`data: ${JSON.stringify({ error: `Erro ao processar resposta (${providerInfo.label}): ${err.message?.slice(0, 120)}` })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: friendlyAiErrorMessage(err) })}\n\n`);
     } finally {
       res.end();
     }
@@ -618,6 +597,8 @@ Quando gerar planilhas de treino, use formato estruturado (dia, tipo, distância
       model: coach.aiModel ?? null,
       byok: coach.aiByok,
       hasApiKey: !!coach.aiApiKey,
+      /** true se há chave utilizável (BYOK do treinador ou da plataforma) */
+      configured: !!resolveFromCoach(coach),
       providerLabel: PROVIDER_DEFAULTS[(coach.aiProvider ?? 'anthropic') as AIProvider]?.label,
       defaultModel: PROVIDER_DEFAULTS[(coach.aiProvider ?? 'anthropic') as AIProvider]?.model,
       availableProviders: Object.entries(PROVIDER_DEFAULTS).map(([key, val]) => ({
@@ -699,17 +680,13 @@ Quando gerar planilhas de treino, use formato estruturado (dia, tipo, distância
       }
       return { ok: true, provider, model, latencyMs: Date.now() - start };
     } catch (err: any) {
-      throw new Error(`Conexão falhou (${PROVIDER_DEFAULTS[provider].label}): ${err.message?.slice(0, 200)}`);
+      this.logger.warn(`AI test failed (${provider}): ${String(err?.message ?? '').slice(0, 200)}`);
+      throw mapAiError(err);
     }
   }
 
   private getPlatformKey(provider: AIProvider): string | undefined {
-    return {
-      anthropic: process.env.ANTHROPIC_API_KEY,
-      openai:    process.env.OPENAI_API_KEY,
-      gemini:    process.env.GEMINI_API_KEY,
-      grok:      process.env.GROK_API_KEY,
-    }[provider];
+    return platformKey(provider);
   }
 
   // ─── Sessions ─────────────────────────────────────────────────────────────
@@ -758,15 +735,15 @@ Quando gerar planilhas de treino, use formato estruturado (dia, tipo, distância
 
   // ─── Apply Plan from Chat ──────────────────────────────────────────────────
 
-  async applyPlanFromChat(coachId: string, athleteId: string, planText: string): Promise<{ created: number }> {
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  async applyPlanFromChat(user: AuthUserLike, athleteId: string, planText: string): Promise<{ created: number }> {
+    // Atleta precisa ser do coach chamador (ADMIN/SUPER_ADMIN liberados) — checado ANTES de chamar a IA
+    await assertCoachOwnsAthlete(this.prisma, user, athleteId, { allowSelf: false });
+    const coachId = user.id;
+    const creds = await requireAiCredentials(this.prisma, coachId);
 
-    const parseResponse = await client.messages.create({
-      model: 'claude-opus-4-6',
-      max_tokens: 2000,
-      messages: [{
-        role: 'user',
-        content: `Extraia do seguinte texto de planilha de treino um array JSON de treinos.
+    const parsedText = await aiComplete(creds, {
+      maxTokens: 2000,
+      prompt: `Extraia do seguinte texto de planilha de treino um array JSON de treinos.
 
 Cada treino deve ter:
 - date: "YYYY-MM-DD" (a partir de amanhã)
@@ -779,12 +756,17 @@ Cada treino deve ter:
 Responda APENAS com o JSON array, sem markdown, sem explicação.
 
 Texto da planilha:
-${planText}`
-      }]
+${planText}`,
     });
 
-    const jsonText = (parseResponse.content[0] as any).text.trim();
-    const workouts = JSON.parse(jsonText);
+    let workouts: any[];
+    try {
+      const m = parsedText.match(/\[[\s\S]*\]/);
+      workouts = JSON.parse(m ? m[0] : parsedText.trim());
+      if (!Array.isArray(workouts)) throw new Error('not array');
+    } catch {
+      throw new BadRequestException('Não consegui interpretar a planilha gerada. Peça à IA para listar os treinos por dia e tente novamente.');
+    }
 
     // Find or create a plan for this athlete
     let plan = await this.prisma.trainingPlan.findFirst({

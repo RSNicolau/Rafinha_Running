@@ -6,6 +6,7 @@
  */
 
 import request from 'supertest';
+import { CONSENT, linkAthleteToCoach } from './helpers';
 
 const BASE = process.env.TEST_API_URL || 'http://localhost:3000';
 const testEmail = `nutrition_e2e_${Date.now()}@test.com`;
@@ -17,7 +18,7 @@ let mealId: string;
 beforeAll(async () => {
   const res = await request(BASE)
     .post('/api/v1/auth/register')
-    .send({ email: testEmail, password: 'Test12345!', name: 'Nutrition Tester' });
+    .send({ ...CONSENT, email: testEmail, password: 'Test12345!', name: 'Nutrition Tester' });
   token = res.body.accessToken;
 });
 

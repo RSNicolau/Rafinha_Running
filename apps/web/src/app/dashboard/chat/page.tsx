@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import dynamic from 'next/dynamic';
 
 const ChatPanel = dynamic(() => import('./ChatPanel'), {
@@ -10,5 +11,10 @@ const ChatPanel = dynamic(() => import('./ChatPanel'), {
 });
 
 export default function ChatPage() {
-  return <ChatPanel />;
+  // ChatPanel usa useSearchParams (?athleteId=…) → precisa de Suspense
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-full text-gray-500">Carregando chat...</div>}>
+      <ChatPanel />
+    </Suspense>
+  );
 }

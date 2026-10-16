@@ -6,6 +6,7 @@
  */
 
 import request from 'supertest';
+import { CONSENT, linkAthleteToCoach } from './helpers';
 
 const BASE = process.env.TEST_API_URL || 'http://localhost:3000';
 const ts = Date.now();
@@ -23,16 +24,17 @@ beforeAll(async () => {
   // Register coach
   const coachRes = await request(BASE)
     .post('/api/v1/auth/register')
-    .send({ email: coachEmail, password: 'Test12345!', name: 'Coach E2E', role: 'COACH' });
+    .send({ ...CONSENT, email: coachEmail, password: 'Test12345!', name: 'Coach E2E', role: 'COACH' });
   coachToken = coachRes.body.accessToken;
   coachId = coachRes.body.user.id;
 
   // Register athlete
   const athleteRes = await request(BASE)
     .post('/api/v1/auth/register')
-    .send({ email: athleteEmail, password: 'Test12345!', name: 'Athlete E2E' });
+    .send({ ...CONSENT, email: athleteEmail, password: 'Test12345!', name: 'Athlete E2E' });
   athleteToken = athleteRes.body.accessToken;
   athleteId = athleteRes.body.user.id;
+  await linkAthleteToCoach(coachToken, athleteToken, athleteEmail);
 });
 
 describe('Training Plans & Workouts E2E', () => {
@@ -92,7 +94,7 @@ describe('Training Plans & Workouts E2E', () => {
   describe('POST /api/v1/workouts', () => {
     it('should create a workout in the plan', async () => {
       const scheduledDate = new Date();
-      scheduledDate.setDate(scheduledDate.getDate() + 2);
+      scheduledDate.setHours(12, 0, 0, 0); // hoje — resultado de treino futuro é recusado (regra nova)
 
       const res = await request(BASE)
         .post('/api/v1/workouts')

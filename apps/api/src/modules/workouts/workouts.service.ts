@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import { endOfPeriod, localDateParts, localMidnight, startOfPeriod } from '../../common/utils/sp-period';
 import Anthropic from '@anthropic-ai/sdk';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthUserLike, isPlatformAdmin, assertCoachOwnsAthlete } from '../../common/utils/ownership';
 import { NotificationsService } from '../notifications/notifications.service';
 import { BadgesService } from '../badges/badges.service';
 import { CreateWorkoutDto, SubmitResultDto, SubmitFeedbackDto } from './dto/workout.dto';
@@ -18,8 +20,11 @@ export class WorkoutsService {
 
   async create(coachId: string, dto: CreateWorkoutDto) {
     const plan = await this.prisma.trainingPlan.findUnique({ where: { id: dto.planId } });
-    if (!plan) throw new NotFoundException('Plano de treino não encontrado');
-    if (plan.coachId !== coachId) throw new ForbiddenException('Acesso negado');
+    if (!plan || plan.deletedAt) throw new NotFoundException('Plano de treino não encontrado');
+    // Planilha é da equipe: autor OU quem acessa o atleta hoje (treinador atribuído / OWNER/ADMIN)
+    if (plan.coachId !== coachId) {
+      await assertCoachOwnsAthlete(this.prisma, { id: coachId, role: 'COACH' }, plan.athleteId, { allowSelf: false });
+    }
 
     const workout = await this.prisma.workout.create({
       data: {
@@ -48,10 +53,14 @@ export class WorkoutsService {
     return workout;
   }
 
+  /**
+   * Treinos da semana (segunda a domingo, America/Sao_Paulo). `weekStart` = 'YYYY-MM-DD' (qualquer dia
+   * da semana desejada; é normalizado para a segunda-feira).
+   */
   async getWeeklyWorkouts(athleteId: string, weekStart?: string) {
-    const start = weekStart ? new Date(weekStart) : (() => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); d.setHours(0,0,0,0); return d; })();
-    const end = new Date(start);
-    end.setDate(end.getDate() + 7);
+    const ref = parseLocalDate(weekStart) ?? new Date();
+    const start = startOfPeriod('week', ref);
+    const end = endOfPeriod('week', ref);
 
     const workouts = await this.prisma.workout.findMany({
       where: { athleteId, scheduledDate: { gte: start, lt: end } },
@@ -60,12 +69,37 @@ export class WorkoutsService {
     });
 
     return {
-      week: weekStart,
+      week: toLocalIsoDate(start),
+      weekStart: start.toISOString(),
+      weekEnd: end.toISOString(),
       workouts,
       totalDistanceMeters: workouts.reduce((sum, w) => sum + (w.result?.distanceMeters || 0), 0),
       completedCount: workouts.filter(w => w.status === 'COMPLETED').length,
       totalCount: workouts.length,
     };
+  }
+
+  /**
+   * Calendário do atleta: treinos entre `from` e `to` (inclusive, 'YYYY-MM-DD' em SP). Máx. 62 dias.
+   * Padrão: mês corrente.
+   */
+  async getCalendar(athleteId: string, from?: string, to?: string) {
+    const fromDate = parseLocalDate(from) ?? startOfPeriod('month');
+    const toParsed = parseLocalDate(to);
+    const toExclusive = toParsed
+      ? (() => { const p = localDateParts(toParsed); return localMidnight(p.year, p.month, p.day + 1); })()
+      : endOfPeriod('month', fromDate);
+    if (toExclusive.getTime() <= fromDate.getTime()) throw new BadRequestException('Período inválido');
+    if (toExclusive.getTime() - fromDate.getTime() > 62 * 86400000) {
+      throw new BadRequestException('Período máximo de 62 dias');
+    }
+
+    const workouts = await this.prisma.workout.findMany({
+      where: { athleteId, scheduledDate: { gte: fromDate, lt: toExclusive } },
+      include: { result: true },
+      orderBy: { scheduledDate: 'asc' },
+    });
+    return { from: fromDate.toISOString(), to: toExclusive.toISOString(), workouts };
   }
 
   async findById(id: string) {
@@ -77,14 +111,34 @@ export class WorkoutsService {
     return workout;
   }
 
+  /**
+   * Detalhe do treino com checagem de posse:
+   *  - atleta: somente os próprios; coach: somente de atletas seus (ou planos seus); ADMIN/SUPER_ADMIN: todos.
+   */
+  async findByIdForUser(id: string, user: AuthUserLike) {
+    const workout = await this.findById(id);
+    if (isPlatformAdmin(user)) return workout;
+    if (workout.athleteId === user.id) return workout;
+    if (user.role === 'COACH') {
+      if (workout.plan?.coachId === user.id) return workout;
+      const profile = await this.prisma.athleteProfile.findUnique({
+        where: { userId: workout.athleteId },
+        select: { coachId: true },
+      });
+      if (profile?.coachId === user.id) return workout;
+    }
+    throw new NotFoundException('Treino não encontrado');
+  }
+
   async markComplete(workoutId: string, athleteId: string) {
     const workout = await this.prisma.workout.findUnique({ where: { id: workoutId } });
     if (!workout) throw new NotFoundException('Treino não encontrado');
     if (workout.athleteId !== athleteId) throw new ForbiddenException('Acesso negado');
+    assertNotFutureWorkout(workout.scheduledDate);
 
     return this.prisma.workout.update({
       where: { id: workoutId },
-      data: { status: WorkoutStatus.COMPLETED, completedAt: new Date() },
+      data: { status: WorkoutStatus.COMPLETED, completedAt: completionDateFor(workout.scheduledDate) },
     });
   }
 
@@ -96,24 +150,32 @@ export class WorkoutsService {
     if (!workout) throw new NotFoundException('Treino não encontrado');
     if (workout.athleteId !== athleteId) throw new ForbiddenException('Acesso negado');
 
-    const result = await this.prisma.workoutResult.create({
-      data: {
-        workoutId,
-        source: dto.source || 'MANUAL',
-        distanceMeters: dto.distanceMeters,
-        durationSeconds: dto.durationSeconds,
-        avgPace: dto.avgPace,
-        avgHeartRate: dto.avgHeartRate,
-        maxHeartRate: dto.maxHeartRate,
-        calories: dto.calories,
-        elevationGain: dto.elevationGain,
-        splits: dto.splits as any,
-      },
+    assertNotFutureWorkout(workout.scheduledDate);
+    if (dto.durationSeconds <= 0 && dto.distanceMeters <= 0) {
+      throw new BadRequestException('Informe a distância ou a duração do treino');
+    }
+
+    const resultData = {
+      source: dto.source || 'MANUAL',
+      distanceMeters: dto.distanceMeters,
+      durationSeconds: dto.durationSeconds,
+      avgPace: dto.avgPace || computePace(dto.distanceMeters, dto.durationSeconds),
+      avgHeartRate: dto.avgHeartRate,
+      maxHeartRate: dto.maxHeartRate,
+      calories: dto.calories,
+      elevationGain: dto.elevationGain,
+      splits: dto.splits as any,
+    };
+    // upsert: o feedback (RPE) pode ter criado o registro antes do resultado
+    const result = await this.prisma.workoutResult.upsert({
+      where: { workoutId },
+      create: { workoutId, ...resultData },
+      update: resultData,
     });
 
     await this.prisma.workout.update({
       where: { id: workoutId },
-      data: { status: WorkoutStatus.COMPLETED, completedAt: new Date() },
+      data: { status: WorkoutStatus.COMPLETED, completedAt: completionDateFor(workout.scheduledDate) },
     });
 
     // Notify coach about completed workout
@@ -177,11 +239,14 @@ export class WorkoutsService {
     return { data: workouts, total, page, totalPages: Math.ceil(total / limit) };
   }
 
-  async getAthleteStats(athleteId: string) {
-    const now = new Date();
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - now.getDay());
-    weekStart.setHours(0, 0, 0, 0);
+  /**
+   * Estatísticas do atleta. "Esta semana" = treinos CONCLUÍDOS cuja data (conclusão; senão a agendada)
+   * cai na semana corrente (segunda 00:00 → domingo 23:59, America/Sao_Paulo) — nunca a data de criação
+   * do registro (importações tardias não inflam a semana).
+   */
+  async getAthleteStats(athleteId: string, now: Date = new Date()) {
+    const weekStart = startOfPeriod('week', now);
+    const weekEnd = endOfPeriod('week', now);
 
     const [allResults, weeklyResults, totalWorkouts] = await Promise.all([
       this.prisma.workoutResult.findMany({
@@ -190,8 +255,14 @@ export class WorkoutsService {
       }),
       this.prisma.workoutResult.findMany({
         where: {
-          workout: { athleteId, status: WorkoutStatus.COMPLETED },
-          createdAt: { gte: weekStart },
+          workout: {
+            athleteId,
+            status: WorkoutStatus.COMPLETED,
+            OR: [
+              { completedAt: { gte: weekStart, lt: weekEnd } },
+              { completedAt: null, scheduledDate: { gte: weekStart, lt: weekEnd } },
+            ],
+          },
         },
         select: { distanceMeters: true },
       }),
@@ -409,13 +480,13 @@ export class WorkoutsService {
 
     const athleteIds = coachAthletes.map((a) => a.userId);
 
-    // Current week boundaries
-    const now = new Date();
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - now.getDay());
-    weekStart.setHours(0, 0, 0, 0);
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekStart.getDate() + 7);
+    // Semana corrente (segunda → domingo, America/Sao_Paulo) — mesmo critério de /workouts/stats
+    const weekStart = startOfPeriod('week');
+    const weekEnd = endOfPeriod('week');
+    const inWeek = [
+      { completedAt: { gte: weekStart, lt: weekEnd } },
+      { completedAt: null, scheduledDate: { gte: weekStart, lt: weekEnd } },
+    ];
 
     // For each athlete: total weekly km, workout count, best pace
     const athleteStats = await Promise.all(
@@ -423,12 +494,12 @@ export class WorkoutsService {
         const [weeklyResults, weeklyWorkoutCount, bestPaceResult] = await Promise.all([
           this.prisma.workoutResult.findMany({
             where: {
-              workout: { athleteId: uid, status: WorkoutStatus.COMPLETED, scheduledDate: { gte: weekStart, lt: weekEnd } },
+              workout: { athleteId: uid, status: WorkoutStatus.COMPLETED, OR: inWeek },
             },
             select: { distanceMeters: true, durationSeconds: true, avgPace: true },
           }),
           this.prisma.workout.count({
-            where: { athleteId: uid, status: WorkoutStatus.COMPLETED, scheduledDate: { gte: weekStart, lt: weekEnd } },
+            where: { athleteId: uid, status: WorkoutStatus.COMPLETED, OR: inWeek },
           }),
           this.prisma.workoutResult.findFirst({
             where: {
@@ -491,13 +562,16 @@ export class WorkoutsService {
 
   // ─── Change Workout Type (Coach — HRV auto-adjust) ────────────────────────
 
-  async changeWorkoutType(workoutId: string, coachId: string, newType: string) {
+  async changeWorkoutType(workoutId: string, user: AuthUserLike, newType: string) {
     const workout = await this.prisma.workout.findUnique({
       where: { id: workoutId },
       include: { plan: { select: { coachId: true } } },
     });
     if (!workout) throw new NotFoundException('Treino não encontrado');
-    if (workout.plan?.coachId !== coachId) throw new ForbiddenException('Acesso negado');
+    if (!isPlatformAdmin(user) && workout.plan?.coachId !== user.id) {
+      // Treinador atual do atleta (ou gestão da equipe) também pode ajustar
+      await assertCoachOwnsAthlete(this.prisma, user, workout.athleteId, { allowSelf: false });
+    }
 
     const updated = await this.prisma.workout.update({
       where: { id: workoutId },
@@ -737,4 +811,47 @@ Seja encorajador e técnico. Responda em português.`;
       this.logger.error(`generateWorkoutFeedback failed: ${err.message}`);
     }
   }
+}
+
+// ─── Helpers de data (America/Sao_Paulo) ─────────────────────────────────────
+
+/** 'YYYY-MM-DD' → meia-noite local em SP (ou null se inválido/ausente). */
+export function parseLocalDate(value?: string | null): Date | null {
+  if (!value || typeof value !== 'string') return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return localMidnight(y, mo, d);
+}
+
+export function toLocalIsoDate(date: Date): string {
+  const p = localDateParts(date);
+  return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
+}
+
+/** Não permite registrar resultado/conclusão de treino agendado para depois de hoje (SP). */
+export function assertNotFutureWorkout(scheduledDate: Date | string | null | undefined, now: Date = new Date()) {
+  if (!scheduledDate) return;
+  const endOfToday = endOfPeriod('day', now);
+  if (new Date(scheduledDate).getTime() >= endOfToday.getTime()) {
+    throw new BadRequestException('Não é possível registrar o resultado de um treino com data futura');
+  }
+}
+
+/** Data de conclusão: agora se o treino é de hoje; senão o dia agendado (mantém a semana correta). */
+export function completionDateFor(scheduledDate: Date | string | null | undefined, now: Date = new Date()): Date {
+  if (!scheduledDate) return now;
+  const sched = new Date(scheduledDate);
+  return sched.getTime() < startOfPeriod('day', now).getTime() ? sched : now;
+}
+
+/** Pace médio "m:ss" por km. */
+export function computePace(distanceMeters: number, durationSeconds: number): string | null {
+  if (!distanceMeters || !durationSeconds || distanceMeters <= 0 || durationSeconds <= 0) return null;
+  const secPerKm = durationSeconds / (distanceMeters / 1000);
+  let mins = Math.floor(secPerKm / 60);
+  let secs = Math.round(secPerKm % 60);
+  if (secs === 60) { mins += 1; secs = 0; }
+  return `${mins}:${String(secs).padStart(2, '0')}`;
 }

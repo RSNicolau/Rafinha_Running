@@ -1,0 +1,133 @@
+{
+  "$comment": "Configuração da auditoria de UX com TypeSafe Jev. Senhas NUNCA ficam aqui: cada papel lê QA_<PAPEL>_EMAIL e QA_<PAPEL>_PASSWORD do ambiente (ou do .env da raiz). Rotas derivadas de apps/web/src/app/**/page.tsx e do menu em apps/web/src/app/dashboard/layout.tsx.",
+  "baseUrl": "http://localhost",
+  "model": "jev-latest",
+  "apiUrl": "https://api.typesafe.ai/v1/systemone",
+  "maxTextChars": 7000,
+  "maxListItems": 40,
+  "navigationTimeoutMs": 25000,
+  "settleMs": 1500,
+  "viewports": [
+    { "name": "mobile-390", "width": 390, "height": 844, "isMobile": true, "hasTouch": true },
+    { "name": "desktop-1366", "width": 1366, "height": 768, "isMobile": false, "hasTouch": false }
+  ],
+  "thresholds": {
+    "$comment": "noul: probabilidade de SIM (0–1). score: escala exibida de 1 a 5 (valor contínuo, ponderado por probabilidade). choice: confiança 0–1.",
+    "noulFlag": 0.7,
+    "noulReview": 0.4,
+    "clarityFlagAtOrBelow": 2.0,
+    "errorHelpfulnessFlagAtOrBelow": 2.0,
+    "errorMessagePresentMin": 0.5,
+    "choiceReviewBelow": 0.5,
+    "scoreReviewBelow": 0.3
+  },
+  "severityWeights": {
+    "pageShowsErrorState": 5,
+    "redirectedToLogin": 4,
+    "englishOrTechnicalText": 3,
+    "deadEnd": 3,
+    "clarityForRole": 2,
+    "errorMessageHelpfulness": 2,
+    "serverErrors": 2,
+    "placeholderOrFakeData": 1,
+    "primaryIssue": 1
+  },
+  "roles": {
+    "public": {
+      "label": "Visitante (sem login)",
+      "audience": "A first-time visitor in Brazil, not logged in: an amateur runner or a running coach evaluating the product. Non-technical.",
+      "login": null,
+      "routes": [
+        "/",
+        "/landing",
+        "/pricing",
+        "/loja",
+        "/termos",
+        "/privacidade",
+        "/login",
+        "/athlete-login",
+        "/register",
+        "/athlete-register",
+        "/forgot-password",
+        "/subscribe",
+        "/white-label",
+        { "path": "/eventos/{id}", "discover": { "api": "/api/v1/events", "pick": "data[0].id" } }
+      ]
+    },
+    "athlete": {
+      "label": "Atleta",
+      "audience": "A non-technical amateur runner (aluno/atleta) in Brazil using the app on their phone to follow the training plan prescribed by their coach.",
+      "login": { "portal": "/athlete-login", "envPrefix": "QA_ATHLETE" },
+      "routes": [
+        "/athlete",
+        "/athlete?tab=treinos",
+        "/athlete?tab=nutricao",
+        "/athlete?tab=mais",
+        "/athlete?tab=perfil",
+        "/athlete-subscribe",
+        "/dashboard",
+        "/dashboard/athlete/training-load",
+        "/dashboard/athlete/niche-zones",
+        "/dashboard/athlete/badges",
+        "/dashboard/athlete/events",
+        "/dashboard/athlete/group",
+        "/dashboard/athlete/nutrition",
+        "/dashboard/athlete/reports",
+        "/dashboard/athlete/schedule",
+        "/dashboard/athlete/documents",
+        "/dashboard/athlete/testimonial",
+        "/dashboard/athlete/referrals",
+        "/dashboard/chat",
+        "/dashboard/integrations",
+        "/privacidade/meus-dados",
+        "/loja",
+        { "path": "/eventos/{id}", "discover": { "api": "/api/v1/events", "pick": "data[0].id" } }
+      ]
+    },
+    "coach": {
+      "label": "Treinador",
+      "audience": "A running coach (treinador de corrida) in Brazil who manages athletes, training plans and events. Comfortable with apps but not technical.",
+      "login": { "portal": "/login", "envPrefix": "QA_COACH" },
+      "routes": [
+        "/dashboard",
+        "/dashboard/athletes",
+        { "path": "/dashboard/athletes/{id}", "discover": { "api": "/api/v1/users/athletes?page=1&limit=1", "pick": ["data[0].user.id", "data[0].id"] } },
+        "/dashboard/onboarding",
+        "/dashboard/plans",
+        "/dashboard/plans/create",
+        { "path": "/dashboard/plans/{id}", "discover": { "api": "/api/v1/training-plans?page=1&limit=1", "pick": "data[0].id" } },
+        "/dashboard/rankings",
+        "/dashboard/events",
+        "/dashboard/ai-assistant",
+        "/dashboard/chat",
+        "/dashboard/live",
+        "/dashboard/integrations",
+        "/dashboard/settings",
+        "/dashboard/settings/profile",
+        "/dashboard/settings/ai",
+        "/dashboard/settings/appointments",
+        "/dashboard/settings/niche",
+        "/dashboard/settings/onboarding-form",
+        "/dashboard/settings/whatsapp",
+        "/dashboard/onboarding-guide",
+        "/dashboard/testimonials",
+        "/dashboard/partners",
+        "/privacidade/meus-dados"
+      ]
+    },
+    "owner": {
+      "label": "Dono da equipe",
+      "audience": "The owner of a running-coaching business (dono de assessoria esportiva) in Brazil: manages staff, monthly fees, the subscription, the online store and events. A business person, not technical.",
+      "login": { "portal": "/login", "envPrefix": "QA_OWNER" },
+      "extends": "coach",
+      "routes": [
+        "/dashboard/equipe",
+        "/dashboard/mensalidades",
+        "/dashboard/billing",
+        "/dashboard/loja",
+        "/dashboard/events",
+        { "path": "/dashboard/events/{id}", "discover": { "api": "/api/v1/events", "pick": "data[0].id" } }
+      ]
+    }
+  }
+}

@@ -6,6 +6,16 @@ import { Response } from 'express';
 import { ChatMessageDto } from './dto/chat-message.dto';
 import { GeneratePlanAiDto } from './dto/generate-plan-ai.dto';
 import { UpdateConfigDto } from './dto/update-config.dto';
+import { assertCoachOwnsAthlete, athleteProfileScopeWhere, AuthUserLike } from '../../common/utils/ownership';
+import {
+  AiCredentials,
+  AI_NOT_CONFIGURED_CODE,
+  AI_NOT_CONFIGURED_MESSAGE,
+  aiComplete,
+  friendlyAiErrorMessage,
+  requireAiCredentials,
+  resolveAiCredentials,
+} from '../../common/ai/ai-provider';
 
 const TONE_MAP = {
   FRIENDLY: 'amigável, próximo e encorajador',
@@ -16,20 +26,13 @@ const TONE_MAP = {
 @Injectable()
 export class AiAssistantService {
   private readonly logger = new Logger(AiAssistantService.name);
-  private openaiClient: OpenAI;
-  private anthropicClient: Anthropic;
-  // keep old name for compatibility
-  private get client() { return this.openaiClient; }
-
   constructor(
     private prisma: PrismaService,
-  ) {
-    this.openaiClient = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY ?? 'not-set',
-    });
-    this.anthropicClient = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY ?? '',
-    });
+  ) {}
+
+  /** Credenciais de IA do treinador (BYOK) ou da plataforma; lança 503 se não houver chave. */
+  requireCredentials(coachId: string): Promise<AiCredentials> {
+    return requireAiCredentials(this.prisma, coachId);
   }
 
   private tools: OpenAI.Chat.ChatCompletionTool[] = [
@@ -92,13 +95,27 @@ export class AiAssistantService {
     }},
   ];
 
-  private async executeTool(toolName: string, toolInput: Record<string, unknown>, coachId: string): Promise<string> {
+  /** Atleta precisa pertencer ao coach chamador (ADMIN/SUPER_ADMIN liberados). */
+  async assertAthleteAccess(user: AuthUserLike, athleteId: string) {
+    await assertCoachOwnsAthlete(this.prisma, user, athleteId, { allowSelf: false });
+  }
+
+  private async executeTool(toolName: string, toolInput: Record<string, unknown>, user: AuthUserLike): Promise<string> {
     try {
+      // Toda ferramenta recebe athleteId vindo do modelo/usuário → sempre checar posse
+      if (toolInput && 'athleteId' in toolInput) {
+        if (typeof toolInput.athleteId !== 'string') return JSON.stringify({ error: 'Atleta não encontrado' });
+        try {
+          await this.assertAthleteAccess(user, toolInput.athleteId);
+        } catch {
+          return JSON.stringify({ error: 'Atleta não encontrado' });
+        }
+      }
       switch (toolName) {
         case 'get_athlete_profile': {
           const athlete = await this.prisma.user.findFirst({
             where: { id: toolInput.athleteId as string },
-            include: { athleteProfile: true, coachProfile: true },
+            include: { athleteProfile: true },
           });
           if (!athlete) return JSON.stringify({ error: 'Atleta não encontrado' });
           return JSON.stringify({
@@ -169,10 +186,6 @@ export class AiAssistantService {
     }
   }
 
-  private useAnthropic(): boolean {
-    return !!(process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.length > 10);
-  }
-
   private async getSystemPrompt(coachId: string): Promise<string> {
     const coach = await this.prisma.user.findUnique({ where: { id: coachId } });
     const config = await this.prisma.aIAssistantConfig.findUnique({ where: { coachId } });
@@ -212,140 +225,130 @@ REGRAS:
 - Quando gerar planilhas, use formato estruturado: Dia | Tipo | Distância/Tempo | Ritmo/Zona`;
   }
 
-  async streamToResponse(coachId: string, dto: ChatMessageDto, res: Response): Promise<void> {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
+  async streamToResponse(user: AuthUserLike, dto: ChatMessageDto, res: Response, credsArg?: AiCredentials): Promise<void> {
+    const coachId = user.id;
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
+    }
+    const send = (payload: Record<string, unknown>) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
 
     try {
-      const systemPrompt = await this.getSystemPrompt(coachId);
+      const creds = credsArg ?? (await resolveAiCredentials(this.prisma, coachId));
+      if (!creds) {
+        send({ type: 'error', code: AI_NOT_CONFIGURED_CODE, content: AI_NOT_CONFIGURED_MESSAGE });
+      } else {
+        const systemPrompt = await this.getSystemPrompt(coachId);
+        // Clean history — filter empty messages to avoid API errors
+        const cleanHistory = (dto.history ?? []).filter(h => h.content?.trim());
 
-      // Clean history — filter empty messages to avoid API errors
-      const cleanHistory = (dto.history ?? []).filter(h => h.content?.trim());
-
-      if (this.useAnthropic()) {
-        // Use Anthropic Claude (preferred — key is always set in production)
-        const anthropicMessages = [
-          ...cleanHistory.map(h => ({ role: h.role as 'user' | 'assistant', content: h.content })),
-          { role: 'user' as const, content: dto.message },
-        ];
-
-        // Build context from database if athlete is selected
+        // Contexto do atleta selecionado (posse já checada no controller; executeTool checa de novo)
         let contextAddition = '';
         if (dto.athleteId) {
-          try {
-            const profile = await this.executeTool('get_athlete_profile', { athleteId: dto.athleteId }, coachId);
-            const history = await this.executeTool('get_workout_history', { athleteId: dto.athleteId, weeks: 4 }, coachId);
-            contextAddition = `\n\nDADOS DO ATLETA SELECIONADO:\nPerfil: ${profile}\nHistórico (4 semanas): ${history}`;
-          } catch {}
+          const profile = await this.executeTool('get_athlete_profile', { athleteId: dto.athleteId }, user);
+          const history = await this.executeTool('get_workout_history', { athleteId: dto.athleteId, weeks: 4 }, user);
+          contextAddition = `\n\nDADOS DO ATLETA SELECIONADO:\nPerfil: ${profile}\nHistórico (4 semanas): ${history}`;
         }
 
-        const stream = this.anthropicClient.messages.stream({
-          model: 'claude-opus-4-6',
-          max_tokens: 2048,
-          system: systemPrompt + contextAddition,
-          messages: anthropicMessages,
-        });
-
-        for await (const event of stream) {
-          if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-            res.write(`data: ${JSON.stringify({ type: 'text', content: event.delta.text })}\n\n`);
-          }
-        }
-      } else if (process.env.OPENAI_API_KEY) {
-        // Fallback to OpenAI with tool calling
-        const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-          { role: 'system', content: systemPrompt },
-          ...cleanHistory.map(h => ({ role: h.role as 'user' | 'assistant', content: h.content })),
-          { role: 'user', content: dto.message },
-        ];
-
-        let iterations = 0;
-        while (iterations < 5) {
-          iterations++;
-          const response = await this.openaiClient.chat.completions.create({
-            model: 'gpt-4o',
+        if (creds.provider === 'anthropic') {
+          const client = new Anthropic({ apiKey: creds.apiKey });
+          const stream = client.messages.stream({
+            model: creds.model,
             max_tokens: 2048,
-            tools: this.tools,
-            messages,
+            system: systemPrompt + contextAddition,
+            messages: [
+              ...cleanHistory.map(h => ({ role: h.role as 'user' | 'assistant', content: h.content })),
+              { role: 'user' as const, content: dto.message },
+            ],
           });
-          const choice = response.choices[0];
-          if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls?.length) {
-            messages.push(choice.message);
-            for (const tc of choice.message.tool_calls) {
-              if (tc.type !== 'function') continue;
-              res.write(`data: ${JSON.stringify({ type: 'tool_call', tool: tc.function.name })}\n\n`);
-              const args = JSON.parse(tc.function.arguments || '{}');
-              const result = await this.executeTool(tc.function.name, args, coachId);
-              messages.push({ role: 'tool', tool_call_id: tc.id, content: result });
+          for await (const event of stream) {
+            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+              send({ type: 'text', content: event.delta.text });
             }
-          } else {
-            const text = choice.message.content ?? '';
-            for (const word of text.split(' ')) {
-              res.write(`data: ${JSON.stringify({ type: 'text', content: word + ' ' })}\n\n`);
-            }
-            break;
           }
+        } else if (creds.provider === 'openai' || creds.provider === 'grok') {
+          // OpenAI-compatível com tool calling
+          const client = new OpenAI({ apiKey: creds.apiKey, ...(creds.provider === 'grok' ? { baseURL: 'https://api.x.ai/v1' } : {}) });
+          const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+            { role: 'system', content: systemPrompt + contextAddition },
+            ...cleanHistory.map(h => ({ role: h.role as 'user' | 'assistant', content: h.content })),
+            { role: 'user', content: dto.message },
+          ];
+          let iterations = 0;
+          while (iterations < 5) {
+            iterations++;
+            const response = await client.chat.completions.create({
+              model: creds.model,
+              max_tokens: 2048,
+              tools: this.tools,
+              messages,
+            });
+            const choice = response.choices[0];
+            if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls?.length) {
+              messages.push(choice.message);
+              for (const tc of choice.message.tool_calls) {
+                if (tc.type !== 'function') continue;
+                send({ type: 'tool_call', tool: tc.function.name });
+                let args: Record<string, unknown> = {};
+                try { args = JSON.parse(tc.function.arguments || '{}'); } catch { args = {}; }
+                const result = await this.executeTool(tc.function.name, args, user);
+                messages.push({ role: 'tool', tool_call_id: tc.id, content: result });
+              }
+            } else {
+              send({ type: 'text', content: choice.message.content ?? '' });
+              break;
+            }
+          }
+        } else {
+          const historyText = cleanHistory.map(h => `${h.role === 'user' ? 'Treinador' : 'Assistente'}: ${h.content}`).join('\n');
+          const text = await aiComplete(creds, {
+            system: systemPrompt + contextAddition,
+            prompt: historyText ? `${historyText}\nTreinador: ${dto.message}` : dto.message,
+            maxTokens: 2048,
+          });
+          send({ type: 'text', content: text });
         }
-      } else {
-        res.write(`data: ${JSON.stringify({ type: 'text', content: 'IA não configurada. Configure ANTHROPIC_API_KEY ou OPENAI_API_KEY nas variáveis de ambiente.' })}\n\n`);
       }
     } catch (err: any) {
-      this.logger.error(`AI Assistant error: ${err.message}`);
-      res.write(`data: ${JSON.stringify({ type: 'text', content: 'Desculpe, ocorreu um erro interno. Tente novamente em instantes.' })}\n\n`);
+      this.logger.error(`AI Assistant error: ${err?.message}`);
+      send({ type: 'error', content: friendlyAiErrorMessage(err) });
     }
 
-    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+    send({ type: 'done' });
     res.end();
   }
 
-  async generatePlan(coachId: string, dto: GeneratePlanAiDto): Promise<{ plan: string }> {
+  async generatePlan(user: AuthUserLike, dto: GeneratePlanAiDto): Promise<{ plan: string }> {
+    await this.assertAthleteAccess(user, dto.athleteId);
+    const coachId = user.id;
+    const creds = await this.requireCredentials(coachId);
     const systemPrompt = await this.getSystemPrompt(coachId);
-    if (this.useAnthropic()) {
-      const msg = await this.anthropicClient.messages.create({
-        model: 'claude-opus-4-6',
-        max_tokens: 4096,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: `Crie um plano de treino detalhado para o atleta ${dto.athleteId}, com duração de ${dto.durationWeeks} semanas, objetivo: ${dto.goal}. Data de início: ${dto.startDate ?? 'hoje'}.` }],
-      });
-      return { plan: (msg.content[0] as any)?.text ?? 'Plano gerado' };
-    }
-    const response = await this.openaiClient.chat.completions.create({
-      model: 'gpt-4o',
-      max_tokens: 4096,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Crie um plano de treino detalhado para o atleta ${dto.athleteId}, com duração de ${dto.durationWeeks} semanas, objetivo: ${dto.goal}. Data de início: ${dto.startDate ?? 'hoje'}.` },
-      ],
+    const athlete = await this.prisma.user.findUnique({ where: { id: dto.athleteId }, select: { name: true } }).catch(() => null);
+    const plan = await aiComplete(creds, {
+      system: systemPrompt,
+      prompt: `Crie um plano de treino detalhado para o atleta ${athlete?.name ?? dto.athleteId}, com duração de ${dto.durationWeeks} semanas, objetivo: ${dto.goal}. Data de início: ${dto.startDate ?? 'hoje'}.`,
+      maxTokens: 4096,
     });
-    return { plan: response.choices[0]?.message?.content ?? 'Plano gerado' };
+    return { plan: plan || 'Plano gerado' };
   }
 
   async getInsight(coachId: string): Promise<{ insight: string }> {
+    const creds = await this.requireCredentials(coachId);
     const systemPrompt = await this.getSystemPrompt(coachId);
-    const athletes = await this.prisma.athleteProfile.findMany({
-      where: { coachId },
-      include: { user: true },
-      take: 5,
-    });
-    const prompt = `Gere um insight rápido e motivador sobre a semana da assessoria. Você tem ${athletes.length} atletas ativos. Seja breve (máximo 3 frases).`;
+    const total = await this.prisma.athleteProfile.count({ where: await athleteProfileScopeWhere(this.prisma, { id: coachId, role: 'COACH' }) });
+    const prompt = `Gere um insight rápido e motivador sobre a semana da assessoria. Você tem ${total} atletas ativos. Seja breve (máximo 3 frases).`;
+    const insight = await aiComplete(creds, { system: systemPrompt, prompt, maxTokens: 512 });
+    return { insight: insight || 'Semana em progresso!' };
+  }
 
-    if (this.useAnthropic()) {
-      const msg = await this.anthropicClient.messages.create({
-        model: 'claude-haiku-4-6',
-        max_tokens: 512,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: prompt }],
-      });
-      return { insight: (msg.content[0] as any)?.text ?? 'Semana em progresso!' };
-    }
-    const response = await this.openaiClient.chat.completions.create({
-      model: 'gpt-4o',
-      max_tokens: 512,
-      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
-    });
-    return { insight: response.choices[0]?.message?.content ?? 'Semana em progresso!' };
+  /** Indica se há IA configurada para o treinador (sem expor chave). */
+  async getAiStatus(coachId: string) {
+    const creds = await resolveAiCredentials(this.prisma, coachId);
+    return creds
+      ? { configured: true, provider: creds.provider, model: creds.model, source: creds.source }
+      : { configured: false, message: AI_NOT_CONFIGURED_MESSAGE };
   }
 
   async getConfig(coachId: string) {
@@ -359,10 +362,15 @@ REGRAS:
   }
 
   async updateConfig(coachId: string, dto: UpdateConfigDto) {
+    const data: Record<string, any> = {};
+    if (dto.assistantName !== undefined) data.assistantName = dto.assistantName;
+    if (dto.tone !== undefined) data.tone = dto.tone;
+    if (dto.personaPrompt !== undefined) data.personaPrompt = dto.personaPrompt;
+    if (dto.voiceEnabled !== undefined) data.voiceEnabled = dto.voiceEnabled;
     return this.prisma.aIAssistantConfig.upsert({
       where: { coachId },
-      create: { coachId, ...dto },
-      update: dto,
+      create: { coachId, ...data },
+      update: data,
     });
   }
 }

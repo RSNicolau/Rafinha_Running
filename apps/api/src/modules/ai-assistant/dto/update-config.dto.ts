@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsEnum, MaxLength } from 'class-validator';
 
 export enum AIAssistantToneDto {
   FRIENDLY = 'FRIENDLY',
@@ -9,6 +9,7 @@ export enum AIAssistantToneDto {
 export class UpdateConfigDto {
   @IsOptional()
   @IsString()
+  @MaxLength(60)
   assistantName?: string;
 
   @IsOptional()
@@ -17,6 +18,7 @@ export class UpdateConfigDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(4000)
   personaPrompt?: string;
 
   @IsOptional()

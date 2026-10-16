@@ -3,13 +3,18 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EmailService } from '../email/email.service';
+import { emailEquals, normalizeEmail } from '../../common/utils/email';
+import { LegalService, ConsentContext } from '../legal/legal.service';
 import { CreateInviteDto, AcceptInviteDto } from './dto/invite.dto';
 import { NotificationType } from '@prisma/client';
+import { defaultTeamIdForUser } from '../teams/team-scope';
+import { assertPasswordPolicy } from '../../common/validators/password-policy';
 
 @Injectable()
 export class InvitesService {
@@ -17,12 +22,18 @@ export class InvitesService {
     private prisma: PrismaService,
     private notifications: NotificationsService,
     private emailService: EmailService,
+    private legal: LegalService,
   ) {}
 
+  /**
+   * Cria convite pendente. O token NUNCA é retornado pela API (vai apenas por e-mail ao convidado);
+   * exceção: NODE_ENV=test, para testes automatizados.
+   */
   async createInvite(coachId: string, dto: CreateInviteDto) {
-    // Check if invite already pending for this email+coach
+    const email = normalizeEmail(dto.email);
+    // Check if invite already pending for this email+coach (insensitive: convites legados com maiúsculas)
     const existing = await this.prisma.coachInvite.findFirst({
-      where: { coachId, email: dto.email, status: 'PENDING' },
+      where: { coachId, email: emailEquals(email), status: 'PENDING' },
     });
     if (existing) {
       throw new ConflictException('Já existe um convite pendente para este email');
@@ -32,19 +43,26 @@ export class InvitesService {
     expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
 
     const invite = await this.prisma.coachInvite.create({
-      data: { coachId, email: dto.email, expiresAt },
+      data: { coachId, email, expiresAt },
       include: { coach: { select: { name: true, tenantBranding: true } } },
     });
 
     // Send invite email (fire-and-forget, don't block response)
     this.emailService.sendAthleteInvite(
-      dto.email,
+      email,
       invite.coach.name,
       invite.token,
       invite.coach.tenantBranding?.tenantName ?? undefined,
     ).catch(() => {});
 
-    return invite;
+    return {
+      id: invite.id,
+      email: invite.email,
+      status: invite.status,
+      expiresAt: invite.expiresAt,
+      createdAt: invite.createdAt,
+      ...(process.env.NODE_ENV === 'test' ? { token: invite.token } : {}),
+    };
   }
 
   async listInvites(coachId: string) {
@@ -64,6 +82,9 @@ export class InvitesService {
   }
 
   async getInviteByToken(token: string) {
+    if (typeof token !== 'string' || !token.trim() || token.length > 512) {
+      throw new BadRequestException('Token do convite é obrigatório');
+    }
     const invite = await this.prisma.coachInvite.findUnique({
       where: { token },
       include: {
@@ -91,8 +112,30 @@ export class InvitesService {
       throw new BadRequestException('Convite expirado');
     }
 
+    const existingAccount = !!(await this.prisma.user.findFirst({
+      where: { email: { equals: invite.email, mode: 'insensitive' } },
+      select: { id: true },
+    }));
+
+    // Equipe do treinador que convidou: a que ele é dono, senão a primeira equipe ativa dele
+    const membership = await this.prisma.teamMember.findFirst({
+      where: { userId: invite.coach.id, isActive: true },
+      orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
+      select: { team: { select: { name: true, logoUrl: true, primaryColor: true } } },
+    });
+    const ownedTeam = await this.prisma.team.findFirst({
+      where: { ownerId: invite.coach.id },
+      orderBy: { createdAt: 'asc' },
+      select: { name: true, logoUrl: true, primaryColor: true },
+    });
+    const team = ownedTeam ?? membership?.team ?? null;
+
     return {
       email: invite.email,
+      existingAccount,
+      teamName: team?.name ?? null,
+      teamLogoUrl: team?.logoUrl ?? null,
+      teamPrimaryColor: team?.primaryColor ?? null,
       coachName: invite.coach.name,
       tenantName: invite.coach.tenantBranding?.tenantName ?? invite.coach.name,
       primaryColor: invite.coach.tenantBranding?.primaryColor ?? '#DC2626',
@@ -101,71 +144,75 @@ export class InvitesService {
     };
   }
 
-  async acceptInvite(dto: AcceptInviteDto) {
-    const invite = await this.prisma.coachInvite.findUnique({
-      where: { token: dto.token },
-    });
-
+  private async loadPendingInvite(token: string) {
+    if (!token || typeof token !== 'string') throw new NotFoundException('Convite não encontrado');
+    const invite = await this.prisma.coachInvite.findUnique({ where: { token } });
     if (!invite) throw new NotFoundException('Convite não encontrado');
     if (invite.status !== 'PENDING') {
       throw new BadRequestException('Convite não está mais válido');
     }
     if (new Date() > invite.expiresAt) {
-      await this.prisma.coachInvite.update({
-        where: { token: dto.token },
-        data: { status: 'EXPIRED' },
-      });
+      await this.prisma.coachInvite.update({ where: { token }, data: { status: 'EXPIRED' } });
       throw new BadRequestException('Convite expirado');
     }
+    return invite;
+  }
 
-    // Check if user already exists
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: invite.email },
+  /**
+   * Público: cria uma conta NOVA a partir do convite (token + senha) e registra o aceite LGPD.
+   * Se o e-mail já tem conta, recusa — o atleta precisa fazer login e usar POST /invites/accept-existing.
+   */
+  async acceptInvite(dto: AcceptInviteDto, ctx: ConsentContext = {}) {
+    this.legal.assertCurrentVersions(dto);
+    const invite = await this.loadPendingInvite(dto.token);
+
+    const existingUser = await this.prisma.user.findFirst({
+      where: { email: { equals: invite.email, mode: 'insensitive' } },
+      select: { id: true },
     });
     if (existingUser) {
-      // Link existing athlete to coach
-      await this.prisma.$transaction([
-        this.prisma.athleteProfile.upsert({
-          where: { userId: existingUser.id },
-          update: { coachId: invite.coachId },
-          create: { userId: existingUser.id, coachId: invite.coachId },
-        }),
-        this.prisma.coachInvite.update({
-          where: { token: dto.token },
-          data: { status: 'ACCEPTED', acceptedAt: new Date(), athleteId: existingUser.id },
-        }),
-      ]);
-      // Notify coach that existing athlete accepted
-      this.notifications.createNotification(
-        invite.coachId,
-        NotificationType.PLAN_ASSIGNED,
-        'Atleta vinculado',
-        `${existingUser.name} aceitou seu convite e está na sua lista de atletas.`,
-        { athleteId: existingUser.id },
-      ).catch(() => {});
-      return { message: 'Conta vinculada ao treinador com sucesso', userId: existingUser.id };
+      throw new ConflictException(
+        'Já existe uma conta com este e-mail. Faça login com ela para aceitar o convite.',
+      );
     }
 
+    // Atleta entra na equipe padrão de quem convidou; o responsável (coachId) é quem convidou —
+    // a gestão pode reatribuir depois (PATCH /teams/me/athletes/:id/coach).
+    const teamId = await defaultTeamIdForUser(this.prisma, invite.coachId);
+
     // Create new athlete account
-    const passwordHash = await bcrypt.hash(dto.password, 10);
+    assertPasswordPolicy(dto.password);
+    const passwordHash = await bcrypt.hash(dto.password, 12);
     const result = await this.prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
-          email: invite.email,
-          name: dto.name,
+          email: normalizeEmail(invite.email),
+          name: dto.name.trim(),
           passwordHash,
           role: 'ATHLETE',
         },
       });
 
       await tx.athleteProfile.create({
-        data: { userId: user.id, coachId: invite.coachId },
+        data: { userId: user.id, coachId: invite.coachId, teamId },
       });
 
       await tx.coachInvite.update({
         where: { token: dto.token },
         data: { status: 'ACCEPTED', acceptedAt: new Date(), athleteId: user.id },
       });
+
+      await this.legal.recordConsent(
+        user.id,
+        {
+          termsVersion: dto.termsVersion,
+          privacyVersion: dto.privacyVersion,
+          marketingOptIn: !!dto.marketingOptIn,
+          ...(dto.healthDataConsent !== undefined && { healthDataConsent: dto.healthDataConsent }),
+        },
+        ctx,
+        tx,
+      );
 
       return user;
     });
@@ -182,6 +229,47 @@ export class InvitesService {
     return { message: 'Conta criada com sucesso', userId: result.id };
   }
 
+  /**
+   * Autenticado: o usuário logado aceita um convite endereçado ao SEU e-mail.
+   * Só então o vínculo com o treinador (coachId) é alterado.
+   */
+  async acceptInviteAsExistingUser(user: { id: string; email?: string | null; role?: string }, token: string) {
+    const invite = await this.loadPendingInvite(token);
+    const me = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { id: true, email: true, name: true, role: true },
+    });
+    if (!me || !me.email || normalizeEmail(me.email) !== normalizeEmail(invite.email)) {
+      throw new ForbiddenException('Este convite foi enviado para outro e-mail.');
+    }
+    if (me.role !== 'ATHLETE') {
+      throw new BadRequestException('Somente contas de atleta podem aceitar convites de treinador.');
+    }
+
+    const teamId = await defaultTeamIdForUser(this.prisma, invite.coachId);
+    await this.prisma.$transaction([
+      this.prisma.athleteProfile.upsert({
+        where: { userId: me.id },
+        update: { coachId: invite.coachId, teamId },
+        create: { userId: me.id, coachId: invite.coachId, teamId },
+      }),
+      this.prisma.coachInvite.update({
+        where: { token },
+        data: { status: 'ACCEPTED', acceptedAt: new Date(), athleteId: me.id },
+      }),
+    ]);
+
+    this.notifications.createNotification(
+      invite.coachId,
+      NotificationType.PLAN_ASSIGNED,
+      'Atleta vinculado',
+      `${me.name} aceitou seu convite e está na sua lista de atletas.`,
+      { athleteId: me.id },
+    ).catch(() => {});
+
+    return { message: 'Conta vinculada ao treinador com sucesso', userId: me.id };
+  }
+
   async cancelInvite(coachId: string, inviteId: string) {
     const invite = await this.prisma.coachInvite.findFirst({
       where: { id: inviteId, coachId },
@@ -194,6 +282,7 @@ export class InvitesService {
     return this.prisma.coachInvite.update({
       where: { id: inviteId },
       data: { status: 'CANCELLED' },
+      select: { id: true, email: true, status: true, expiresAt: true, createdAt: true },
     });
   }
 }

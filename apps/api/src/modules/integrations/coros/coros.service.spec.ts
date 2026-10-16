@@ -19,6 +19,7 @@ const mockPrisma = {
     upsert:     jest.fn(),
     findUnique: jest.fn(),
     delete:     jest.fn(),
+    deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
   },
   fitnessIntegration: {
     upsert:  jest.fn(),
@@ -103,7 +104,7 @@ describe('CorosService', () => {
 
     it('upserts fitnessIntegration on successful token exchange', async () => {
       const stateRecord = {
-        key: 'oauth_state:coros:abc',
+        key: `oauth_state:coros:${'a'.repeat(64)}`,
         value: { userId: 'u1', expiresAt: new Date(Date.now() + 60_000).toISOString() },
       };
       mockPrisma.appConfig.findUnique.mockResolvedValue(stateRecord);
@@ -119,7 +120,7 @@ describe('CorosService', () => {
       });
       mockPrisma.fitnessIntegration.upsert.mockResolvedValue({ id: 'fi_1' });
 
-      const result = await service.handleCallback('auth_code', 'abc');
+      const result = await service.handleCallback('auth_code', 'a'.repeat(64));
       expect(mockPrisma.fitnessIntegration.upsert).toHaveBeenCalled();
       expect(result.success).toBe(true);
       expect(result.provider).toBe('COROS');

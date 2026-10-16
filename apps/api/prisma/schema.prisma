@@ -98,6 +98,166 @@ enum PaymentProvider {
   STRIPE
   MERCADO_PAGO
   PAGARME
+  ASAAS
+  FAKE // somente desenvolvimento (PAYMENTS_FAKE_PROVIDER=true e NODE_ENV!=production)
+  MANUAL // recebido fora do app (dinheiro, Pix direto) e registrado pela equipe
+}
+
+enum PaymentPurpose {
+  SUBSCRIPTION
+  STORE_ORDER
+  EVENT_REGISTRATION
+  PLATFORM_PLAN
+  MEMBERSHIP
+}
+
+// ============================================
+// EQUIPES (assessorias) — o tenant do negócio
+// ============================================
+
+enum TeamRole {
+  OWNER // dono da assessoria: tudo na equipe, inclusive financeiro
+  ADMIN // gestor: tudo na equipe, exceto excluir a equipe / trocar dono
+  COACH // treinador: só os atletas atribuídos a ele
+  STAFF // apoio (recepção, kit, financeiro limitado)
+}
+
+enum TeamStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum MembershipStatus {
+  PENDING   // aguardando 1º pagamento
+  ACTIVE
+  PAST_DUE  // vencida e não paga
+  PAUSED
+  CANCELED
+}
+
+enum BillingInterval {
+  MONTHLY
+  QUARTERLY
+  SEMIANNUAL
+  ANNUAL
+}
+
+/// Assessoria / equipe de corrida. Um treinador solo é uma equipe de 1.
+model Team {
+  id                 String     @id @default(uuid())
+  name               String
+  slug               String     @unique
+  ownerId            String     @map("owner_id")
+  status             TeamStatus @default(ACTIVE)
+  logoUrl            String?    @map("logo_url")
+  primaryColor       String?    @map("primary_color")
+  city               String?
+  // Recebimento: carteira Asaas da equipe (split). Sem carteira → valor fica na conta da plataforma.
+  asaasWalletId      String?    @map("asaas_wallet_id")
+  platformFeePercent Float      @default(0) @map("platform_fee_percent")
+  // Regras de cobrança da mensalidade
+  graceDays          Int        @default(5) @map("grace_days") // dias após vencimento até PAST_DUE
+  createdAt          DateTime   @default(now()) @map("created_at")
+  updatedAt          DateTime   @updatedAt @map("updated_at")
+
+  owner       User                @relation("TeamOwner", fields: [ownerId], references: [id])
+  members     TeamMember[]
+  athletes    AthleteProfile[]
+  plans       TeamPlan[]
+  memberships AthleteMembership[]
+
+  @@index([ownerId])
+  @@map("teams")
+}
+
+model TeamMember {
+  id        String   @id @default(uuid())
+  teamId    String   @map("team_id")
+  userId    String   @map("user_id")
+  role      TeamRole @default(COACH)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation("TeamMemberships", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+  @@index([userId])
+  @@map("team_members")
+}
+
+/// Planos de mensalidade que a EQUIPE vende aos atletas (ex.: mensal R$174, trimestral R$495).
+model TeamPlan {
+  id           String          @id @default(uuid())
+  teamId       String          @map("team_id")
+  name         String
+  description  String?
+  interval     BillingInterval @default(MONTHLY)
+  priceInCents Int             @map("price_in_cents")
+  benefits     String[]        @default([])
+  isActive     Boolean         @default(true) @map("is_active")
+  sortOrder    Int             @default(0) @map("sort_order")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+
+  team        Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  memberships AthleteMembership[]
+
+  @@index([teamId, isActive])
+  @@map("team_plans")
+}
+
+/// Mensalidade recorrente do atleta com a equipe.
+model AthleteMembership {
+  id                     String           @id @default(uuid())
+  teamId                 String           @map("team_id")
+  athleteId              String           @map("athlete_id")
+  planId                 String           @map("plan_id")
+  status                 MembershipStatus @default(PENDING)
+  provider               PaymentProvider  @default(ASAAS)
+  externalSubscriptionId String?          @unique @map("external_subscription_id")
+  priceInCents           Int              @map("price_in_cents") // preço travado na contratação
+  currentPeriodStart     DateTime?        @map("current_period_start")
+  currentPeriodEnd       DateTime?        @map("current_period_end")
+  nextDueDate            DateTime?        @map("next_due_date")
+  canceledAt             DateTime?        @map("canceled_at")
+  cancelReason           String?          @map("cancel_reason")
+  createdAt              DateTime         @default(now()) @map("created_at")
+  updatedAt              DateTime         @updatedAt @map("updated_at")
+
+  team    Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  athlete User     @relation("AthleteMemberships", fields: [athleteId], references: [id], onDelete: Cascade)
+  plan    TeamPlan @relation(fields: [planId], references: [id])
+
+  @@index([teamId, status])
+  @@index([athleteId])
+  @@index([nextDueDate])
+  @@map("athlete_memberships")
+}
+
+enum ConsentType {
+  TERMS
+  PRIVACY
+  MARKETING
+  HEALTH_DATA
+}
+
+/// LGPD — trilha de auditoria de consentimentos (art. 8º §2º: ônus da prova é do controlador)
+model ConsentLog {
+  id        String      @id @default(uuid())
+  userId    String      @map("user_id")
+  type      ConsentType
+  version   String
+  granted   Boolean     @default(true)
+  ip        String?
+  userAgent String?     @map("user_agent")
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@map("consent_logs")
 }
 
 enum PaymentStatus {
@@ -195,6 +355,18 @@ model User {
   referredByCode      String? @map("referred_by_code")             // code of the user who referred this user
   referralCreditCents Int     @default(0) @map("referral_credit_cents") // accumulated credit (BRL cents)
 
+  // Session revocation — incremented on logout-all / password change / reset
+  tokenVersion Int @default(0) @map("token_version")
+
+  // LGPD — último aceite dos Termos de Uso e da Política de Privacidade (histórico completo em consent_logs)
+  termsAcceptedAt   DateTime? @map("terms_accepted_at")
+  termsVersion      String?   @map("terms_version")
+  privacyVersion    String?   @map("privacy_version")
+  marketingOptIn    Boolean   @default(false) @map("marketing_opt_in")
+
+  // Gateway customer ids
+  asaasCustomerId   String?   @unique @map("asaas_customer_id")
+
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
@@ -266,6 +438,14 @@ model User {
   // Supplements (suplementação do atleta)
   supplements           AthleteSupplement[]    @relation("AthleteSupplements")
 
+  // LGPD consent audit trail
+  consentLogs           ConsentLog[]
+
+  // Equipes
+  ownedTeams            Team[]                 @relation("TeamOwner")
+  teamMemberships       TeamMember[]           @relation("TeamMemberships")
+  athleteMemberships    AthleteMembership[]    @relation("AthleteMemberships")
+
   @@map("users")
 }
 
@@ -314,8 +494,11 @@ model AthleteProfile {
 
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
   coach User? @relation("CoachAthletes", fields: [coachId], references: [id])
+  teamId String? @map("team_id") // equipe à qual o atleta pertence (coachId = treinador responsável dentro dela)
+  team   Team?   @relation(fields: [teamId], references: [id])
 
   @@index([coachId])
+  @@index([teamId])
   @@map("athlete_profiles")
 }
 
@@ -452,7 +635,14 @@ model Subscription {
 model Payment {
   id                String          @id @default(uuid())
   subscriptionId    String?         @map("subscription_id")
-  userId            String          @map("user_id")
+  userId            String?         @map("user_id") // null = compra de visitante (loja pública)
+  purpose           PaymentPurpose  @default(SUBSCRIPTION)
+  storeOrderId      String?         @map("store_order_id")
+  eventRegistrationId String?       @map("event_registration_id")
+  checkoutUrl       String?         @map("checkout_url")
+  teamId            String?         @map("team_id")       // equipe recebedora (split)
+  membershipId      String?         @map("membership_id") // mensalidade (purpose MEMBERSHIP)
+  method            String?         // PIX | BOLETO | CREDIT_CARD | UNDEFINED
   amount            Int
   currency          String          @default("BRL")
   status            PaymentStatus   @default(PENDING)
@@ -464,17 +654,25 @@ model Payment {
   pixQrCodeUrl      String?         @map("pix_qr_code_url")
   pixExpiresAt      DateTime?       @map("pix_expires_at")
   planId            String?         @map("plan_id")
+  accessTokenHash   String?         @map("access_token_hash") // sha256 do token público de consulta de status
+  expiresAt         DateTime?       @map("expires_at")
+  refundedAt        DateTime?       @map("refunded_at")
+  failureReason     String?         @map("failure_reason")
   deletedAt         DateTime?       @map("deleted_at")
   createdAt         DateTime        @default(now()) @map("created_at")
   updatedAt         DateTime        @updatedAt @map("updated_at")
 
   subscription Subscription? @relation(fields: [subscriptionId], references: [id])
-  user         User          @relation(fields: [userId], references: [id])
+  user         User?         @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([status])
   @@index([subscriptionId])
   @@index([paidAt])
+  @@index([storeOrderId])
+  @@index([eventRegistrationId])
+  @@index([membershipId])
+  @@index([teamId])
   @@map("payments")
 }
 
@@ -574,6 +772,7 @@ model Event {
   meetingPoint       String?   @map("meeting_point")
   meetingPointLat    Float?    @map("meeting_point_lat")
   meetingPointLng    Float?    @map("meeting_point_lng")
+  bibSeq             Int       @default(0) @map("bib_seq") // sequência atômica do número de peito
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
 
@@ -611,6 +810,7 @@ model EventRegistration {
   medicalInfo            String?   @map("medical_info")
   registeredAt           DateTime  @default(now()) @map("registered_at")
   confirmedAt            DateTime? @map("confirmed_at")
+  paymentExpiresAt       DateTime? @map("payment_expires_at")
   checkinAt              DateTime? @map("checkin_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
 
@@ -621,9 +821,11 @@ model EventRegistration {
   couponUse EventCouponUse?
 
   @@unique([eventId, userId])
+  @@unique([eventId, bibNumber])
   @@index([userId])
   @@index([status])
   @@index([paymentStatus])
+  @@index([paymentExpiresAt])
   @@map("event_registrations")
 }
 
@@ -1019,6 +1221,7 @@ enum StoreOrderStatus {
   CONFIRMED
   PROCESSING
   SHIPPED
+  READY_FOR_PICKUP
   DELIVERED
   CANCELLED
   REFUNDED
@@ -1039,6 +1242,10 @@ model Product {
   active        Boolean         @default(true)
   featured      Boolean         @default(false)
   athleteDiscountPercent Int    @default(0) @map("athlete_discount_percent") // % desconto exclusivo para alunos
+  isPreOrder        Boolean     @default(false) @map("is_pre_order")       // encomenda (sem estoque físico)
+  preOrderDeadline  DateTime?   @map("pre_order_deadline")                 // data limite para encomendar
+  estimatedDelivery DateTime?   @map("estimated_delivery")                 // previsão de entrega da encomenda
+  preOrderLimit     Int?        @map("pre_order_limit")                    // máx. de unidades encomendadas (null = sem limite)
   createdAt     DateTime        @default(now()) @map("created_at")
   updatedAt     DateTime        @updatedAt @map("updated_at")
 
@@ -1066,6 +1273,14 @@ model StoreOrder {
   status          StoreOrderStatus @default(PENDING_PAYMENT)
   paymentId       String?          @map("payment_id")
   paymentUrl      String?          @map("payment_url")
+  paidAt          DateTime?        @map("paid_at")
+  expiresAt       DateTime?        @map("expires_at") // reserva de estoque expira se não pago
+  isPreOrder      Boolean          @default(false) @map("is_pre_order")
+  deliveryMethod  String?          @map("delivery_method") // SHIPPING | PICKUP
+  trackingCode    String?          @map("tracking_code")
+  accessTokenHash String?          @map("access_token_hash") // sha256 do token de consulta pública do pedido
+  cancelReason    String?          @map("cancel_reason")     // EXPIRED | COACH | CUSTOMER | REFUND
+  statusUpdatedAt DateTime?        @map("status_updated_at")
   shippingAddress String?          @map("shipping_address")
   notes           String?
   createdAt       DateTime         @default(now()) @map("created_at")
@@ -1077,6 +1292,7 @@ model StoreOrder {
   @@index([productId])
   @@index([status])
   @@index([customerEmail])
+  @@index([expiresAt])
   @@map("store_orders")
 }
 
@@ -1345,6 +1561,7 @@ model WhatsappConfig {
   provider        String   @default("zapi")   // 'zapi' | 'twilio' | 'evolution'
   phone           String   @default("")
   apiToken        String   @default("") @map("api_token")
+  webhookSecret   String?  @map("webhook_secret") // valida chamadas em /webhooks/whatsapp/:coachId
   instanceId      String   @default("") @map("instance_id")
   welcomeMessage  String   @default("Olá {nome}! Sou o assistente do {coachName}. Acesse: {onboardingLink}") @map("welcome_message")
   isConnected     Boolean  @default(false) @map("is_connected")

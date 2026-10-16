@@ -6,6 +6,7 @@ import { TestimonialsService } from './testimonials.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { UpsertTestimonialDto } from './dto/testimonial.dto';
 
 @ApiTags('Depoimentos')
 @Controller('testimonials')
@@ -19,7 +20,7 @@ export class TestimonialsController {
   @ApiOperation({ summary: 'Atleta envia ou atualiza depoimento para o treinador' })
   async upsert(
     @CurrentUser('id') athleteId: string,
-    @Body() body: { coachId: string; rating: number; text: string },
+    @Body() body: UpsertTestimonialDto,
   ) {
     return this.testimonialsService.upsert(athleteId, body);
   }
@@ -44,8 +45,8 @@ export class TestimonialsController {
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles(UserRole.COACH, UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Treinador vê todos os depoimentos recebidos' })
-  async getCoachTestimonials(@CurrentUser('id') coachId: string) {
-    return this.testimonialsService.getCoachTestimonials(coachId);
+  async getCoachTestimonials(@CurrentUser() user: { id: string; role: UserRole }) {
+    return this.testimonialsService.getCoachTestimonials(user);
   }
 
   @Put(':id/feature')
@@ -55,8 +56,8 @@ export class TestimonialsController {
   @ApiOperation({ summary: 'Treinador alterna destaque de um depoimento' })
   async toggleFeatured(
     @Param('id') id: string,
-    @CurrentUser('id') coachId: string,
+    @CurrentUser() user: { id: string; role: UserRole },
   ) {
-    return this.testimonialsService.toggleFeatured(id, coachId);
+    return this.testimonialsService.toggleFeatured(id, user);
   }
 }

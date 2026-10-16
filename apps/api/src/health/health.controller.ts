@@ -1,4 +1,5 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, UseGuards } from '@nestjs/common';
+import { MetricsAccessGuard } from '../common/guards/metrics-access.guard';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -8,36 +9,20 @@ export class HealthController {
   constructor(private prisma: PrismaService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Health check com dependências reais (sem auth)' })
+  @ApiOperation({ summary: 'Health check público e mínimo (sem auth)' })
   async health() {
-    const checks: Record<string, string> = {};
-
-    // DB check
+    let database: 'ok' | 'error' = 'ok';
     try {
       await this.prisma.$queryRaw`SELECT 1`;
-      checks.database = 'ok';
     } catch {
-      checks.database = 'error';
+      database = 'error';
     }
-
-    // External service config checks
-    checks.anthropic = process.env.ANTHROPIC_API_KEY ? 'configured' : 'missing';
-    checks.email = process.env.RESEND_API_KEY ? 'configured' : 'missing';
-    checks.push = process.env.EXPO_ACCESS_TOKEN ? 'configured' : 'missing';
-
-    const hasPayment = !!(
-      process.env.MERCADO_PAGO_ACCESS_TOKEN ||
-      process.env.STRIPE_SECRET_KEY ||
-      process.env.PAGARME_API_KEY
-    );
-    checks.payments = hasPayment ? 'configured' : 'missing';
-
-    const status = checks.database === 'ok' ? 'ok' : 'degraded';
-
-    return { status, checks, timestamp: new Date().toISOString() };
+    const status = database === 'ok' ? 'ok' : 'degraded';
+    return { status, checks: { database }, timestamp: new Date().toISOString() };
   }
 
   @Get('detailed')
+  @UseGuards(MetricsAccessGuard) // x-metrics-token (METRICS_TOKEN) ou JWT de SUPER_ADMIN
   @ApiOperation({ summary: 'Health check detalhado (DB + memória + dependências)' })
   async detailed() {
     const start = Date.now();

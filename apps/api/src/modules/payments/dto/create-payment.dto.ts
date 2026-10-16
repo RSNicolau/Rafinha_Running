@@ -1,41 +1,32 @@
-import { IsNumber, IsString, IsOptional, Min, IsNotEmpty } from 'class-validator';
+import { IsNumber, IsString, IsOptional, Min, IsNotEmpty, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
+/**
+ * O valor cobrado é derivado do plano no servidor. `amount` é opcional e, se enviado,
+ * precisa ser igual ao preço do plano (senão 400).
+ */
 export class CreatePixPaymentDto {
-  @ApiProperty({ description: 'Valor em centavos (ex: 4900 = R$49)', minimum: 100, example: 4900 })
+  @ApiPropertyOptional({ description: 'Valor esperado em centavos (conferência). O servidor usa o preço do plano.', example: 17400 })
+  @IsOptional()
   @IsNumber()
   @Min(100)
-  amount: number; // in centavos
+  amount?: number;
 
-  @ApiProperty({ description: 'Descrição do pagamento', example: 'Plano Mensal - RR Rafinha Running' })
+  @ApiPropertyOptional({ description: 'Descrição do pagamento', example: 'Plano Mensal - RR Rafinha Running' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  description?: string;
+
+  @ApiProperty({ description: 'ID do plano (STARTER, PRO, SCALE, ELITE, WHITE_LABEL, MONTHLY, QUARTERLY, SEMIANNUAL)', example: 'MONTHLY' })
   @IsString()
   @IsNotEmpty()
-  description: string;
-
-  @ApiPropertyOptional({ description: 'ID do plano a ser ativado após pagamento', example: 'MONTHLY' })
-  @IsString()
-  @IsOptional()
-  planId?: string;
+  planId: string;
 }
 
-export class CreateCardPaymentDto {
-  @ApiProperty({ description: 'Valor em centavos (ex: 4900 = R$49)', minimum: 100, example: 4900 })
-  @IsNumber()
-  @Min(100)
-  amount: number; // in centavos
-
-  @ApiProperty({ description: 'Descrição do pagamento', example: 'Plano Mensal - RR Rafinha Running' })
-  @IsString()
-  @IsNotEmpty()
-  description: string;
-
-  @ApiPropertyOptional({ description: 'ID do plano a ser ativado após pagamento', example: 'MONTHLY' })
-  @IsString()
-  @IsOptional()
-  planId?: string;
-
+export class CreateCardPaymentDto extends CreatePixPaymentDto {
   @ApiProperty({
-    description: 'Token do cartão gerado pelo Pagar.me.js no frontend. Em produção, use pagarme.js para tokenizar o cartão.',
+    description: 'Token do cartão gerado pelo Pagar.me.js no frontend.',
     example: 'token_xxxxx',
   })
   @IsString()

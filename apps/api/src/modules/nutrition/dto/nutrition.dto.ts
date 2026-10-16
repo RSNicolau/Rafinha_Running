@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsInt, IsNumber, IsArray, Min, IsDateString, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsInt, IsNumber, IsArray, Min, IsDateString, IsEnum, IsNotEmpty, MaxLength } from 'class-validator';
 
 export class CreateMealDto {
   @IsDateString()
@@ -91,4 +91,31 @@ export class CreateWaterLogDto {
   @IsString()
   @IsOptional()
   loggedAt?: string;
+}
+
+export class AnalyzeMacrosDto {
+  @IsString() @IsNotEmpty({ message: 'Descrição obrigatória' }) @MaxLength(2000)
+  description: string;
+}
+
+export class CreateSupplementDto {
+  @IsString() @IsNotEmpty({ message: 'Nome do suplemento é obrigatório' }) @MaxLength(100)
+  name: string;
+
+  @IsOptional() @IsString() @MaxLength(100)
+  dose?: string;
+
+  @IsOptional() @IsString() @MaxLength(50)
+  timeOfDay?: string;
+
+  @IsOptional() @IsString() @MaxLength(20)
+  color?: string;
+
+  @IsOptional() @IsString() @MaxLength(20)
+  icon?: string;
+}
+
+export class ToggleSupplementDto {
+  @IsOptional() @IsDateString({}, { message: 'Data inválida' })
+  date?: string;
 }

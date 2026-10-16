@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
 import { api } from '@/lib/api';
 import { getNiche } from '@/lib/niches';
@@ -43,6 +44,8 @@ function AthleteSkeleton() {
 
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
+  const router = useRouter();
+  const isAthlete = user?.role === 'ATHLETE';
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -72,7 +75,24 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadData(); }, []);
+  // Atleta não usa o painel do treinador: a "Visão Geral" dele é a área /athlete
+  useEffect(() => {
+    if (!user) return;
+    if (isAthlete) {
+      router.replace('/athlete');
+      return;
+    }
+    loadData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, isAthlete]);
+
+  if (!user || isAthlete) {
+    return (
+      <div className="flex items-center justify-center py-24 text-sm text-gray-400">
+        {isAthlete ? 'Abrindo sua área de atleta...' : 'Carregando...'}
+      </div>
+    );
+  }
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
@@ -210,8 +230,9 @@ export default function DashboardPage() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-gray-900 font-medium truncate">{alert.name}</p>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    {alert.missedCount} {niche.workoutLabel}{alert.missedCount > 1 ? 's' : ''} perdido{alert.missedCount > 1 ? 's' : ''}
-                    {' · '}{new Date(alert.lastMissedDate).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+                    {/* Sem adjetivo após o substantivo: evita erro de concordância ("1 corrida perdido") */}
+                    Faltou em {alert.missedCount} {niche.workoutLabel}{alert.missedCount > 1 ? 's' : ''}
+                    {' · '}último em {new Date(alert.lastMissedDate.slice(0, 10) + 'T12:00:00Z').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', timeZone: 'UTC' })}
                   </p>
                 </div>
                 <svg className="w-4 h-4 text-gray-300 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

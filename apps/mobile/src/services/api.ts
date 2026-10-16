@@ -8,7 +8,7 @@ export function setAuthLogout(fn: () => Promise<void>) {
   _logoutFn = fn;
 }
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
+export const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api/v1';
 
 // Web-safe storage helpers
 const getItem = async (key: string) =>
@@ -38,6 +38,27 @@ api.interceptors.request.use(
   (error) => Promise.reject(error),
 );
 
+/**
+ * Refresh em voo único: a API rotaciona o refresh token (cada um vale UMA vez; reuso → 401 e, fora da
+ * janela de corrida, derruba todas as sessões). Vários 401 simultâneos esperam a MESMA renovação.
+ */
+let refreshInFlight: Promise<string> | null = null;
+function refreshAccessToken(): Promise<string> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const refreshToken = await getItem('refreshToken');
+      if (!refreshToken) throw new Error('No refresh token');
+      const { data } = await axios.post(`${API_URL}/auth/refresh`, { refreshToken });
+      await setItem('accessToken', data.accessToken);
+      if (data.refreshToken) await setItem('refreshToken', data.refreshToken);
+      return data.accessToken as string;
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
 // Response interceptor - handle token refresh
 api.interceptors.response.use(
   (response) => response,
@@ -48,17 +69,8 @@ api.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        const refreshToken = await getItem('refreshToken');
-        if (!refreshToken) throw new Error('No refresh token');
-
-        const { data } = await axios.post(`${API_URL}/auth/refresh`, {
-          refreshToken,
-        });
-
-        await setItem('accessToken', data.accessToken);
-        await setItem('refreshToken', data.refreshToken);
-
-        originalRequest.headers.Authorization = `Bearer ${data.accessToken}`;
+        const accessToken = await refreshAccessToken();
+        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
         return api(originalRequest);
       } catch {
         await deleteItem('accessToken');

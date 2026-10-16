@@ -5,7 +5,20 @@ import { UserRole } from '@prisma/client';
 import { AdminService } from './admin.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import {
+  UpdateUserRoleDto,
+  SetUserPasswordDto,
+  SetUserPasswordByEmailDto,
+  SetCoachSlugDto,
+  SetCoachPlatformFeeDto,
+} from './dto/admin.dto';
 
+/**
+ * Rotas herdam @Roles(ADMIN) da classe (ADMIN e SUPER_ADMIN passam).
+ * Rotas com @Roles(SUPER_ADMIN) são exclusivas de SUPER_ADMIN (ver RolesGuard).
+ * Ações sobre contas SUPER_ADMIN (desativar/excluir) são bloqueadas para ADMIN no AdminService.
+ */
 @ApiTags('Admin')
 @ApiBearerAuth()
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -22,20 +35,25 @@ export class AdminController {
 
   @Delete('users/:id')
   @ApiOperation({ summary: 'Desativar usuário (soft delete)' })
-  async deleteUser(@Param('id') id: string) {
-    return this.adminService.deleteUser(id);
+  async deleteUser(@Param('id') id: string, @CurrentUser() actor: { id: string; role: UserRole }) {
+    return this.adminService.deleteUser(id, actor);
   }
 
   @Delete('users/:id/hard')
   @ApiOperation({ summary: 'Deletar usuário permanentemente' })
-  async hardDeleteUser(@Param('id') id: string) {
-    return this.adminService.hardDeleteUser(id);
+  async hardDeleteUser(@Param('id') id: string, @CurrentUser() actor: { id: string; role: UserRole }) {
+    return this.adminService.hardDeleteUser(id, actor);
   }
 
   @Patch('users/:id/role')
-  @ApiOperation({ summary: 'Atualizar role do usuário' })
-  async updateRole(@Param('id') id: string, @Body('role') role: UserRole) {
-    return this.adminService.updateUserRole(id, role);
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Atualizar role do usuário (SUPER_ADMIN)' })
+  async updateRole(
+    @Param('id') id: string,
+    @Body() dto: UpdateUserRoleDto,
+    @CurrentUser() actor: { id: string; role: UserRole },
+  ) {
+    return this.adminService.updateUserRole(id, dto.role, actor);
   }
 
   @Get('analytics')
@@ -70,8 +88,8 @@ export class AdminController {
 
   @Patch('users/:id/coach-slug')
   @ApiOperation({ summary: 'Definir slug do perfil de coach (SUPER_ADMIN)' })
-  async setCoachSlug(@Param('id') id: string, @Body('slug') slug: string) {
-    return this.adminService.setCoachSlug(id, slug);
+  async setCoachSlug(@Param('id') id: string, @Body() dto: SetCoachSlugDto) {
+    return this.adminService.setCoachSlug(id, dto.slug);
   }
 
   @Post('users/:id/activate-subscription')
@@ -83,15 +101,22 @@ export class AdminController {
   @Patch('users/by-email/password')
   @Roles(UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Definir senha por email (SUPER_ADMIN)' })
-  async setUserPasswordByEmail(@Body('email') email: string, @Body('password') password: string) {
-    return this.adminService.setUserPasswordByEmail(email, password);
+  async setUserPasswordByEmail(
+    @Body() dto: SetUserPasswordByEmailDto,
+    @CurrentUser() actor: { id: string; role: UserRole },
+  ) {
+    return this.adminService.setUserPasswordByEmail(dto.email, dto.password, actor);
   }
 
   @Patch('users/:id/password')
   @Roles(UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Definir senha de qualquer usuário (SUPER_ADMIN)' })
-  async setUserPassword(@Param('id') id: string, @Body('password') password: string) {
-    return this.adminService.setUserPassword(id, password);
+  async setUserPassword(
+    @Param('id') id: string,
+    @Body() dto: SetUserPasswordDto,
+    @CurrentUser() actor: { id: string; role: UserRole },
+  ) {
+    return this.adminService.setUserPassword(id, dto.password, actor);
   }
 
   // ── Platform / Split Payments ──
@@ -115,15 +140,19 @@ export class AdminController {
   @ApiOperation({ summary: 'Definir % de split da plataforma para um coach' })
   async setCoachPlatformFee(
     @Param('id') id: string,
-    @Body('platformFeePercent') platformFeePercent: number,
+    @Body() dto: SetCoachPlatformFeeDto,
   ) {
-    return this.adminService.setCoachPlatformFee(id, platformFeePercent);
+    return this.adminService.setCoachPlatformFee(id, dto.platformFeePercent);
   }
 
   @Patch('coaches/:id/status')
   @Roles(UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Ativar/desativar coach' })
-  async setCoachStatus(@Param('id') id: string, @Body('isActive') isActive: boolean) {
-    return this.adminService.setUserActiveStatus(id, isActive);
+  async setCoachStatus(
+    @Param('id') id: string,
+    @Body('isActive') isActive: boolean,
+    @CurrentUser() actor: { id: string; role: UserRole },
+  ) {
+    return this.adminService.setUserActiveStatus(id, isActive === true, actor);
   }
 }
